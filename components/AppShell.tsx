@@ -65,7 +65,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {navItems.map((item) => {
             const active = pathname === item.href
             return (
-              <Link key={item.href} href={item.href} passHref legacyBehavior>
+              <Link key={item.href} href={item.href}>
+                {/* @next-codemod-error This Link previously used the now removed `legacyBehavior` prop, and has a child that might not be an anchor. The codemod bailed out of lifting the child props to the Link. Check that the child component does not render an anchor, and potentially move the props manually to Link. */
+                }
                 <motion.a
                   whileHover={{ x: 4 }}
                   style={active ? styles.activeLink : styles.link}
@@ -74,10 +76,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   {item.name}
                 </motion.a>
               </Link>
-            )
+            );
           })}
           {isMechanic && (
-            <Link href="/marketplace/mechanics/dashboard" passHref legacyBehavior>
+            <Link href="/marketplace/mechanics/dashboard">
+              {/* @next-codemod-error This Link previously used the now removed `legacyBehavior` prop, and has a child that might not be an anchor. The codemod bailed out of lifting the child props to the Link. Check that the child component does not render an anchor, and potentially move the props manually to Link. */
+              }
               <motion.a
                 whileHover={{ x: 4 }}
                 style={pathname === '/marketplace/mechanics/dashboard' ? styles.activeLink : styles.link}
@@ -90,13 +94,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
         {/* No user section in sidebar – moved to Topbar */}
       </aside>
-
       {/* Main area with Topbar */}
       <div style={styles.mainArea}>
         <Topbar />
         <main style={styles.mainContent}>{children}</main>
       </div>
-
       <style jsx>{`
         .spinner {
           border: 3px solid rgba(255,255,255,0.1);
@@ -111,7 +113,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }
       `}</style>
     </div>
-  )
+  );
 }
 
 const styles: Record<string, React.CSSProperties> = {
