@@ -1,98 +1,43 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import L from 'leaflet'
+import { MapContainer, TileLayer } from 'react-leaflet'
+import MechanicMarker from './MechanicMarker'
 import 'leaflet/dist/leaflet.css'
+import theme from '@/app/theme'
 
-// Fix for default marker icons in Leaflet with webpack
-delete (L.Icon.Default.prototype as any)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-})
-
-interface Mechanic {
-  id: string
-  business_name: string
-  lat: number | null
-  lng: number | null
+const MyComponent = () => (
+  <div style={{ background: theme.colors.background.main, color: theme.colors.text.primary }}>
+    <h1 style={{ background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+      Hello
+    </h1>
+  </div>
+)
+const fixLeafletIcon = () => {
+  delete (L.Icon.Default.prototype as any)._getIconUrl
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  })
 }
 
-interface MechanicsMapProps {
-  mechanics: Mechanic[]
-  userLocation?: { lat: number; lng: number } | null
-  onMarkerClick?: (mechanicId: string) => void
-}
-
-export default function MechanicsMap({ mechanics, userLocation, onMarkerClick }: MechanicsMapProps) {
-  const mapRef = useRef<L.Map | null>(null)
-  const mapContainerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!mapContainerRef.current) return
-    if (mapRef.current) return // already initialized
-
-    // Initialize map
-    mapRef.current = L.map(mapContainerRef.current).setView([51.505, -0.09], 10)
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(mapRef.current)
-
-    // Clean up on unmount
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.remove()
-        mapRef.current = null
-      }
-    }
-  }, [])
-
-  // Update markers when mechanics or userLocation change
-  useEffect(() => {
-    if (!mapRef.current) return
-
-    // Clear existing markers
-    mapRef.current.eachLayer((layer) => {
-      if (layer instanceof L.Marker) {
-        mapRef.current?.removeLayer(layer)
-      }
-    })
-
-    // Add user location marker if available
-    if (userLocation) {
-      const userMarker = L.marker([userLocation.lat, userLocation.lng], {
-        icon: L.divIcon({
-          className: 'user-location-marker',
-          html: '📍',
-          iconSize: [20, 20],
-        }),
-      }).addTo(mapRef.current)
-      userMarker.bindPopup('Your location')
-    }
-
-    // Add mechanic markers
-    mechanics.forEach((m) => {
-      if (m.lat && m.lng) {
-        const marker = L.marker([m.lat, m.lng]).addTo(mapRef.current!)
-        marker.bindPopup(`<b>${m.business_name}</b>`)
-        if (onMarkerClick) {
-          marker.on('click', () => onMarkerClick(m.id))
-        }
-      }
-    })
-
-    // Fit bounds to show all markers
-    const bounds = L.latLngBounds([])
-    if (userLocation) bounds.extend([userLocation.lat, userLocation.lng])
-    mechanics.forEach((m) => {
-      if (m.lat && m.lng) bounds.extend([m.lat, m.lng])
-    })
-    if (bounds.isValid()) {
-      mapRef.current.fitBounds(bounds, { padding: [50, 50] })
-    }
-  }, [mechanics, userLocation, onMarkerClick])
-
-  return <div ref={mapContainerRef} style={{ width: '100%', height: '400px', borderRadius: '12px' }} />
+export default function MechanicsMap({ mechanics }: { mechanics: any[] }) {
+  useEffect(() => { fixLeafletIcon() }, [])
+  return (
+    <MapContainer center={[52.6369, -1.1398]} zoom={10} style={{ height: '100%', width: '100%' }}>
+      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      {mechanics.map(m => (
+        <MechanicMarker
+          key={m.id}
+          id={m.id}
+          position={[m.lat, m.lng]}
+          businessName={m.business_name}
+          phone={m.phone}
+          verified={m.verified}
+        />
+      ))}
+    </MapContainer>
+  )
 }

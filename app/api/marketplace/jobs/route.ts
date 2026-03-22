@@ -1,110 +1,98 @@
-import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+// app/api/marketplace/jobs/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-export async function GET() {
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
+export async function GET(request: NextRequest) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-        },
-      }
-    )
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get('status');
+    const category = searchParams.get('category');
+    const limit = parseInt(searchParams.get('limit') || '10');
+    const offset = parseInt(searchParams.get('offset') || '0');
 
-    // First, try to fetch jobs with a simpler query to isolate issues
-    const { data: jobs, error: jobsError } = await supabase
-      .from('jobs')
-      .select('*')
-      .eq('status', 'open')
-      .order('created_at', { ascending: false })
+    let query = supabaseAdmin.from('jobs').select('*', { count: 'exact' });
+    if (status) query = query.eq('status', status);
+    if (category) query = query.eq('category', category);
 
-    if (jobsError) {
-      console.error('Jobs fetch error:', jobsError)
-      return NextResponse.json({ error: jobsError.message }, { status: 500 })
+    const { data, error, count } = await query
+      .range(offset, offset + limit - 1)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Fetch jobs error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // If jobs exist, manually fetch related data to avoid complex joins
-    const enrichedJobs = await Promise.all(
-      jobs.map(async (job) => {
-        const enriched: any = { ...job }
-
-        // Fetch vehicle if vehicle_id exists
-        if (job.vehicle_id) {
-          const { data: vehicle } = await supabase
-            .from('vehicles')
-            .select('make, model, license_plate')
-            .eq('id', job.vehicle_id)
-            .single()
-          enriched.vehicle = vehicle || null
-        }
-
-        // Fetch user email if needed (optional)
-        // const { data: user } = await supabase.auth.admin.getUserById(job.user_id)
-        // enriched.user = { email: user?.user?.email }
-
-        return enriched
-      })
-    )
-
-    return NextResponse.json(enrichedJobs)
+    return NextResponse.json({ jobs: data, count });
   } catch (err: any) {
-    console.error('Server error in GET /api/marketplace/jobs:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    console.error('GET unexpected error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-        },
-      }
-    )
+    // 1. Parse JSON body
+    let body;
+    try {
+      body = await request.json();
+    } catch (err) {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    // 2. Validate
+    if (!body.title || typeof body.title !== 'string' || body.title.trim() === '') {
+      return NextResponse.json({ error: 'Job title is required' }, { status: 400 });
+    }
+
+    // 3. Authenticate
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'Missing or invalid Authorization header' }, { status: 401 });
+    }
+    const token = authHeader.substring(7);
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     if (userError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      console.error('Auth error:', userError);
+      return NextResponse.json({ error: 'Unauthorized – invalid token' }, { status: 401 });
     }
 
-    const body = await request.json()
-    const { vehicle_id, title, description, budget, location, lat, lng } = body
+    // 4. Prepare insert
+    const jobData = {
+      user_id: user.id,
+      vehicle_id: body.vehicle_id || null,
+      title: body.title.trim(),
+      description: body.description || null,
+      budget: body.budget ? parseInt(body.budget) : null,
+      location: body.location || null,
+      lat: body.lat ? parseFloat(body.lat) : null,
+      lng: body.lng ? parseFloat(body.lng) : null,
+      status: 'open',
+      created_at: new Date().toISOString(),
+    };
 
-    if (!title) {
-      return NextResponse.json({ error: 'Title is required' }, { status: 400 })
-    }
-
-    const { data, error } = await supabase
+    // 5. Insert into Supabase
+    const { data, error } = await supabaseAdmin
       .from('jobs')
-      .insert([{
-        user_id: user.id,
-        vehicle_id,
-        title,
-        description,
-        budget: budget ? parseInt(budget) : null,
-        location,
-        lat,
-        lng,
-      }])
+      .insert(jobData)
       .select()
-      .single()
+      .single();
 
     if (error) {
-      console.error('Job insert error:', error)
-      return NextResponse.json({ error: error.message }, { status: 400 })
+      console.error('Insert error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data, { status: 201 })
+    return NextResponse.json({ job: data }, { status: 201 });
   } catch (err: any) {
-    console.error('Server error in POST /api/marketplace/jobs:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    console.error('POST unexpected error:', err);
+    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
   }
 }

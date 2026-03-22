@@ -15,14 +15,14 @@ export async function createClient() {
         set(name: string, value: string, options: any) {
           try {
             cookieStore.set({ name, value, ...options })
-          } catch (error) {
+          } catch {
             // Called from a Server Component – can be ignored
           }
         },
         remove(name: string, options: any) {
           try {
             cookieStore.set({ name, value: '', ...options })
-          } catch (error) {
+          } catch {
             // Ignore
           }
         },
@@ -30,6 +30,3 @@ export async function createClient() {
     }
   )
 }
-
-// Alias for backward compatibility – matches the import in your reviews route
-export const createServerSupabaseClient = createClient

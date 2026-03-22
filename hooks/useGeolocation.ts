@@ -1,60 +1,93 @@
-// hooks/useGeolocation.ts
-import { useState, useEffect } from 'react';
+'use client'
 
-interface Location {
-  latitude: number;
-  longitude: number;
-  accuracy?: number;
+import { useState, useEffect } from 'react'
+
+interface GeolocationState {
+  loading: boolean
+  accuracy: number | null
+  altitude: number | null
+  altitudeAccuracy: number | null
+  heading: number | null
+  latitude: number | null
+  longitude: number | null
+  speed: number | null
+  timestamp: number | null
+  error: string | null
 }
 
 interface GeolocationOptions {
-  enableHighAccuracy?: boolean;
-  timeout?: number;
-  maximumAge?: number;
+  enableHighAccuracy?: boolean
+  timeout?: number
+  maximumAge?: number
+  watch?: boolean
 }
 
 export function useGeolocation(options: GeolocationOptions = {}) {
-  const [location, setLocation] = useState<Location | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [state, setState] = useState<GeolocationState>({
+    loading: true,
+    accuracy: null,
+    altitude: null,
+    altitudeAccuracy: null,
+    heading: null,
+    latitude: null,
+    longitude: null,
+    speed: null,
+    timestamp: null,
+    error: null,
+  })
 
   useEffect(() => {
     if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser');
-      setLoading(false);
-      return;
+      setState(prev => ({ ...prev, loading: false, error: 'Geolocation not supported' }))
+      return
     }
 
-    const successHandler = (position: GeolocationPosition) => {
-      setLocation({
+    const onSuccess = (position: GeolocationPosition) => {
+      setState({
+        loading: false,
+        accuracy: position.coords.accuracy,
+        altitude: position.coords.altitude,
+        altitudeAccuracy: position.coords.altitudeAccuracy,
+        heading: position.coords.heading,
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
-        accuracy: position.coords.accuracy,
-      });
-      setError(null);
-      setLoading(false);
-    };
+        speed: position.coords.speed,
+        timestamp: position.timestamp,
+        error: null,
+      })
+    }
 
-    const errorHandler = (error: GeolocationPositionError) => {
-      setError(error.message);
-      setLoading(false);
-    };
+    const onError = (error: GeolocationPositionError) => {
+      setState(prev => ({
+        ...prev,
+        loading: false,
+        error: error.message,
+      }))
+    }
 
-    const watchId = navigator.geolocation.watchPosition(
-      successHandler,
-      errorHandler,
-      {
-        enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 0,
-        ...options,
-      }
-    );
+    const { enableHighAccuracy = true, timeout = 10000, maximumAge = 0, watch = false } = options
+
+    let watchId: number | null = null
+    if (watch) {
+      watchId = navigator.geolocation.watchPosition(onSuccess, onError, {
+        enableHighAccuracy,
+        timeout,
+        maximumAge,
+      })
+    } else {
+      navigator.geolocation.getCurrentPosition(onSuccess, onError, {
+        enableHighAccuracy,
+        timeout,
+        maximumAge,
+      })
+    }
 
     return () => {
-      navigator.geolocation.clearWatch(watchId);
-    };
-  }, [options.enableHighAccuracy, options.timeout, options.maximumAge]);
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId)
+      }
+    }
+  }, [options.enableHighAccuracy, options.timeout, options.maximumAge, options.watch])
 
-  return { location, error, loading };
+  return state
 }

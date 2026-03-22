@@ -1,640 +1,411 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { QRCodeCanvas as QRCode } from 'qrcode.react'
-import { supabase } from '@/lib/supabase/client'
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabase/client';
+import Link from 'next/link';
 
-// ... rest of your component unchanged
+type Tab = 'profile' | 'notifications' | 'security' | 'support' | 'legal';
 
-// ... rest of your component remains exactly the same
-
-type MechanicProfile = {
-  id: string
-  business_name: string
-  phone: string | null
-  address: string | null
-  subscription_status: 'active' | 'inactive' | 'past_due'
-  stripe_account_id: string | null
-}
-
-type UserPreferences = {
-  email_notifications: boolean
-  push_notifications: boolean
-}
-
+const primaryColor = '#22c55e';
 
 export default function SettingsPage() {
-  const router = useRouter()
-  const [user, setUser] = useState<SupabaseUser | null>(null)
-  const [mechanic, setMechanic] = useState<MechanicProfile | null>(null)
-  const [preferences, setPreferences] = useState<UserPreferences>({
-    email_notifications: true,
-    push_notifications: false,
-  })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-
-  // Profile form
-  const [fullName, setFullName] = useState('')
-  const [phone, setPhone] = useState('')
-
-  // Email change form
-  const [newEmail, setNewEmail] = useState('')
-  const [emailChanging, setEmailChanging] = useState(false)
-
-  // Password change form
-  const [oldPassword, setOldPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<Tab>('profile');
+  const [user, setUser] = useState<any>(null);
+  const [fullName, setFullName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [supportMessage, setSupportMessage] = useState('');
+  const [supportResponse, setSupportResponse] = useState('');
+  const [supportLoading, setSupportLoading] = useState(false);
 
   useEffect(() => {
-    loadUserData()
-  }, [])
+    fetchUser();
+  }, []);
 
-  async function loadUserData() {
-    try {
-      setLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/login')
-        return
-      }
-      setUser(user)
-      setFullName(user.user_metadata?.full_name || '')
-      setNewEmail(user.email || '')
-
-      // Load preferences
-      const { data: prefs, error: prefsError } = await supabase
-        .from('user_preferences')
-        .select('email_notifications, push_notifications')
-        .eq('user_id', user.id)
-        .single()
-
-      if (prefsError && prefsError.code !== 'PGRST116') { // not found
-        console.error('Error loading preferences:', prefsError)
-      }
-      if (prefs) {
-        setPreferences(prefs)
-      } else {
-        // Insert default preferences
-        const { error: insertError } = await supabase
-          .from('user_preferences')
-          .insert({ user_id: user.id })
-        if (!insertError) {
-          setPreferences({ email_notifications: true, push_notifications: false })
-        }
-      }
-
-      // Load mechanic profile if exists
-      const { data: mechanicData } = await supabase
-        .from('mechanics')
-        .select('*')
-        .eq('user_id', user.id)
-        .single()
-
-      if (mechanicData) {
-        setMechanic(mechanicData)
-        setPhone(mechanicData.phone || '')
-      }
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+  async function fetchUser() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push('/login');
+      return;
     }
+    setUser(user);
+    setFullName(user.user_metadata?.full_name || '');
   }
 
-  // Update profile (name & phone)
-  const handleProfileUpdate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError(null)
-    setSuccess(null)
+  async function updateProfile(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setMessage(null);
     try {
-      // Update auth metadata
-      const { error: updateError } = await supabase.auth.updateUser({
+      const { error } = await supabase.auth.updateUser({
         data: { full_name: fullName },
-      })
-      if (updateError) throw updateError
-
-      // Update mechanic profile if exists
-      if (mechanic) {
-        const { error: mechError } = await supabase
-          .from('mechanics')
-          .update({ phone })
-          .eq('id', mechanic.id)
-        if (mechError) throw mechError
-      }
-
-      setSuccess('Profile updated successfully')
+      });
+      if (error) throw error;
+      setMessage({ type: 'success', text: 'Profile updated successfully' });
     } catch (err: any) {
-      setError(err.message)
-    }
-  }
-
-  // Update notification preferences
-  const handlePreferenceChange = async (key: keyof UserPreferences, value: boolean) => {
-    setPreferences(prev => ({ ...prev, [key]: value }))
-    try {
-      const { error } = await supabase
-        .from('user_preferences')
-        .upsert({ user_id: user?.id, [key]: value }, { onConflict: 'user_id' })
-      if (error) throw error
-      setSuccess('Preferences updated')
-    } catch (err: any) {
-      setError(err.message)
-    }
-  }
-
-  // Change email (requires confirmation)
-  const handleEmailChange = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError(null)
-    setSuccess(null)
-    setEmailChanging(true)
-    try {
-      const { error } = await supabase.auth.updateUser({ email: newEmail })
-      if (error) throw error
-      setSuccess('Confirmation email sent. Please check your inbox.')
-    } catch (err: any) {
-      setError(err.message)
+      setMessage({ type: 'error', text: err.message });
     } finally {
-      setEmailChanging(false)
+      setLoading(false);
     }
   }
 
-  // Change password
-  const handlePasswordChange = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError(null)
-    setSuccess(null)
-    if (newPassword !== confirmPassword) {
-      setError('New passwords do not match')
-      return
-    }
+  async function handleSupportSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!supportMessage.trim()) return;
+    setSupportLoading(true);
+    setSupportResponse('');
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword })
-      if (error) throw error
-      setSuccess('Password changed successfully')
-      setOldPassword('')
-      setNewPassword('')
-      setConfirmPassword('')
+      const res = await fetch('/api/ai/support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: supportMessage }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI service unavailable');
+      setSupportResponse(data.reply);
     } catch (err: any) {
-      setError(err.message)
+      setSupportResponse(err.message);
+    } finally {
+      setSupportLoading(false);
     }
   }
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/login')
-  }
+    await supabase.auth.signOut();
+    router.push('/login');
+  };
 
-  const handleDeleteAccount = async () => {
-    if (!confirm('Are you sure? This action cannot be undone.')) return
-    // Note: Deleting user requires admin API or custom function
-    alert('Account deletion not implemented in this demo')
-  }
-
-  if (loading) {
-    return (
-      <div style={styles.centered}>
-        <div className="spinner" />
-        <p>Loading settings...</p>
-      </div>
-    )
-  }
-
-  if (!user) return null
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'profile', label: 'Profile' },
+    { id: 'notifications', label: 'Notifications' },
+    { id: 'security', label: 'Security' },
+    { id: 'support', label: 'Support' },
+    { id: 'legal', label: 'Legal' },
+  ];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
-      <h1 style={styles.title}>Settings</h1>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      style={styles.page}
+    >
+      <div style={styles.container}>
+        <h1 style={styles.title}>Settings</h1>
+        <div style={styles.tabs}>
+          {tabs.map(tab => (
+            <motion.button
+              key={tab.id}
+              whileHover={{ y: -2 }}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                ...styles.tabButton,
+                borderBottom: activeTab === tab.id ? `2px solid ${primaryColor}` : 'none',
+                color: activeTab === tab.id ? primaryColor : '#94a3b8',
+              }}
+            >
+              {tab.label}
+            </motion.button>
+          ))}
+        </div>
 
-      <div style={styles.grid}>
-        {/* Profile Section */}
         <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.1 }}
-          style={styles.card}
+          key={activeTab}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          style={styles.content}
         >
-          <div style={styles.cardHeader}>
-            <User size={20} color="#94a3b8" />
-            <h2 style={styles.cardTitle}>Profile Information</h2>
-          </div>
-          <form onSubmit={handleProfileUpdate}>
-            <div style={styles.field}>
-              <label style={styles.label}>Email (cannot be changed here)</label>
-              <input
-                type="email"
-                value={user.email}
-                disabled
-                style={{ ...styles.input, opacity: 0.6, cursor: 'not-allowed' }}
-              />
-            </div>
-            <div style={styles.field}>
-              <label style={styles.label}>Full Name</label>
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                style={styles.input}
-              />
-            </div>
-            {mechanic && (
+          {activeTab === 'profile' && (
+            <form onSubmit={updateProfile} style={styles.form}>
               <div style={styles.field}>
-                <label style={styles.label}>Phone Number</label>
+                <label>Email</label>
+                <input type="email" value={user?.email || ''} disabled style={styles.inputDisabled} />
+                <small style={styles.small}>Email cannot be changed here. Contact support.</small>
+              </div>
+              <div style={styles.field}>
+                <label>Full Name</label>
                 <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
                   style={styles.input}
                 />
               </div>
-            )}
-            <button type="submit" style={styles.saveButton}>
-              Save Changes
-            </button>
-          </form>
-        </motion.div>
+              {message && (
+                <div style={{ ...styles.message, background: message.type === 'success' ? `${primaryColor}20` : '#ef444420', color: message.type === 'success' ? primaryColor : '#ef4444' }}>
+                  {message.text}
+                </div>
+              )}
+              <button type="submit" disabled={loading} style={styles.button}>
+                {loading ? 'Saving...' : 'Save Changes'}
+              </button>
+            </form>
+          )}
 
-        {/* Email Change Section */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.15 }}
-          style={styles.card}
-        >
-          <div style={styles.cardHeader}>
-            <Mail size={20} color="#94a3b8" />
-            <h2 style={styles.cardTitle}>Change Email</h2>
-          </div>
-          <form onSubmit={handleEmailChange}>
-            <div style={styles.field}>
-              <label style={styles.label}>New Email Address</label>
-              <input
-                type="email"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                style={styles.input}
-                required
-              />
-            </div>
-            <button type="submit" disabled={emailChanging} style={styles.saveButton}>
-              {emailChanging ? 'Sending...' : 'Update Email'}
-            </button>
-            <p style={styles.note}>
-              You will receive a confirmation email at the new address.
-            </p>
-          </form>
-        </motion.div>
-
-        {/* Notification Preferences */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.2 }}
-          style={styles.card}
-        >
-          <div style={styles.cardHeader}>
-            <Bell size={20} color="#94a3b8" />
-            <h2 style={styles.cardTitle}>Notifications</h2>
-          </div>
-          <div style={styles.toggleGroup}>
-            <label style={styles.toggleLabel}>
-              <span>Email Notifications</span>
-              <input
-                type="checkbox"
-                checked={preferences.email_notifications}
-                onChange={(e) => handlePreferenceChange('email_notifications', e.target.checked)}
-                style={styles.checkbox}
-              />
-            </label>
-            <label style={styles.toggleLabel}>
-              <span>Push Notifications</span>
-              <input
-                type="checkbox"
-                checked={preferences.push_notifications}
-                onChange={(e) => handlePreferenceChange('push_notifications', e.target.checked)}
-                style={styles.checkbox}
-              />
-            </label>
-          </div>
-        </motion.div>
-
-        {/* Security */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          style={styles.card}
-        >
-          <div style={styles.cardHeader}>
-            <Shield size={20} color="#94a3b8" />
-            <h2 style={styles.cardTitle}>Change Password</h2>
-          </div>
-          <form onSubmit={handlePasswordChange}>
-            <div style={styles.field}>
-              <label style={styles.label}>Current Password</label>
-              <input
-                type="password"
-                value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
-                style={styles.input}
-                required
-              />
-            </div>
-            <div style={styles.field}>
-              <label style={styles.label}>New Password</label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                style={styles.input}
-                required
-              />
-            </div>
-            <div style={styles.field}>
-              <label style={styles.label}>Confirm New Password</label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                style={styles.input}
-                required
-              />
-            </div>
-            <button type="submit" style={styles.saveButton}>
-              Change Password
-            </button>
-          </form>
-        </motion.div>
-
-        {/* Mechanic Section (if applicable) */}
-        {mechanic && (
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.4 }}
-            style={styles.card}
-          >
-            <div style={styles.cardHeader}>
-              <CreditCard size={20} color="#94a3b8" />
-              <h2 style={styles.cardTitle}>Mechanic Account</h2>
-            </div>
-            <div style={styles.detailRow}>
-              <span>Business Name</span>
-              <span style={styles.detailValue}>{mechanic.business_name}</span>
-            </div>
-            <div style={styles.detailRow}>
-              <span>Subscription Status</span>
-              <span
-                style={{
-                  ...styles.statusBadge,
-                  backgroundColor:
-                    mechanic.subscription_status === 'active'
-                      ? '#22c55e20'
-                      : '#ef444420',
-                  color:
-                    mechanic.subscription_status === 'active'
-                      ? '#22c55e'
-                      : '#ef4444',
-                }}
-              >
-                {mechanic.subscription_status}
-              </span>
-            </div>
-            {mechanic.stripe_account_id && (
-              <div style={styles.detailRow}>
-                <span>Stripe Dashboard</span>
-                <a
-                  href={`https://connect.stripe.com/express/${mechanic.stripe_account_id}/dashboard`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={styles.stripeLink}
-                >
-                  Manage Account <ExternalLink size={14} />
-                </a>
+          {activeTab === 'notifications' && (
+            <div>
+              <p style={styles.sectionDesc}>Manage your notification preferences.</p>
+              <div style={styles.option}>
+                <label>Email Notifications</label>
+                <input type="checkbox" defaultChecked />
               </div>
-            )}
-          </motion.div>
-        )}
+              <div style={styles.option}>
+                <label>Push Notifications</label>
+                <input type="checkbox" defaultChecked />
+              </div>
+            </div>
+          )}
 
-        {/* Danger Zone */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          style={{ ...styles.card, borderColor: '#ef4444' }}
-        >
-          <div style={styles.cardHeader}>
-            <Trash2 size={20} color="#ef4444" />
-            <h2 style={{ ...styles.cardTitle, color: '#ef4444' }}>Danger Zone</h2>
-          </div>
-          <div style={styles.dangerActions}>
-            <button onClick={handleLogout} style={styles.logoutButton}>
-              <LogOut size={16} />
-              Sign Out
-            </button>
-            <button onClick={handleDeleteAccount} style={styles.deleteButton}>
-              <Trash2 size={16} />
-              Delete Account
-            </button>
-          </div>
+          {activeTab === 'security' && (
+            <div>
+              <div style={styles.securityItem}>
+                <div>
+                  <h3>Password</h3>
+                  <p>Change your password</p>
+                </div>
+                <button
+                  onClick={() => router.push('/settings/change-password')}
+                  style={styles.secondaryButton}
+                >
+                  Update
+                </button>
+              </div>
+              <div style={styles.securityItem}>
+                <div>
+                  <h3>Two-Factor Authentication</h3>
+                  <p>Add an extra layer of security to your account</p>
+                </div>
+                <button
+                  onClick={() => router.push('/settings/2fa')}
+                  style={styles.secondaryButton}
+                >
+                  Manage
+                </button>
+              </div>
+              <div style={styles.securityItem}>
+                <div>
+                  <h3>Sign out</h3>
+                  <p>Log out of your account</p>
+                </div>
+                <button onClick={handleLogout} style={styles.dangerButton}>
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'support' && (
+            <div>
+              <h3 style={styles.subtitle}>AI Customer Service</h3>
+              <p style={styles.sectionDesc}>Ask our AI assistant for help 24/7.</p>
+              <form onSubmit={handleSupportSubmit} style={styles.aiChat}>
+                <textarea
+                  placeholder="Describe your issue..."
+                  rows={3}
+                  value={supportMessage}
+                  onChange={(e) => setSupportMessage(e.target.value)}
+                  style={styles.textarea}
+                  disabled={supportLoading}
+                />
+                <button type="submit" disabled={supportLoading} style={styles.button}>
+                  {supportLoading ? 'Thinking...' : 'Send to AI Assistant'}
+                </button>
+              </form>
+              {supportResponse && (
+                <div style={styles.aiResponse}>
+                  <strong>AI Response:</strong>
+                  <p>{supportResponse}</p>
+                </div>
+              )}
+              <hr style={styles.divider} />
+              <p>
+                <Link href="/contact" style={styles.link}>Contact human support</Link> or visit our{' '}
+                <Link href="/help" style={styles.link}>Help Center</Link>.
+              </p>
+            </div>
+          )}
+
+          {activeTab === 'legal' && (
+            <div>
+              <h3 style={styles.subtitle}>Legal</h3>
+              <p>
+                <Link href="/terms" style={styles.link}>Terms of Service</Link>
+              </p>
+              <p>
+                <Link href="/privacy" style={styles.link}>Privacy Policy</Link>
+              </p>
+            </div>
+          )}
         </motion.div>
       </div>
-
-      {/* Success/Error Messages */}
-      {error && <div style={styles.errorBox}>{error}</div>}
-      {success && <div style={styles.successBox}>{success}</div>}
-
-      <style jsx>{`
-        .spinner {
-          border: 3px solid rgba(255,255,255,0.1);
-          border-top: 3px solid #22c55e;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </motion.div>
-  )
+  );
 }
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    padding: '40px',
+    minHeight: '100vh',
     background: '#020617',
-    minHeight: '100vh',
-    color: '#f1f5f9',
-    fontFamily: 'Inter, sans-serif',
+    padding: '40px 20px',
+    fontFamily: 'Inter, system-ui, sans-serif',
   },
-  centered: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#94a3b8',
+  container: {
+    maxWidth: 800,
+    margin: '0 auto',
   },
   title: {
-    fontSize: '32px',
+    fontSize: 32,
     fontWeight: 700,
     background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
-    marginBottom: '32px',
+    marginBottom: 32,
   },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-    gap: '24px',
-  },
-  card: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '16px',
-    padding: '20px',
-  },
-  cardHeader: {
+  tabs: {
     display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    marginBottom: '16px',
+    gap: 24,
+    borderBottom: '1px solid #1e293b',
+    marginBottom: 32,
+    flexWrap: 'wrap',
   },
-  cardTitle: {
-    fontSize: '18px',
-    fontWeight: 600,
-    color: '#94a3b8',
-    margin: 0,
+  tabButton: {
+    background: 'none',
+    border: 'none',
+    padding: '8px 0',
+    fontSize: 16,
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  content: {
+    background: '#0f172a',
+    borderRadius: 16,
+    border: '1px solid #1e293b',
+    padding: 32,
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 24,
   },
   field: {
-    marginBottom: '16px',
-  },
-  label: {
-    display: 'block',
-    fontSize: '14px',
-    color: '#64748b',
-    marginBottom: '4px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
   },
   input: {
+    background: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: 8,
+    padding: '12px 16px',
+    color: '#f1f5f9',
+    fontSize: 16,
+    outline: 'none',
+  },
+  inputDisabled: {
+    background: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: 8,
+    padding: '12px 16px',
+    color: '#94a3b8',
+    fontSize: 16,
+    cursor: 'not-allowed',
+  },
+  small: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 4,
+  },
+  button: {
+    background: primaryColor,
+    color: '#020617',
+    border: 'none',
+    borderRadius: 8,
+    padding: '12px 20px',
+    fontSize: 16,
+    fontWeight: 600,
+    cursor: 'pointer',
+    width: 'fit-content',
+    transition: 'all 0.2s',
+  },
+  secondaryButton: {
+    background: 'transparent',
+    border: '1px solid #334155',
+    borderRadius: 8,
+    padding: '8px 16px',
+    color: '#f1f5f9',
+    fontSize: 14,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  dangerButton: {
+    background: 'transparent',
+    border: '1px solid #ef4444',
+    borderRadius: 8,
+    padding: '8px 16px',
+    color: '#ef4444',
+    fontSize: 14,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  message: {
+    padding: '12px',
+    borderRadius: 8,
+    fontSize: 14,
+  },
+  option: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  securityItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '16px 0',
+    borderBottom: '1px solid #1e293b',
+  },
+  subtitle: {
+    fontSize: 18,
+    fontWeight: 600,
+    marginBottom: 8,
+  },
+  sectionDesc: {
+    color: '#94a3b8',
+    marginBottom: 24,
+  },
+  textarea: {
     width: '100%',
     background: '#1e293b',
     border: '1px solid #334155',
-    borderRadius: '8px',
-    padding: '10px',
+    borderRadius: 8,
+    padding: '12px',
     color: '#f1f5f9',
-    fontSize: '14px',
+    fontSize: 14,
+    marginBottom: 12,
+    outline: 'none',
   },
-  saveButton: {
-    background: '#22c55e',
-    color: '#020617',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '10px',
-    width: '100%',
-    fontWeight: 600,
-    cursor: 'pointer',
-    marginTop: '8px',
+  divider: {
+    borderColor: '#1e293b',
+    margin: '24px 0',
   },
-  note: {
-    fontSize: '12px',
-    color: '#64748b',
-    marginTop: '8px',
-    textAlign: 'center',
-  },
-  toggleGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  toggleLabel: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    fontSize: '14px',
-    color: '#94a3b8',
-  },
-  checkbox: {
-    width: '18px',
-    height: '18px',
-    cursor: 'pointer',
-  },
-  detailRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '8px 0',
-    borderBottom: '1px solid #1e293b',
-  },
-  detailValue: {
-    color: '#f1f5f9',
-    fontWeight: 500,
-  },
-  statusBadge: {
-    padding: '4px 8px',
-    borderRadius: '12px',
-    fontSize: '12px',
-    fontWeight: 500,
-    textTransform: 'capitalize',
-  },
-  stripeLink: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    color: '#22c55e',
+  link: {
+    color: primaryColor,
     textDecoration: 'none',
   },
-  dangerActions: {
-    display: 'flex',
-    gap: '12px',
-    marginTop: '8px',
+  aiChat: {
+    marginBottom: 24,
   },
-  logoutButton: {
-    flex: 1,
-    background: '#334155',
-    color: '#f1f5f9',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '10px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '6px',
+  aiResponse: {
+    background: '#1e293b',
+    padding: 16,
+    borderRadius: 8,
+    border: '1px solid #334155',
+    marginTop: 16,
   },
-  deleteButton: {
-    flex: 1,
-    background: '#ef4444',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '10px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '6px',
-  },
-  errorBox: {
-    marginTop: '24px',
-    padding: '12px',
-    background: 'rgba(239,68,68,0.1)',
-    border: '1px solid #ef4444',
-    borderRadius: '8px',
-    color: '#ef4444',
-  },
-  successBox: {
-    marginTop: '24px',
-    padding: '12px',
-    background: 'rgba(34,197,94,0.1)',
-    border: '1px solid #22c55e',
-    borderRadius: '8px',
-    color: '#22c55e',
-  },
-}
+};

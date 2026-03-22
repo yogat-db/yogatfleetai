@@ -4,10 +4,10 @@ import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts'
-import { supabase } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase'
 
 interface Vehicle {
   id: string
@@ -31,11 +31,12 @@ interface Job {
 interface Transaction {
   id: string
   job_id: string
-  amount: number
-  platform_fee: number
+  amount: number        // in pence
+  platform_fee: number   // in pence
   status: string
   created_at: string
   mechanic_id: string
+  user_id: string
 }
 
 interface Mechanic {
@@ -63,8 +64,8 @@ export default function OwnerAnalyticsPage() {
   async function fetchData() {
     try {
       setLoading(true)
+      setError(null)
 
-      // Get current user
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         router.push('/login')
@@ -80,20 +81,19 @@ export default function OwnerAnalyticsPage() {
       if (vehiclesError) throw vehiclesError
       setVehicles(vehiclesData || [])
 
-      // Fetch all jobs (we'll filter by user_id)
+      // Fetch jobs (using API for simplicity, but could use Supabase directly)
       const jobsRes = await fetch('/api/marketplace/jobs')
       if (!jobsRes.ok) throw new Error('Failed to fetch jobs')
       const jobsData = await jobsRes.json()
-      // Filter jobs where user_id matches current user
-      const userJobs = jobsData.filter((j: any) => j.user_id === user.id)
+      const userJobs = jobsData.filter((j: Job) => j.user_id === user.id)
       setJobs(userJobs)
 
-      // Fetch all transactions (we'll filter by user_id)
-      // We need a transactions API – we'll create a simple one
+      // Fetch transactions (using supabase directly)
       const { data: txData, error: txError } = await supabase
         .from('transactions')
         .select('*')
         .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
       if (txError) throw txError
       setTransactions(txData || [])
 
@@ -110,7 +110,6 @@ export default function OwnerAnalyticsPage() {
           setMechanics(mechMap)
         }
       }
-
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -118,9 +117,9 @@ export default function OwnerAnalyticsPage() {
     }
   }
 
-  // Filter data by time range
+  // Filter transactions by time range
   const filteredTransactions = useMemo(() => {
-    if (timeRange === 'all') return transactions
+    if (timeRange === 'all') return transactions.filter(t => t.status === 'completed')
     const now = new Date()
     const cutoff = new Date()
     if (timeRange === '3m') cutoff.setMonth(now.getMonth() - 3)
@@ -140,7 +139,7 @@ export default function OwnerAnalyticsPage() {
   }, [vehicles])
   const completedJobs = jobs.filter(j => j.status === 'completed').length
 
-  // Spending over time (by month)
+  // Spending by month
   const spendingByMonth = useMemo(() => {
     const monthMap: Record<string, number> = {}
     filteredTransactions.forEach(t => {
@@ -153,18 +152,17 @@ export default function OwnerAnalyticsPage() {
       .map(([month, amount]) => ({ month, amount }))
   }, [filteredTransactions])
 
-  // Health trend over time (by month, average health of vehicles? Not time-series – maybe not)
-  // For health trend, we could use service events or vehicle health snapshots. Without history, we can just show current health.
-  // We'll show a pie chart of health distribution instead.
+  // Health distribution
   const healthDistribution = useMemo(() => {
     const healthy = vehicles.filter(v => (v.health_score || 0) >= 70).length
     const warning = vehicles.filter(v => (v.health_score || 0) >= 40 && (v.health_score || 0) < 70).length
     const critical = vehicles.filter(v => (v.health_score || 0) < 40).length
+    const total = healthy + warning + critical
     return [
       { name: 'Healthy', value: healthy, color: '#22c55e' },
       { name: 'Warning', value: warning, color: '#f59e0b' },
       { name: 'Critical', value: critical, color: '#ef4444' },
-    ]
+    ].filter(item => item.value > 0)
   }, [vehicles])
 
   // Top mechanics by spending
@@ -190,12 +188,36 @@ export default function OwnerAnalyticsPage() {
 
   // Recent jobs
   const recentJobs = useMemo(() => 
-    [...jobs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5)
+    [...jobs]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 5)
   , [jobs])
 
-  if (loading) return <div style={styles.centered}>Loading analytics...</div>
-  if (error) return <div style={styles.centered}>Error: {error}</div>
-  if (!currentUserId) return <div style={styles.centered}>Please log in</div>
+  if (loading) {
+    return (
+      <div style={styles.centered}>
+        <div className="spinner" />
+        <p>Loading analytics...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div style={styles.centered}>
+        <p style={{ color: '#ef4444' }}>Error: {error}</p>
+        <button onClick={fetchData} style={styles.retryButton}>Retry</button>
+      </div>
+    )
+  }
+
+  if (!currentUserId) {
+    return (
+      <div style={styles.centered}>
+        <p>Please log in to view analytics.</p>
+      </div>
+    )
+  }
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
@@ -216,7 +238,7 @@ export default function OwnerAnalyticsPage() {
       <div style={styles.kpiGrid}>
         <div style={styles.kpiCard}>
           <span style={styles.kpiLabel}>Total Spent</span>
-          <span style={styles.kpiValue}>${totalSpent.toFixed(2)}</span>
+          <span style={styles.kpiValue}>£{totalSpent.toFixed(2)}</span>
         </div>
         <div style={styles.kpiCard}>
           <span style={styles.kpiLabel}>Vehicles</span>
@@ -237,54 +259,62 @@ export default function OwnerAnalyticsPage() {
         {/* Spending Over Time */}
         <div style={styles.chartCard}>
           <h3 style={styles.chartTitle}>Spending Over Time</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={spendingByMonth}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis dataKey="month" stroke="#94a3b8" />
-              <YAxis stroke="#94a3b8" />
-              <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
-              <Legend />
-              <Line type="monotone" dataKey="amount" stroke="#22c55e" name="Amount ($)" />
-            </LineChart>
-          </ResponsiveContainer>
+          {spendingByMonth.length === 0 ? (
+            <p style={styles.emptyText}>No spending data</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={spendingByMonth}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="month" stroke="#94a3b8" />
+                <YAxis stroke="#94a3b8" />
+                <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
+                <Legend />
+                <Line type="monotone" dataKey="amount" stroke="#22c55e" name="Amount (£)" />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* Health Distribution (Pie) */}
         <div style={styles.chartCard}>
           <h3 style={styles.chartTitle}>Vehicle Health</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={healthDistribution}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={80}
-                paddingAngle={5}
-                dataKey="value"
-                label={({ name, value, payload }) => {
-  const total = healthDistribution.reduce((sum, entry) => sum + entry.value, 0);
-  const percentage = total > 0 ? ((value / total) * 100).toFixed(0) : '0';
-  return `${name} ${percentage}%`;
-}}
-              >
-                {healthDistribution.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          {healthDistribution.length === 0 ? (
+            <p style={styles.emptyText}>No vehicle data</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <PieChart>
+                <Pie
+                  data={healthDistribution}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                  label={({ name, value }) => {
+                    const total = healthDistribution.reduce((sum, entry) => sum + entry.value, 0)
+                    const percent = total > 0 ? ((value / total) * 100).toFixed(0) : '0'
+                    return `${name} ${percent}%`
+                  }}
+                >
+                  {healthDistribution.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 
-      {/* Top Mechanics & Recent Jobs */}
+      {/* Bottom Row */}
       <div style={styles.chartsRow}>
         {/* Top Mechanics */}
         <div style={styles.chartCard}>
           <h3 style={styles.chartTitle}>Top Mechanics by Spending</h3>
           {topMechanics.length === 0 ? (
-            <p style={styles.emptyText}>No data</p>
+            <p style={styles.emptyText}>No mechanic data</p>
           ) : (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={topMechanics} layout="vertical">
@@ -292,7 +322,7 @@ export default function OwnerAnalyticsPage() {
                 <XAxis type="number" stroke="#94a3b8" />
                 <YAxis type="category" dataKey="name" stroke="#94a3b8" width={150} />
                 <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
-                <Bar dataKey="total" fill="#22c55e" name="Total Spent ($)" />
+                <Bar dataKey="total" fill="#22c55e" name="Total Spent (£)" />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -316,13 +346,28 @@ export default function OwnerAnalyticsPage() {
           )}
         </div>
       </div>
+
+      <style jsx>{`
+        .spinner {
+          border: 3px solid rgba(255,255,255,0.1);
+          border-top: 3px solid #22c55e;
+          border-radius: 50%;
+          width: 40px;
+          height: 40px;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </motion.div>
   )
 }
 
 const styles: Record<string, React.CSSProperties> = {
   page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9' },
-  centered: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' },
+  centered: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' },
   title: { fontSize: '32px', fontWeight: 700, background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '32px' },
   rangeSelector: { marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' },
   rangeLabel: { fontSize: '14px', color: '#94a3b8' },
@@ -340,4 +385,5 @@ const styles: Record<string, React.CSSProperties> = {
   jobTitle: { fontSize: '14px', fontWeight: 500 },
   jobStatus: { fontSize: '12px', color: '#22c55e', textTransform: 'capitalize' },
   jobDate: { fontSize: '12px', color: '#64748b' },
+  retryButton: { marginTop: '16px', padding: '8px 16px', background: '#22c55e', border: 'none', borderRadius: '4px', color: '#020617', cursor: 'pointer' },
 }

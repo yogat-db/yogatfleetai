@@ -1,49 +1,32 @@
-"use client";
+import { useState, useEffect } from 'react'
+import { computeFleetBrain } from '@/lib/ai'
+import type { Vehicle } from '@/app/types/fleet'
 
-import { useState, useEffect } from "react";
-import type { VehicleRow } from "./useVehicles";
+export interface FleetKPIs {
+  totalVehicles: number
+  healthy: number
+  warning: number
+  critical: number
+}
 
-export type FleetKPIs = {
-  totalVehicles: number;
-  activeVehicles: number;
-  inServiceVehicles: number;
-  highRiskVehicles: number;
-  fleetHealthScore: number;
-  motRiskCount: number;
-  forecast90dTotal: number;
-};
-
-export function useFleetKPIs(vehicles: VehicleRow[]) {
+export function useFleetKPIs(vehicles: Vehicle[]): FleetKPIs {
   const [kpis, setKpis] = useState<FleetKPIs>({
     totalVehicles: 0,
-    activeVehicles: 0,
-    inServiceVehicles: 0,
-    highRiskVehicles: 0,
-    fleetHealthScore: 0,
-    motRiskCount: 0,
-    forecast90dTotal: 0
-  });
+    healthy: 0,
+    warning: 0,
+    critical: 0,
+  })
 
   useEffect(() => {
-    const totalVehicles = vehicles.length;
-    const activeVehicles = vehicles.filter(v => v.status === "active").length;
-    const inServiceVehicles = vehicles.filter(v => v.status === "in_service").length;
-    
-    // Calculate health score (simplified for now)
-    const fleetHealthScore = vehicles.length > 0 
-      ? Math.round(vehicles.reduce((acc, v) => acc + (v.mileage ? 100 - (v.mileage / 10000) : 80), 0) / vehicles.length)
-      : 0;
+    const enriched = computeFleetBrain(vehicles)
+    const healthy = enriched.filter(v => (v.health_score ?? 100) >= 70).length
+    const warning = enriched.filter(v => {
+      const s = v.health_score ?? 100
+      return s >= 40 && s < 70
+    }).length
+    const critical = enriched.filter(v => (v.health_score ?? 100) < 40).length
+    setKpis({ totalVehicles: vehicles.length, healthy, warning, critical })
+  }, [vehicles])
 
-    setKpis({
-      totalVehicles,
-      activeVehicles,
-      inServiceVehicles,
-      highRiskVehicles: 0, // You can implement risk calculation
-      fleetHealthScore,
-      motRiskCount: 0,
-      forecast90dTotal: 0
-    });
-  }, [vehicles]);
-
-  return kpis;
+  return kpis
 }

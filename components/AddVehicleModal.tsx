@@ -1,487 +1,270 @@
-'use client'
+// components/vehicles/AddVehicleModal.tsx
+'use client';
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import Image from 'next/image'
-import { motion, AnimatePresence } from 'framer-motion'
-import { supabase } from '@/lib/supabase/client'
+import { useState, Fragment } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
+import { XMarkIcon } from '@heroicons/react/24/outline';
+import { createBrowserClient } from '@supabase/ssr'; // Use new package
+import { z } from 'zod';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+
+// Validation schema
+const vehicleSchema = z.object({
+  make: z.string().min(1, 'Make is required'),
+  model: z.string().min(1, 'Model is required'),
+  year: z
+    .number()
+    .int()
+    .min(1900, 'Year must be 1900 or later')
+    .max(new Date().getFullYear() + 1, 'Year cannot be in the future'),
+  license_plate: z.string().optional(),
+  vin: z.string().optional(),
+  color: z.string().optional(),
+  mileage: z.number().min(0).optional(),
+  fuel_type: z.enum(['gasoline', 'diesel', 'electric', 'hybrid']).optional(),
+});
+
+type VehicleFormValues = z.infer<typeof vehicleSchema>;
 
 interface AddVehicleModalProps {
-  isOpen: boolean
-  onClose: () => void
-  onSuccess?: (vehicle: any) => void
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess?: () => void;
+  userId: string;
 }
 
-export default function AddVehicleModal({ isOpen, onClose, onSuccess }: AddVehicleModalProps) {
-  const router = useRouter()
-  const [plate, setPlate] = useState('')
-  const [make, setMake] = useState('')
-  const [model, setModel] = useState('')
-  const [year, setYear] = useState('')
-  const [mileage, setMileage] = useState('')
-  const [imageFile, setImageFile] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const [lookupLoading, setLookupLoading] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
-  const [motData, setMotData] = useState<any>(null)
+export default function AddVehicleModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  userId,
+}: AddVehicleModalProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const normalizePlate = (p: string) => p.toUpperCase().replace(/\s+/g, '')
+  // Create Supabase client for browser usage
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setImageFile(file)
-    setImagePreview(URL.createObjectURL(file))
-  }
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    reset,
+  } = useForm<VehicleFormValues>({
+    resolver: zodResolver(vehicleSchema),
+    defaultValues: {
+      year: new Date().getFullYear(),
+    },
+  });
 
-  const handleLookup = async () => {
-    if (!plate) {
-      setError('Please enter a registration number')
-      return
-    }
-    setLookupLoading(true)
-    setError(null)
-    setMotData(null)
+  const onSubmit = async (data: VehicleFormValues) => {
+    setIsSubmitting(true);
+    setError(null);
+
     try {
-      const res = await fetch(`/api/enrich/${normalizePlate(plate)}`)
-      const data = await res.json()
-      if (!data.success) throw new Error(data.error || 'Lookup failed')
-      setMake(data.dvla?.make || '')
-      setModel(data.dvla?.model || '')
-      setYear(data.dvla?.yearOfManufacture?.toString() || '')
-      setMotData(data.mot || null)
-    } catch (err: any) {
-      setError(err.message)
+      const { error: insertError } = await supabase.from('vehicles').insert({
+        user_id: userId,
+        ...data,
+        created_at: new Date().toISOString(),
+      });
+
+      if (insertError) throw insertError;
+
+      reset();
+      onSuccess?.();
+      onClose();
+    } catch (err) {
+      console.error('Error adding vehicle:', err);
+      setError(err instanceof Error ? err.message : 'Failed to add vehicle');
     } finally {
-      setLookupLoading(false)
+      setIsSubmitting(false);
     }
-  }
-
-  const uploadImage = async (): Promise<string | null> => {
-    if (!imageFile) return null
-    const fileExt = imageFile.name.split('.').pop()
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
-    const filePath = `vehicles/${fileName}`
-    const { error: uploadError } = await supabase.storage
-      .from('vehicle-images')
-      .upload(filePath, imageFile)
-    if (uploadError) {
-      console.error('Upload error:', uploadError)
-      throw new Error(uploadError.message)
-    }
-    const { data: urlData } = supabase.storage.from('vehicle-images').getPublicUrl(filePath)
-    return urlData.publicUrl
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitting(true)
-    setError(null)
-    try {
-      const imageUrl = await uploadImage()
-      const payload = {
-        registration: normalizePlate(plate),
-        make,
-        model,
-        year: year ? parseInt(year) : null,
-        mileage: mileage ? parseInt(mileage) : null,
-        image_url: imageUrl,
-        lat: 52.6369, // default coordinates
-        lng: -1.1398,
-      }
-
-      const res = await fetch('/api/vehicles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to add vehicle')
-
-      setSuccess(true)
-      onSuccess?.(data)
-      setTimeout(() => {
-        onClose()
-        router.refresh()
-      }, 1500)
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  if (!isOpen) return null
+  };
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        style={styles.overlay}
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ scale: 0.9, y: 20 }}
-          animate={{ scale: 1, y: 0 }}
-          exit={{ scale: 0.9, y: 20 }}
-          style={styles.modal}
-          onClick={(e) => e.stopPropagation()}
+    <Transition show={isOpen} as={Fragment}>
+      <Dialog onClose={onClose} className="relative z-50">
+        {/* Backdrop */}
+        <Transition.Child
+          as={Fragment}
+          enter="ease-out duration-300"
+          enterFrom="opacity-0"
+          enterTo="opacity-100"
+          leave="ease-in duration-200"
+          leaveFrom="opacity-100"
+          leaveTo="opacity-0"
         >
-          <h2 style={styles.title}>Add New Vehicle</h2>
+          <div className="fixed inset-0 bg-black/30" />
+        </Transition.Child>
 
-          <form onSubmit={handleSubmit}>
-            {/* Registration + Lookup */}
-            <div style={styles.field}>
-              <label style={styles.label}>Registration Number *</label>
-              <div style={styles.row}>
-                <input
-                  type="text"
-                  value={plate}
-                  onChange={(e) => setPlate(e.target.value.toUpperCase())}
-                  style={styles.input}
-                  required
-                  disabled={lookupLoading || submitting}
-                />
-                <button
-                  type="button"
-                  onClick={handleLookup}
-                  disabled={lookupLoading || !plate || submitting}
-                  style={styles.lookupButton}
-                >
-                  {lookupLoading ? <div style={styles.spinnerSmall} /> : 'Lookup'}
-                </button>
-              </div>
-            </div>
+        <div className="fixed inset-0 overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center p-4">
+            <Transition.Child
+              as={Fragment}
+              enter="ease-out duration-300"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
+              leave="ease-in duration-200"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
+            >
+              <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 shadow-xl transition-all">
+                <div className="flex items-center justify-between">
+                  <Dialog.Title className="text-xl font-semibold">
+                    Add New Vehicle
+                  </Dialog.Title>
+                  <button
+                    onClick={onClose}
+                    className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  >
+                    <XMarkIcon className="h-5 w-5" />
+                  </button>
+                </div>
 
-            {/* Make, Model */}
-            <div style={styles.rowFields}>
-              <div style={styles.field}>
-                <label style={styles.label}>Make</label>
-                <input
-                  type="text"
-                  value={make}
-                  onChange={(e) => setMake(e.target.value)}
-                  style={styles.input}
-                  disabled={submitting}
-                />
-              </div>
-              <div style={styles.field}>
-                <label style={styles.label}>Model</label>
-                <input
-                  type="text"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  style={styles.input}
-                  disabled={submitting}
-                />
-              </div>
-            </div>
-
-            {/* Year, Mileage */}
-            <div style={styles.rowFields}>
-              <div style={styles.field}>
-                <label style={styles.label}>Year</label>
-                <input
-                  type="number"
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                  style={styles.input}
-                  disabled={submitting}
-                />
-              </div>
-              <div style={styles.field}>
-                <label style={styles.label}>Mileage</label>
-                <input
-                  type="number"
-                  value={mileage}
-                  onChange={(e) => setMileage(e.target.value)}
-                  style={styles.input}
-                  disabled={submitting}
-                />
-              </div>
-            </div>
-
-            {/* Image Upload */}
-            <div style={styles.field}>
-              <label style={styles.label}>Vehicle Image</label>
-              <div style={styles.uploadArea}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageChange}
-                  style={styles.fileInput}
-                  id="vehicle-image"
-                  disabled={submitting}
-                />
-                <label htmlFor="vehicle-image" style={styles.fileInputLabel}>
-                  {imagePreview ? 'Change image' : 'Choose file'}
-                </label>
-                {imagePreview && (
-                  <div style={styles.previewContainer}>
-                    <Image
-                      src={imagePreview}
-                      alt="Preview"
-                      width={60}
-                      height={40}
-                      style={styles.previewImage}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => { setImageFile(null); setImagePreview(null); }}
-                      style={styles.clearPreview}
-                    >
-                      ✕
-                    </button>
+                {error && (
+                  <div className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
+                    {error}
                   </div>
                 )}
-              </div>
-            </div>
 
-            {/* MOT Info */}
-            {motData ? (
-              <div style={styles.motBox}>
-                <strong>MOT:</strong> {motData.status}
-                {motData.expiryDate && ` – Expires ${new Date(motData.expiryDate).toLocaleDateString()}`}
-              </div>
-            ) : (
-              <div style={styles.motBox}>
-                <strong>MOT:</strong> No MOT data available
-              </div>
-            )}
+                <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4">
+                  {/* Form fields same as before */}
+                  <div>
+                    <label htmlFor="make" className="block text-sm font-medium text-gray-700">
+                      Make *
+                    </label>
+                    <input
+                      type="text"
+                      id="make"
+                      {...register('make')}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    />
+                    {errors.make && (
+                      <p className="mt-1 text-xs text-red-600">{errors.make.message}</p>
+                    )}
+                  </div>
 
-            {/* Error / Success */}
-            <AnimatePresence>
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  style={styles.errorBox}
-                >
-                  {error}
-                </motion.div>
-              )}
-              {success && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  style={styles.successBox}
-                >
-                  ✓ Vehicle added successfully!
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  <div>
+                    <label htmlFor="model" className="block text-sm font-medium text-gray-700">
+                      Model *
+                    </label>
+                    <input
+                      type="text"
+                      id="model"
+                      {...register('model')}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    />
+                    {errors.model && (
+                      <p className="mt-1 text-xs text-red-600">{errors.model.message}</p>
+                    )}
+                  </div>
 
-            {/* Buttons */}
-            <div style={styles.buttonRow}>
-              <button type="button" onClick={onClose} style={styles.cancelButton} disabled={submitting}>
-                Cancel
-              </button>
-              <button type="submit" disabled={submitting || success} style={styles.submitButton}>
-                {submitting ? 'Adding...' : 'Add Vehicle'}
-              </button>
-            </div>
-          </form>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
-  )
-}
+                  <div>
+                    <label htmlFor="year" className="block text-sm font-medium text-gray-700">
+                      Year *
+                    </label>
+                    <input
+                      type="number"
+                      id="year"
+                      {...register('year', { valueAsNumber: true })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    />
+                    {errors.year && (
+                      <p className="mt-1 text-xs text-red-600">{errors.year.message}</p>
+                    )}
+                  </div>
 
-const styles: Record<string, React.CSSProperties> = {
-  overlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(2, 6, 23, 0.8)',
-    backdropFilter: 'blur(4px)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-    padding: '20px',
-  },
-  modal: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '24px',
-    padding: '32px',
-    width: '100%',
-    maxWidth: '520px',
-    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-  },
-  title: {
-    fontSize: '28px',
-    fontWeight: 700,
-    marginBottom: '24px',
-    background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  field: {
-    marginBottom: '16px',
-  },
-  label: {
-    display: 'block',
-    fontSize: '14px',
-    fontWeight: 500,
-    color: '#94a3b8',
-    marginBottom: '6px',
-  },
-  row: {
-    display: 'flex',
-    gap: '8px',
-  },
-  input: {
-    flex: 1,
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '12px',
-    padding: '12px 16px',
-    color: '#f1f5f9',
-    fontSize: '16px',
-    outline: 'none',
-  },
-  lookupButton: {
-    background: '#334155',
-    border: 'none',
-    borderRadius: '12px',
-    padding: '0 20px',
-    color: '#f1f5f9',
-    fontSize: '14px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: '80px',
-  },
-  rowFields: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '12px',
-    marginBottom: '8px',
-  },
-  uploadArea: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    flexWrap: 'wrap',
-  },
-  fileInput: {
-    display: 'none',
-  },
-  fileInputLabel: {
-    background: '#1e293b',
-    border: '1px dashed #334155',
-    borderRadius: '12px',
-    padding: '10px 16px',
-    color: '#94a3b8',
-    fontSize: '14px',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  previewContainer: {
-    position: 'relative',
-    width: '60px',
-    height: '40px',
-    borderRadius: '8px',
-    overflow: 'hidden',
-    border: '1px solid #334155',
-  },
-  previewImage: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-  },
-  clearPreview: {
-    position: 'absolute',
-    top: '2px',
-    right: '2px',
-    background: '#ef4444',
-    border: 'none',
-    borderRadius: '50%',
-    width: '18px',
-    height: '18px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    color: '#fff',
-    fontSize: '12px',
-  },
-  motBox: {
-    marginTop: '8px',
-    marginBottom: '16px',
-    padding: '12px 16px',
-    background: '#1e293b',
-    borderRadius: '12px',
-    fontSize: '14px',
-    color: '#94a3b8',
-  },
-  errorBox: {
-    marginTop: '16px',
-    padding: '12px 16px',
-    background: 'rgba(239, 68, 68, 0.1)',
-    border: '1px solid #ef4444',
-    borderRadius: '12px',
-    color: '#ef4444',
-    fontSize: '14px',
-  },
-  successBox: {
-    marginTop: '16px',
-    padding: '12px 16px',
-    background: 'rgba(34, 197, 94, 0.1)',
-    border: '1px solid #22c55e',
-    borderRadius: '12px',
-    color: '#22c55e',
-    fontSize: '14px',
-  },
-  buttonRow: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '12px',
-    marginTop: '24px',
-  },
-  cancelButton: {
-    background: 'transparent',
-    border: '1px solid #334155',
-    borderRadius: '12px',
-    padding: '12px 24px',
-    color: '#94a3b8',
-    fontSize: '16px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  submitButton: {
-    background: '#22c55e',
-    border: 'none',
-    borderRadius: '12px',
-    padding: '12px 24px',
-    color: '#020617',
-    fontSize: '16px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: '120px',
-  },
-  spinnerSmall: {
-    width: '20px',
-    height: '20px',
-    border: '2px solid rgba(255,255,255,0.2)',
-    borderTopColor: '#ffffff',
-    borderRadius: '50%',
-    animation: 'spin 0.8s linear infinite',
-  },
+                  <div>
+                    <label htmlFor="license_plate" className="block text-sm font-medium text-gray-700">
+                      License Plate
+                    </label>
+                    <input
+                      type="text"
+                      id="license_plate"
+                      {...register('license_plate')}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="vin" className="block text-sm font-medium text-gray-700">
+                      VIN
+                    </label>
+                    <input
+                      type="text"
+                      id="vin"
+                      {...register('vin')}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="color" className="block text-sm font-medium text-gray-700">
+                      Color
+                    </label>
+                    <input
+                      type="text"
+                      id="color"
+                      {...register('color')}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="mileage" className="block text-sm font-medium text-gray-700">
+                      Mileage
+                    </label>
+                    <input
+                      type="number"
+                      id="mileage"
+                      {...register('mileage', { valueAsNumber: true })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="fuel_type" className="block text-sm font-medium text-gray-700">
+                      Fuel Type
+                    </label>
+                    <select
+                      id="fuel_type"
+                      {...register('fuel_type')}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    >
+                      <option value="">Select fuel type</option>
+                      <option value="gasoline">Gasoline</option>
+                      <option value="diesel">Diesel</option>
+                      <option value="electric">Electric</option>
+                      <option value="hybrid">Hybrid</option>
+                    </select>
+                  </div>
+
+                  <div className="mt-6 flex justify-end space-x-3">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+                    >
+                      {isSubmitting ? 'Adding...' : 'Add Vehicle'}
+                    </button>
+                  </div>
+                </form>
+              </Dialog.Panel>
+            </Transition.Child>
+          </div>
+        </div>
+      </Dialog>
+    </Transition>
+  );
 }

@@ -1,85 +1,122 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-import { NextResponse } from 'next/server'
+// app/api/marketplace/applications/[applicationId]/route.ts
+import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function PUT(
-  req: Request,
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+}
+
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
+// GET /api/marketplace/applications/:applicationId
+export async function GET(
+  request: NextRequest,
   { params }: { params: { applicationId: string } }
 ) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-          set() {},
-          remove() {},
-        },
-      }
-    )
+    const { applicationId } = params;
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const body = await req.json()
-    const { status } = body  // expected: 'accepted' or 'rejected'
-
-    if (!['accepted', 'rejected'].includes(status)) {
-      return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
-    }
-
-    // Get application with job details
-    const { data: application, error: fetchError } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('applications')
-      .select('job_id, mechanic_id')
-      .eq('id', params.applicationId)
-      .single()
+      .select('*, user:user_id(*), job:job_id(*)')
+      .eq('id', applicationId)
+      .single();
 
-    if (fetchError || !application) {
-      return NextResponse.json({ error: 'Application not found' }, { status: 404 })
+    if (error || !data) {
+      return NextResponse.json(
+        { error: 'Application not found' },
+        { status: 404 }
+      );
     }
 
-    // Get job to check ownership
-    const { data: job, error: jobError } = await supabase
-      .from('jobs')
-      .select('user_id')
-      .eq('id', application.job_id)
-      .single()
+    return NextResponse.json(data, { status: 200 });
+  } catch (error) {
+    console.error('GET application error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
 
-    if (jobError || !job) {
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 })
-    }
+// PATCH /api/marketplace/applications/:applicationId – update status, etc.
+interface UpdateApplicationPayload {
+  status?: 'pending' | 'accepted' | 'rejected';
+  notes?: string;
+  // other fields
+}
 
-    if (job.user_id !== user.id) {
-      return NextResponse.json({ error: 'Only job owner can update application status' }, { status: 403 })
-    }
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { applicationId: string } }
+) {
+  try {
+    const { applicationId } = params;
+    const updates: UpdateApplicationPayload = await request.json();
 
-    // Update application status
-    const { data: updatedApp, error: updateError } = await supabase
+    // Optional: authorization – check if user is the job poster or admin
+    // You'd need to pass userId in request or get from auth session
+
+    const { data, error } = await supabaseAdmin
       .from('applications')
-      .update({ status })
-      .eq('id', params.applicationId)
+      .update(updates)
+      .eq('id', applicationId)
       .select()
-      .single()
+      .single();
 
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 400 })
+    if (error) {
+      console.error('PATCH application error:', error);
+      return NextResponse.json(
+        { error: 'Failed to update application' },
+        { status: 500 }
+      );
     }
 
-    // If accepted, update job status to 'assigned'
-    if (status === 'accepted') {
-      await supabase
-        .from('jobs')
-        .update({ status: 'assigned' })
-        .eq('id', application.job_id)
+    return NextResponse.json(data, { status: 200 });
+  } catch (error) {
+    console.error('Unexpected error in PATCH application:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/marketplace/applications/:applicationId
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { applicationId: string } }
+) {
+  try {
+    const { applicationId } = params;
+
+    const { error } = await supabaseAdmin
+      .from('applications')
+      .delete()
+      .eq('id', applicationId);
+
+    if (error) {
+      console.error('DELETE application error:', error);
+      return NextResponse.json(
+        { error: 'Failed to delete application' },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json(updatedApp)
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json(
+      { success: true, message: 'Application deleted' },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error('Unexpected error in DELETE application:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

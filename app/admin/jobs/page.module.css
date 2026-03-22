@@ -1,0 +1,75 @@
+.page {
+  padding: 40px;
+  background: #020617;
+  min-height: 100vh;
+  color: #f1f5f9;
+  font-family: 'Inter', sans-serif;
+}
+
+.title {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 32px;
+  background: linear-gradient(135deg, #94a3b8, #f1f5f9);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.tableWrapper {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.titleCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actionButtons {
+  display: flex;
+  gap: 4px;
+}
+
+.viewButton {
+  background: transparent;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.viewButton:hover {
+  background: #1e293b;
+  border-color: #94a3b8;
+}
+.releaseButton {
+  background: transparent;
+  border: 1px solid #f59e0b;
+  color: #f59e0b;
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.releaseButton:hover {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: #f59e0b;
+}

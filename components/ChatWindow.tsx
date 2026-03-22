@@ -1,55 +1,116 @@
-'use client'
+'use client';
 
-import { useEffect, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Check, CheckCheck } from 'lucide-react'
-import { useJobMessages } from '@/hooks/useJobMessages'
+import { useEffect, useState, useRef } from 'react';
+import { supabase } from '@/lib/supabase/client'; // Fix: import supabase instead of createClient
 
-interface ChatWindowProps {
-  jobId: string
-  currentUserId: string
-  otherUserId: string
-  otherUserName: string
+interface Message {
+  id: string;
+  job_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+  sender?: {
+    email?: string;
+  };
 }
 
-export default function ChatWindow({
-  jobId,
-  currentUserId,
-  otherUserId,
-  otherUserName,
-}: ChatWindowProps) {
-  const [newMessage, setNewMessage] = useState('')
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const { messages, loading, sendMessage, markAsRead } = useJobMessages(
-    jobId,
-    currentUserId,
-    otherUserId
-  )
+interface ChatWindowProps {
+  jobId: string;
+  currentUserId: string;
+  otherUserId: string;
+  otherUserName: string;
+}
 
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+export default function ChatWindow({ jobId, currentUserId, otherUserId, otherUserName }: ChatWindowProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mark unread messages as read
   useEffect(() => {
-    const unreadIds = messages
-      .filter(m => m.receiver_id === currentUserId && !m.read_at)
-      .map(m => m.id)
-    if (unreadIds.length > 0) {
-      markAsRead(unreadIds)
+    if (!jobId || !currentUserId || !otherUserId) return;
+
+    fetchMessages();
+
+    // Subscribe to new messages
+    const channel = supabase
+      .channel(`chat:${jobId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `job_id=eq.${jobId}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as Message;
+          if (newMsg.sender_id !== currentUserId) {
+            setMessages((prev) => [...prev, newMsg]);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [jobId, currentUserId, otherUserId]);
+
+  const fetchMessages = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('*, sender:users(email)')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setMessages(data || []);
+    } catch (err: any) {
+      console.error('Error fetching messages:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
-  }, [messages, currentUserId])
+  };
 
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newMessage.trim()) return
-    sendMessage(newMessage)
-    setNewMessage('')
-  }
+  const sendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim()) return;
+
+    try {
+      const { error } = await supabase.from('chat_messages').insert({
+        job_id: jobId,
+        sender_id: currentUserId,
+        content: newMessage.trim(),
+      });
+
+      if (error) throw error;
+      setNewMessage('');
+      scrollToBottom();
+    } catch (err: any) {
+      console.error('Error sending message:', err);
+      setError(err.message);
+    }
+  };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   if (loading) {
-    return <div style={styles.loading}>Loading messages...</div>
+    return <div style={styles.loading}>Loading messages...</div>;
+  }
+
+  if (error) {
+    return <div style={styles.error}>Error: {error}</div>;
   }
 
   return (
@@ -57,55 +118,24 @@ export default function ChatWindow({
       <div style={styles.header}>
         <h3>Chat with {otherUserName}</h3>
       </div>
-
-      <div style={styles.messageList}>
-        <AnimatePresence initial={false}>
-          {messages.map((msg) => {
-            const isMe = msg.sender_id === currentUserId
-            return (
-              <motion.div
-                key={msg.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{
-                  ...styles.messageRow,
-                  justifyContent: isMe ? 'flex-end' : 'flex-start',
-                }}
-              >
-                <div
-                  style={{
-                    ...styles.messageBubble,
-                    background: isMe ? '#22c55e' : '#1e293b',
-                    color: isMe ? '#020617' : '#f1f5f9',
-                  }}
-                >
-                  <p style={styles.messageText}>{msg.content}</p>
-                  <div style={styles.messageMeta}>
-                    <span style={styles.messageTime}>
-                      {new Date(msg.created_at).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                    {isMe && (
-                      <span style={styles.readReceipt}>
-                        {msg.read_at ? (
-                          <CheckCheck size={14} color="#64748b" />
-                        ) : (
-                          <Check size={14} color="#64748b" />
-                        )}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            )
-          })}
-        </AnimatePresence>
+      <div style={styles.messagesContainer}>
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            style={{
+              ...styles.message,
+              ...(msg.sender_id === currentUserId ? styles.sent : styles.received),
+            }}
+          >
+            <div style={styles.messageContent}>{msg.content}</div>
+            <div style={styles.messageTime}>
+              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </div>
+          </div>
+        ))}
         <div ref={messagesEndRef} />
       </div>
-
-      <form onSubmit={handleSend} style={styles.inputForm}>
+      <form onSubmit={sendMessage} style={styles.form}>
         <input
           type="text"
           value={newMessage}
@@ -113,67 +143,64 @@ export default function ChatWindow({
           placeholder="Type a message..."
           style={styles.input}
         />
-        <button type="submit" style={styles.sendButton} disabled={!newMessage.trim()}>
-          <Send size={18} />
+        <button type="submit" style={styles.button}>
+          Send
         </button>
       </form>
     </div>
-  )
+  );
 }
 
+// Simple inline styles – you can replace with your theme if desired
 const styles: Record<string, React.CSSProperties> = {
   container: {
     display: 'flex',
     flexDirection: 'column',
-    height: '500px',
-    background: '#0f172a',
+    height: '400px',
     border: '1px solid #1e293b',
     borderRadius: '12px',
     overflow: 'hidden',
+    background: '#0f172a',
   },
   header: {
     padding: '12px 16px',
     borderBottom: '1px solid #1e293b',
+    background: '#1e293b',
+    color: '#f1f5f9',
   },
-  messageList: {
+  messagesContainer: {
     flex: 1,
     overflowY: 'auto',
     padding: '16px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px',
+    gap: '12px',
   },
-  messageRow: {
-    display: 'flex',
-    width: '100%',
-  },
-  messageBubble: {
+  message: {
     maxWidth: '70%',
     padding: '8px 12px',
     borderRadius: '12px',
-    wordBreak: 'break-word',
-  },
-  messageText: {
-    margin: 0,
     fontSize: '14px',
-    lineHeight: 1.4,
   },
-  messageMeta: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: '4px',
-    marginTop: '4px',
+  sent: {
+    alignSelf: 'flex-end',
+    background: '#22c55e',
+    color: '#020617',
+  },
+  received: {
+    alignSelf: 'flex-start',
+    background: '#334155',
+    color: '#f1f5f9',
+  },
+  messageContent: {
+    wordBreak: 'break-word',
   },
   messageTime: {
     fontSize: '10px',
+    marginTop: '4px',
     opacity: 0.7,
   },
-  readReceipt: {
-    display: 'flex',
-    alignItems: 'center',
-  },
-  inputForm: {
+  form: {
     display: 'flex',
     padding: '12px',
     borderTop: '1px solid #1e293b',
@@ -181,28 +208,30 @@ const styles: Record<string, React.CSSProperties> = {
   },
   input: {
     flex: 1,
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '20px',
     padding: '8px 12px',
+    border: '1px solid #334155',
+    borderRadius: '8px',
+    background: '#1e293b',
     color: '#f1f5f9',
-    fontSize: '14px',
+    outline: 'none',
   },
-  sendButton: {
+  button: {
+    padding: '8px 16px',
     background: '#22c55e',
-    color: '#020617',
     border: 'none',
-    borderRadius: '50%',
-    width: '36px',
-    height: '36px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: '8px',
+    color: '#020617',
+    fontWeight: 600,
     cursor: 'pointer',
   },
   loading: {
-    padding: '20px',
     textAlign: 'center',
+    padding: '20px',
     color: '#94a3b8',
   },
-}
+  error: {
+    textAlign: 'center',
+    padding: '20px',
+    color: '#ef4444',
+  },
+};

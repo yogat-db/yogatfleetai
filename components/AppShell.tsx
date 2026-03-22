@@ -1,3 +1,4 @@
+// components/AppShell.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -5,123 +6,132 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '@/lib/supabase/client'
-import Topbar from './Topbar'
-import type { User } from '@supabase/supabase-js'
+import theme from '@/app/theme'
 
-const navItems = [
-  { name: 'Dashboard', href: '/dashboard', icon: '📊' },
-  { name: 'Fleet', href: '/vehicles', icon: '🚚' },
-  { name: 'Marketplace', href: '/marketplace', icon: '🛒' },
-  { name: 'Diagnostics', href: '/diagnostics', icon: '🔍' },
-  { name: 'Service History', href: '/service-history', icon: '📅' },
-  { name: 'Control Center', href: '/control-center', icon: '🛰️' },
-  { name: 'Settings', href: '/settings', icon: '⚙️' },
+// Base links for all authenticated users
+const baseLinks = [
+  { href: '/dashboard', label: 'Dashboard', icon: '📊' },
+  { href: '/vehicles', label: 'Fleet', icon: '🚚' },
+  { href: '/marketplace', label: 'Marketplace', icon: '🛒' },
+  { href: '/diagnostics', label: 'Diagnostics', icon: '🔍' },
+  { href: '/service-history', label: 'Service', icon: '📅' },
+  { href: '/control-center', label: 'Control', icon: '🛰️' },
+  { href: '/settings', label: 'Settings', icon: '⚙️' },
 ]
+
+// Additional links for specific roles
+const roleLinks = {
+  admin: [
+    { href: '/admin/jobs', label: 'Admin Jobs', icon: '🔧' },
+    { href: '/admin/mechanics', label: 'Admin Mechanics', icon: '🔧' },
+  ],
+  mechanic: [
+    { href: '/marketplace/mechanics/dashboard', label: 'My Dashboard', icon: '🛠️' },
+  ],
+}
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const [user, setUser] = useState<User | null>(null)
-  const [isMechanic, setIsMechanic] = useState(false)
+  const [role, setRole] = useState<string | null>(null)
+  const [userEmail, setUserEmail] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const loadUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/login')
-        return
-      }
-      setUser(user)
+    const fetchUserData = async () => {
+      try {
+        // Get current user
+        const { data: { user }, error: userError } = await supabase.auth.getUser()
+        if (userError || !user) {
+          router.push('/login')
+          return
+        }
 
-      // Check if user is a mechanic
-      const { data: mechanic } = await supabase
-        .from('mechanics')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle()
-      setIsMechanic(!!mechanic)
-      setLoading(false)
+        setUserEmail(user.email || null)
+
+        // Fetch role from profiles table
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single()
+
+        if (profileError) {
+          console.error('Error fetching user role:', profileError)
+          setRole(null)
+        } else {
+          setRole(profile?.role || null)
+        }
+      } catch (err) {
+        console.error('Unexpected error:', err)
+        setRole(null)
+      } finally {
+        setLoading(false)
+      }
     }
-    loadUser()
+
+    fetchUserData()
   }, [router])
+
+  // Build the final link list
+  let links = [...baseLinks]
+  if (role === 'admin') {
+    links = [...links, ...roleLinks.admin]
+  } else if (role === 'mechanic') {
+    links = [...links, ...roleLinks.mechanic]
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
 
   if (loading) {
     return (
-      <div style={styles.loadingContainer}>
-        <div style={styles.spinner} />
+      <div style={styles.layout}>
+        <aside style={styles.sidebar}>
+          <div style={styles.logo}>Yogat Fleet AI</div>
+          <div style={styles.loading}>Loading...</div>
+        </aside>
+        <main style={styles.main}>{children}</main>
       </div>
     )
   }
 
-  if (!user) return null
-
   return (
     <div style={styles.layout}>
-      {/* Sidebar */}
       <aside style={styles.sidebar}>
         <div style={styles.logo}>Yogat Fleet AI</div>
         <nav style={styles.nav}>
-          {navItems.map((item) => {
-            const active = pathname === item.href
+          {links.map((l) => {
+            const active = pathname === l.href
             return (
-              <Link key={item.href} href={item.href}>
-                {/* @next-codemod-error This Link previously used the now removed `legacyBehavior` prop, and has a child that might not be an anchor. The codemod bailed out of lifting the child props to the Link. Check that the child component does not render an anchor, and potentially move the props manually to Link. */
-                }
-                <motion.a
+              <Link key={l.href} href={l.href} style={{ textDecoration: 'none' }}>
+                <motion.div
                   whileHover={{ x: 4 }}
                   style={active ? styles.activeLink : styles.link}
                 >
-                  <span style={styles.icon}>{item.icon}</span>
-                  {item.name}
-                </motion.a>
+                  <span style={styles.icon}>{l.icon}</span>
+                  {l.label}
+                </motion.div>
               </Link>
-            );
+            )
           })}
-          {isMechanic && (
-            <Link href="/marketplace/mechanics/dashboard">
-              {/* @next-codemod-error This Link previously used the now removed `legacyBehavior` prop, and has a child that might not be an anchor. The codemod bailed out of lifting the child props to the Link. Check that the child component does not render an anchor, and potentially move the props manually to Link. */
-              }
-              <motion.a
-                whileHover={{ x: 4 }}
-                style={pathname === '/marketplace/mechanics/dashboard' ? styles.activeLink : styles.link}
-              >
-                <span style={styles.icon}>🔧</span>
-                Mechanic Dashboard
-              </motion.a>
-            </Link>
-          )}
         </nav>
-        {/* No user section in sidebar – moved to Topbar */}
+        <div style={styles.userSection}>
+          <div style={styles.userEmail}>{userEmail}</div>
+          <button onClick={handleLogout} style={styles.logoutButton}>
+            Sign Out
+          </button>
+        </div>
       </aside>
-      {/* Main area with Topbar */}
-      <div style={styles.mainArea}>
-        <Topbar />
-        <main style={styles.mainContent}>{children}</main>
-      </div>
-      <style jsx>{`
-        .spinner {
-          border: 3px solid rgba(255,255,255,0.1);
-          border-top: 3px solid #22c55e;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
+      <main style={styles.main}>{children}</main>
     </div>
-  );
+  )
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  layout: {
-    display: 'flex',
-    minHeight: '100vh',
-    backgroundColor: '#020617',
-  },
+const styles: { [key: string]: React.CSSProperties } = {
+  layout: { display: 'flex', minHeight: '100vh', background: '#020617' },
   sidebar: {
     width: '280px',
     background: 'rgba(15, 23, 42, 0.95)',
@@ -132,7 +142,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: '100vh',
     display: 'flex',
     flexDirection: 'column',
-    zIndex: 20,
+    zIndex: 10,
   },
   logo: {
     fontSize: '22px',
@@ -158,6 +168,7 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: 'none',
     fontSize: '15px',
     fontWeight: 500,
+    cursor: 'pointer',
     transition: 'all 0.2s',
   },
   activeLink: {
@@ -172,27 +183,38 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '15px',
     fontWeight: 600,
   },
-  icon: {
-    fontSize: '18px',
-    width: '24px',
-    textAlign: 'center' as const,
-  },
-  mainArea: {
-    flex: 1,
-    marginLeft: '280px',
+  icon: { fontSize: '18px', width: '24px', textAlign: 'center' as const },
+  userSection: {
+    marginTop: 'auto',
+    paddingTop: '20px',
+    borderTop: '1px solid #1e293b',
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '100vh',
+    gap: '12px',
   },
-  mainContent: {
-    flex: 1,
-    background: '#020617',
+  userEmail: {
+    fontSize: '12px',
+    color: '#64748b',
+    textAlign: 'center',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
-  loadingContainer: {
-    height: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#020617',
+  logoutButton: {
+    background: 'transparent',
+    border: '1px solid #ef4444',
+    color: '#ef4444',
+    borderRadius: '6px',
+    padding: '8px 12px',
+    fontSize: '14px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
   },
+  loading: {
+    padding: '12px 16px',
+    color: '#94a3b8',
+    textAlign: 'center',
+  },
+  main: { flex: 1, marginLeft: '280px', minHeight: '100vh', background: '#020617' },
 }

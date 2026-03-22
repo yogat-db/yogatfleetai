@@ -627,7 +627,7 @@ function summarize(findings: DiagnoseFinding[], motInsights: string[], dvlaInsig
     .sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || b.confidence - a.confidence)[0]
 
   const summary = [
-    `Top issue: ${top.title} (${Math.round(top.confidence * 100)}% confidence).`,
+    `Top issue: £{top.title} (£{Math.round(top.confidence * 100)}% confidence).`,
     `Overall severity: ${sev.toUpperCase()}.`,
     `Health score: ${healthScore}/100.`,
   ].join(" ")

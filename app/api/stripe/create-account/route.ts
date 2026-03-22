@@ -1,77 +1,54 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-import { NextResponse } from 'next/server'
-import { stripe } from '@/lib/stripe/server'
+import { NextRequest, NextResponse } from 'next/server';
+import { stripe } from '@/lib/stripe/server';
+import { createClient } from '@/lib/supabase/server';
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-          set() {},
-          remove() {},
-        },
-      }
-    )
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // Check if mechanic exists
-    const { data: mechanic, error: mechError } = await supabase
+    // Check if mechanic already has a Stripe account
+    const { data: existing } = await supabase
       .from('mechanics')
-      .select('*')
+      .select('stripe_account_id')
       .eq('user_id', user.id)
-      .single()
+      .single();
 
-    if (mechError || !mechanic) {
-      return NextResponse.json({ error: 'Mechanic profile not found' }, { status: 404 })
-    }
-
-    // If mechanic already has a Stripe account, just return the account link
-    if (mechanic.stripe_account_id) {
+    if (existing?.stripe_account_id) {
+      // Return onboarding link to finish setup
       const accountLink = await stripe.accountLinks.create({
-        account: mechanic.stripe_account_id,
-        refresh_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard`,
-        return_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?onboarding=complete`,
+        account: existing.stripe_account_id,
+        refresh_url: `${req.headers.get('origin')}/marketplace/mechanics/dashboard`,
+        return_url: `${req.headers.get('origin')}/marketplace/mechanics/dashboard`,
         type: 'account_onboarding',
-      })
-      return NextResponse.json({ url: accountLink.url })
+      });
+      return NextResponse.json({ url: accountLink.url });
     }
 
-    // Create new Stripe Connect account (Express)
+    // Create new Connect account
     const account = await stripe.accounts.create({
       type: 'express',
-      country: 'GB', // change as needed
+      country: 'GB',
       email: user.email,
-      capabilities: {
-        transfers: { requested: true },
-      },
-      business_type: 'individual',
-    })
+      capabilities: { transfers: { requested: true } },
+    });
 
-    // Save account ID to database
     await supabase
       .from('mechanics')
       .update({ stripe_account_id: account.id })
-      .eq('id', mechanic.id)
+      .eq('user_id', user.id);
 
-    // Create onboarding link
     const accountLink = await stripe.accountLinks.create({
       account: account.id,
-      refresh_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard`,
-      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?onboarding=complete`,
+      refresh_url: `${req.headers.get('origin')}/marketplace/mechanics/dashboard`,
+      return_url: `${req.headers.get('origin')}/marketplace/mechanics/dashboard`,
       type: 'account_onboarding',
-    })
+    });
 
-    return NextResponse.json({ url: accountLink.url })
+    return NextResponse.json({ url: accountLink.url });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    console.error('Stripe create account error:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

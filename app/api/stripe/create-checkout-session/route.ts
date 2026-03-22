@@ -1,70 +1,34 @@
-import { NextResponse } from 'next/server'
-import { stripe } from '@/lib/stripe/server'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { NextRequest, NextResponse } from 'next/server';
+import { stripe } from '@/lib/stripe/server';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-        },
-      }
-    )
+    const { planId, mechanicId, successUrl, cancelUrl } = await req.json();
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    // Map plan IDs to your existing environment variable names
+    const priceMap: Record<string, string> = {
+      basic: process.env.NEXT_PUBLIC_STRIPE_MONTHLY_PRICE_ID!,
+      pro: process.env.NEXT_PUBLIC_STRIPE_ANNUAL_PRICE_ID!,
+    };
 
-    const { priceId, planId } = await req.json()
+    const priceId = priceMap[planId];
     if (!priceId) {
-      return NextResponse.json({ error: 'Missing priceId' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid plan' }, { status: 400 });
     }
 
-    // Get or create customer
-    const { data: mechanic } = await supabase
-      .from('mechanics')
-      .select('stripe_customer_id')
-      .eq('user_id', user.id)
-      .single()
-
-    let customerId = mechanic?.stripe_customer_id
-
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email,
-        metadata: { user_id: user.id },
-      })
-      customerId = customer.id
-      // Update mechanic record with customer ID
-      await supabase
-        .from('mechanics')
-        .update({ stripe_customer_id: customerId })
-        .eq('user_id', user.id)
-    }
-
-    // Create checkout session
     const session = await stripe.checkout.sessions.create({
-      customer: customerId,
+      mode: 'subscription',
       payment_method_types: ['card'],
       line_items: [{ price: priceId, quantity: 1 }],
-      mode: 'subscription',
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/subscribe/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/subscribe/cancel`,
-      metadata: {
-        user_id: user.id,
-        plan_id: planId,
-      },
-    })
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: { mechanicId, planId },
+      subscription_data: { metadata: { mechanicId } },
+    });
 
-    return NextResponse.json({ url: session.url })
+    return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    console.error('Checkout session error:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    console.error('Stripe checkout error:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

@@ -297,3 +297,26 @@ html, body {
   background: rgba(255,255,255,0.2);
   border-radius: 10px;
 }
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+  .sidebar-desktop {
+    display: none;
+  }
+  .sidebar-menu-button {
+    display: flex;
+  }
+}
+@media (max-width: 768px) {
+  button[style*="position: fixed"][style*="top: 16px"] {
+    display: flex !important;
+  }
+}
+@media (max-width: 768px) {
+  button[style*="position: fixed"][style*="top: 16px"] {
+    display: flex !important;
+  }
+}

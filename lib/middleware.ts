@@ -1,9 +1,23 @@
+// middleware.ts
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+// List of public routes that do not require authentication
+const publicRoutes = [
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/update-password',
+  '/privacy',
+  '/terms',
+  '/cookies',
+]
+
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
-    request: { headers: request.headers },
+    request: {
+      headers: request.headers,
+    },
   })
 
   const supabase = createServerClient(
@@ -11,48 +25,33 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return request.cookies.getAll()
+        get(name: string) {
+          return request.cookies.get(name)?.value
         },
-        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            request.cookies.set(name, value)
-            response = NextResponse.next({
-              request: { headers: request.headers },
-            })
-            response.cookies.set(name, value, options)
-          })
+        set(name: string, value: string, options: CookieOptions) {
+          response.cookies.set({ name, value, ...options })
+        },
+        remove(name: string, options: CookieOptions) {
+          response.cookies.set({ name, value: '', ...options })
         },
       },
     }
   )
 
-  // Refresh session if expired – required for Server Components
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Define protected routes
-  const isProtectedRoute =
-    request.nextUrl.pathname.startsWith('/dashboard') ||
-    request.nextUrl.pathname.startsWith('/vehicles') ||
-    request.nextUrl.pathname.startsWith('/marketplace') ||
-    request.nextUrl.pathname.startsWith('/diagnostics') ||
-    request.nextUrl.pathname.startsWith('/service-history') ||
-    request.nextUrl.pathname.startsWith('/control-center') ||
-    request.nextUrl.pathname.startsWith('/settings')
+  const isPublicRoute = publicRoutes.some((route) =>
+    request.nextUrl.pathname.startsWith(route)
+  )
 
-  const isAuthRoute =
-    request.nextUrl.pathname.startsWith('/login') ||
-    request.nextUrl.pathname.startsWith('/register') ||
-    request.nextUrl.pathname === '/'
-
-  // If user is not authenticated and trying to access protected route, redirect to login
-  if (!user && isProtectedRoute) {
+  // Redirect unauthenticated users away from protected routes
+  if (!user && !isPublicRoute) {
     const redirectUrl = new URL('/login', request.url)
     return NextResponse.redirect(redirectUrl)
   }
 
-  // If user is authenticated and trying to access auth route, redirect to dashboard
-  if (user && isAuthRoute) {
+  // Redirect authenticated users away from public auth pages
+  if (user && isPublicRoute && !request.nextUrl.pathname.startsWith('/settings')) {
     const redirectUrl = new URL('/dashboard', request.url)
     return NextResponse.redirect(redirectUrl)
   }
@@ -63,12 +62,13 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except:
+     * Match all request paths except for the ones starting with:
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public files with common extensions
+     * - public (public files)
+     * - api (API routes – we'll let API routes handle their own auth)
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public|api).*)',
   ],
 }

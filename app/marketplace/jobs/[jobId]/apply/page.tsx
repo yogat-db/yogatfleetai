@@ -1,202 +1,323 @@
-'use client'
+// app/marketplace/jobs/[jobId]/apply/page.tsx
+'use client';
 
-import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { supabase } from '@/lib/supabase/client'
+import { useState, useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabase/client';
+import theme from '@/app/theme';
 
-export default function ApplyToJobPage() {
-  const params = useParams()
-  const router = useRouter()
-  const jobId = params.jobId as string
+export default function ApplyPage() {
+  const params = useParams();
+  const router = useRouter();
+  const jobId = params.jobId as string;
 
-  const [job, setJob] = useState<any>(null)
-  const [mechanicId, setMechanicId] = useState<string | null>(null)
-  const [bidAmount, setBidAmount] = useState('')
-  const [message, setMessage] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [bid, setBid] = useState('');
+  const [message, setMessage] = useState('');
+  const [mechanicId, setMechanicId] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [alreadyApplied, setAlreadyApplied] = useState(false);
 
   useEffect(() => {
-    fetchData()
-  }, [jobId])
-
-  async function fetchData() {
-    try {
-      setLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
+    const checkAuth = async () => {
+      // 1. Get current user
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        router.push('/login')
-        return
+        setError('You must be logged in to apply.');
+        setAuthChecked(true);
+        return;
       }
+      setUser(user);
 
-      // Get mechanic profile
+      // 2. Fetch mechanic profile
       const { data: mechanic, error: mechError } = await supabase
         .from('mechanics')
-        .select('id, subscription_status')
+        .select('id')
         .eq('user_id', user.id)
-        .single()
+        .single();
 
       if (mechError || !mechanic) {
-        router.push('/marketplace/mechanics/register')
-        return
+        setError('You need to register as a mechanic before applying.');
+        setAuthChecked(true);
+        return;
+      }
+      setMechanicId(mechanic.id);
+
+      // 3. Check if already applied to this job
+      const { data: existing, error: existingError } = await supabase
+        .from('applications')
+        .select('id')
+        .eq('job_id', jobId)
+        .eq('mechanic_id', mechanic.id)
+        .maybeSingle();
+
+      if (existing) {
+        setAlreadyApplied(true);
+        setError('You have already applied to this job.');
       }
 
-      if (mechanic.subscription_status !== 'active') {
-        alert('You need an active subscription to apply for jobs.')
-        router.push('/marketplace/mechanics/subscribe')
-        return
-      }
-      setMechanicId(mechanic.id)
-
-      // Fetch job details
-      const jobRes = await fetch(`/api/marketplace/jobs/${jobId}`)
-      if (!jobRes.ok) throw new Error('Job not found')
-      const jobData = await jobRes.json()
-      setJob(jobData)
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+      setAuthChecked(true);
+    };
+    checkAuth();
+  }, [jobId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitting(true)
-    setError(null)
+    e.preventDefault();
+    setError(null);
+
+    if (alreadyApplied) {
+      setError('You have already applied to this job.');
+      return;
+    }
+
+    if (!mechanicId) {
+      setError('Mechanic profile not found.');
+      return;
+    }
+
+    // Validate bid if provided
+    let bidNumber: number | null = null;
+    if (bid && bid.trim() !== '') {
+      bidNumber = parseInt(bid, 10);
+      if (isNaN(bidNumber) || bidNumber <= 0) {
+        setError('Bid must be a positive number.');
+        return;
+      }
+    }
+
+    setLoading(true);
 
     try {
-      const amount = parseInt(bidAmount)
-      if (isNaN(amount) || amount <= 0) {
-        throw new Error('Please enter a valid bid amount')
-      }
+      const { error: insertError } = await supabase.from('applications').insert({
+        job_id: jobId,
+        mechanic_id: mechanicId,
+        bid_amount: bidNumber,
+        message: message.trim() || null,
+        status: 'pending',
+      });
 
-      const res = await fetch('/api/marketplace/applications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId,
-          mechanicId,
-          bidAmount: amount,
-          message,
-        }),
-      })
+      if (insertError) throw insertError;
 
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Application failed')
-
-      setSuccess(true)
-      setTimeout(() => {
-        router.push(`/marketplace/jobs/${jobId}`)
-        router.refresh()
-      }, 2000)
+      // Optional: show success message, then redirect
+      alert('Application submitted successfully!'); // Or use a toast notification
+      router.push(`/marketplace/jobs/${jobId}`);
     } catch (err: any) {
-      setError(err.message)
+      setError(err.message || 'Failed to submit application.');
     } finally {
-      setSubmitting(false)
+      setLoading(false);
     }
-  }
+  };
 
-  if (loading) {
+  if (!authChecked) {
     return (
       <div style={styles.centered}>
-        <div className="spinner" />
+        <div style={styles.spinner} />
         <p>Loading...</p>
       </div>
-    )
+    );
   }
 
-  if (error || !job) {
+  if (alreadyApplied) {
     return (
-      <div style={styles.centered}>
-        <h2>Error</h2>
-        <p>{error || 'Job not found'}</p>
-        <button onClick={() => router.back()} style={styles.retryButton}>Go Back</button>
+      <div style={styles.page}>
+        <button onClick={() => router.back()} style={styles.backButton}>
+          ← Back
+        </button>
+        <div style={styles.errorBox}>
+          You have already applied to this job. You cannot submit another application.
+        </div>
       </div>
-    )
+    );
   }
-
-  const budgetNumber = typeof job.budget === 'number' ? job.budget : Number(job.budget) || 0
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={styles.page}>
-      <button onClick={() => router.back()} style={styles.backButton}>← Back</button>
-
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      style={styles.page}
+    >
+      <button onClick={() => router.back()} style={styles.backButton}>
+        ← Back
+      </button>
       <h1 style={styles.title}>Apply to Job</h1>
-      <div style={styles.jobSummary}>
-        <h3>{job.title}</h3>
-        <p><strong>Budget:</strong> £{budgetNumber.toFixed(2)}</p>
-        <p><strong>Location:</strong> {job.location}</p>
-      </div>
+
+      {error && <div style={styles.errorBox}>{error}</div>}
 
       <form onSubmit={handleSubmit} style={styles.form}>
         <div style={styles.field}>
-          <label style={styles.label}>Your Bid (£) *</label>
+          <label style={styles.label}>Bid (£)</label>
           <input
             type="number"
-            step="0.01"
-            min="0.01"
-            value={bidAmount}
-            onChange={(e) => setBidAmount(e.target.value)}
-            placeholder="e.g. 150"
+            value={bid}
+            onChange={(e) => setBid(e.target.value)}
             style={styles.input}
-            required
-            disabled={submitting}
+            placeholder="Optional"
+            step="1"
+            min="1"
           />
+          <p style={styles.hint}>Leave empty if you prefer to negotiate.</p>
         </div>
 
         <div style={styles.field}>
-          <label style={styles.label}>Message to Job Owner</label>
+          <label style={styles.label}>Message</label>
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder="Introduce yourself and explain why you're a good fit..."
             rows={4}
-            style={{ ...styles.input, resize: 'vertical' }}
-            disabled={submitting}
+            style={styles.textarea}
+            placeholder="Introduce yourself and explain why you're a good fit..."
           />
         </div>
 
-        {error && <div style={styles.errorBox}>{error}</div>}
-        {success && <div style={styles.successBox}>✓ Application submitted! Redirecting...</div>}
-
-        <button type="submit" disabled={submitting || success} style={styles.submitButton}>
-          {submitting ? 'Submitting...' : 'Submit Application'}
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            ...styles.submitButton,
+            ...(loading ? styles.submitButtonDisabled : {}),
+          }}
+        >
+          {loading ? 'Submitting...' : 'Submit Application'}
         </button>
       </form>
-
-      <style jsx>{`
-        .spinner {
-          border: 3px solid rgba(255,255,255,0.1);
-          border-top: 3px solid #22c55e;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </motion.div>
-  )
+  );
 }
 
+// Styles using your theme
 const styles: Record<string, React.CSSProperties> = {
-  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9', fontFamily: 'Inter, sans-serif' },
-  centered: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' },
-  backButton: { background: 'transparent', border: '1px solid #334155', color: '#f1f5f9', padding: '8px 16px', borderRadius: 8, marginBottom: 24, cursor: 'pointer' },
-  title: { fontSize: 32, fontWeight: 700, background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 24 },
-  jobSummary: { background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #1e293b', marginBottom: 24 },
-  form: { maxWidth: 600 },
-  field: { marginBottom: 20 },
-  label: { display: 'block', fontSize: 14, fontWeight: 500, color: '#94a3b8', marginBottom: 6 },
-  input: { width: '100%', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, padding: '12px 16px', color: '#f1f5f9', fontSize: 16 },
-  errorBox: { marginTop: 16, padding: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444', borderRadius: 8, color: '#ef4444' },
-  successBox: { marginTop: 16, padding: 12, background: 'rgba(34,197,94,0.1)', border: '1px solid #22c55e', borderRadius: 8, color: '#22c55e' },
-  submitButton: { width: '100%', background: '#22c55e', color: '#020617', border: 'none', padding: '14px', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer' },
-  retryButton: { marginTop: 16, padding: '8px 16px', background: '#22c55e', border: 'none', borderRadius: 4, color: '#020617', cursor: 'pointer' },
-}
+  page: {
+    padding: theme.spacing[10],
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+    color: theme.colors.text.primary,
+    fontFamily: theme.fontFamilies.sans,
+  },
+  centered: {
+    minHeight: '100vh',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: theme.colors.text.secondary,
+  },
+  spinner: {
+    width: '40px',
+    height: '40px',
+    border: `3px solid ${theme.colors.border.medium}`,
+    borderTop: `3px solid ${theme.colors.primary}`,
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    marginBottom: theme.spacing[4],
+  },
+  backButton: {
+    background: 'transparent',
+    border: `1px solid ${theme.colors.border.medium}`,
+    color: theme.colors.text.primary,
+    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
+    borderRadius: theme.borderRadius.lg,
+    marginBottom: theme.spacing[6],
+    cursor: 'pointer',
+    transition: theme.transitions.default,
+    ':hover': {
+      background: theme.colors.background.elevated,
+      borderColor: theme.colors.border.light,
+    },
+  },
+  title: {
+    fontSize: theme.fontSizes['4xl'],
+    fontWeight: theme.fontWeights.bold,
+    marginBottom: theme.spacing[8],
+    background: theme.gradients.title,
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+  },
+  form: {
+    maxWidth: '500px',
+  },
+  field: {
+    marginBottom: theme.spacing[6],
+  },
+  label: {
+    display: 'block',
+    fontSize: theme.fontSizes.sm,
+    fontWeight: theme.fontWeights.medium,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[2],
+  },
+  input: {
+    width: '100%',
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: `${theme.spacing[3]} ${theme.spacing[4]}`,
+    color: theme.colors.text.primary,
+    fontSize: theme.fontSizes.base,
+    outline: 'none',
+    transition: theme.transitions.default,
+    ':focus': {
+      borderColor: theme.colors.primary,
+    },
+  },
+  textarea: {
+    width: '100%',
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: `${theme.spacing[3]} ${theme.spacing[4]}`,
+    color: theme.colors.text.primary,
+    fontSize: theme.fontSizes.base,
+    outline: 'none',
+    resize: 'vertical',
+    transition: theme.transitions.default,
+    ':focus': {
+      borderColor: theme.colors.primary,
+    },
+  },
+  hint: {
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.text.muted,
+    marginTop: theme.spacing[1],
+  },
+  errorBox: {
+    marginBottom: theme.spacing[5],
+    padding: theme.spacing[3],
+    background: `rgba(239,68,68,0.1)`,
+    border: `1px solid ${theme.colors.error}`,
+    borderRadius: theme.borderRadius.lg,
+    color: theme.colors.error,
+    fontSize: theme.fontSizes.sm,
+  },
+  submitButton: {
+    width: '100%',
+    background: theme.colors.primary,
+    border: 'none',
+    borderRadius: theme.borderRadius.lg,
+    padding: `${theme.spacing[3]} ${theme.spacing[4]}`,
+    color: theme.colors.background.main,
+    fontSize: theme.fontSizes.base,
+    fontWeight: theme.fontWeights.semibold,
+    cursor: 'pointer',
+    transition: theme.transitions.default,
+    ':hover': {
+      background: theme.colors.primaryDark,
+      transform: 'scale(1.02)',
+    },
+  },
+  submitButtonDisabled: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+    transform: 'none',
+  },
+};
+
+// Add keyframes for spinner (if you have global CSS, add this there)
+// Alternatively, include in a <style> tag or use CSS modules. For simplicity, we'll rely on existing global CSS.
+// If not, add this to your global.css:
+// @keyframes spin {
+//   0% { transform: rotate(0deg); }
+//   100% { transform: rotate(360deg); }
+// }

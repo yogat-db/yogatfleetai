@@ -1,44 +1,40 @@
-import { NextResponse } from "next/server"
-import { buildVehicleIntelligence } from "@/lib/vehicleAI/vehicleIntelligence"
+import { NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import { computeFleetBrain } from '@/lib/ai'
 
 export async function GET(
-  req: Request,
-  context: { params: Promise<{ id: string }> }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
 ) {
-
   try {
-
-    const { id } = await context.params
-
-    if (!id) {
-      return NextResponse.json(
-        { success:false, error:"Vehicle ID missing" },
-        { status:400 }
-      )
-    }
-
-    const plate = id.toUpperCase().replace(/\s+/g, "")
-
-    const intelligence = await buildVehicleIntelligence(plate)
-
-    return NextResponse.json({
-      success:true,
-      vehicle:{ plate },
-      intelligence
-    })
-
-  } catch (error:any) {
-
-    console.error("Digital Twin API error:", error)
-
-    return NextResponse.json(
+    const { id } = await params
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
-        success:false,
-        error:error.message || "Twin intelligence failed"
-      },
-      { status:500 }
+        cookies: {
+          get(name: string) { return cookieStore.get(name)?.value },
+        },
+      }
     )
 
-  }
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const { data: vehicle, error } = await supabase
+      .from('vehicles')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single()
+
+    if (error || !vehicle) return NextResponse.json({ error: 'Vehicle not found' }, { status: 404 })
+
+    const twin = computeFleetBrain([vehicle])[0]
+    return NextResponse.json(twin)
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
 }

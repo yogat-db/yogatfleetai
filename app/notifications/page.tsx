@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCheck, ChevronLeft, ChevronRight, Bell } from 'lucide-react'
+import { CheckCheck, Bell } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -111,8 +111,6 @@ export default function NotificationsPage() {
     }
     if (notification.data?.job_id) {
       router.push(`/marketplace/jobs/${notification.data.job_id}`)
-    } else if (notification.data?.application_id) {
-      // optionally navigate to application detail
     }
   }
 

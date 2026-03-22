@@ -1,5 +1,5 @@
 'use client'
-
+import { supabase } from '@/lib/supabase/client';
 import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -24,10 +24,15 @@ export default function VehiclesPage() {
   async function fetchVehicles() {
     try {
       setLoading(true)
+      setError(null)
       const res = await fetch('/api/vehicles')
-      if (!res.ok) throw new Error('Failed to fetch vehicles')
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Failed to fetch vehicles')
+      }
       const data = await res.json()
-      setVehicles(data)
+      // Ensure data is an array (API should return array)
+      setVehicles(Array.isArray(data) ? data : [])
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -58,15 +63,15 @@ export default function VehiclesPage() {
 
   const stats = {
     total: vehicles.length,
-    healthy: vehiclesWithAI.filter((v) => (v.health_score ?? 100) >= 70).length,
-    warning: vehiclesWithAI.filter((v) => {
+    healthy: vehiclesWithAI.filter(v => (v.health_score ?? 100) >= 70).length,
+    warning: vehiclesWithAI.filter(v => {
       const s = v.health_score ?? 100
       return s >= 40 && s < 70
     }).length,
-    critical: vehiclesWithAI.filter((v) => (v.health_score ?? 100) < 40).length,
+    critical: vehiclesWithAI.filter(v => (v.health_score ?? 100) < 40).length,
   }
 
-  const getStatusColor = (status: FilterStatus): string => {
+  const getStatusColor = (status: FilterStatus) => {
     switch (status) {
       case 'healthy': return '#22c55e'
       case 'warning': return '#f59e0b'
@@ -76,19 +81,37 @@ export default function VehiclesPage() {
   }
 
   async function deleteVehicle(id: string) {
-    if (!confirm('Are you sure you want to delete this vehicle?')) return
-    try {
-      const res = await fetch(`/api/vehicles/${id}`, { method: 'DELETE' })
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}))
-        throw new Error(errorData.error || 'Delete failed')
-      }
-      // Refresh list after deletion
-      fetchVehicles()
-    } catch (err: any) {
-      alert(err.message)
-    }
+  if (!id) {
+    console.error('Cannot delete vehicle: ID is undefined');
+    alert('Error: Vehicle ID is missing');
+    return;
   }
+
+  // Get the current logged‑in user
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) {
+    console.error('User not authenticated:', userError);
+    alert('You must be logged in to delete a vehicle.');
+    return;
+  }
+
+  if (!confirm('Are you sure you want to delete this vehicle? This action cannot be undone.')) return;
+
+  try {
+    const res = await fetch(`/api/vehicles/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'X-User-Id': user.id,   // 👈 Required by the API
+      },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Delete failed');
+    // Remove from local state
+    setVehicles(prev => prev.filter(v => v.id !== id));
+  } catch (err: any) {
+    alert(err.message);
+  }
+}
 
   if (error) {
     return (
@@ -102,6 +125,7 @@ export default function VehiclesPage() {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
+      {/* Header */}
       <div style={styles.header}>
         <h1 style={styles.title}>Fleet Management</h1>
         <button onClick={() => router.push('/vehicles/add')} style={styles.addButton}>
@@ -159,23 +183,30 @@ export default function VehiclesPage() {
       {/* Vehicle Grid */}
       {loading ? (
         <div style={styles.loadingGrid}>
-          {[...Array(6)].map((_, i) => <div key={i} style={styles.skeletonCard} />)}
+          {[...Array(6)].map((_, i) => (
+            <div key={i} style={styles.skeletonCard} />
+          ))}
         </div>
       ) : filteredVehicles.length === 0 ? (
-        <div style={styles.emptyState}>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.emptyState}>
           <p>No vehicles found</p>
           {vehicles.length === 0 ? (
-            <button onClick={() => router.push('/vehicles/add')} style={styles.addLink}>
+            <button onClick={() => router.push('/vehicles/add')} style={styles.addButton}>
               Add your first vehicle
             </button>
           ) : (
             <p>Try adjusting your search or filter</p>
           )}
-        </div>
+        </motion.div>
       ) : (
-        <div style={styles.grid}>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ staggerChildren: 0.05 }}
+          style={styles.grid}
+        >
           <AnimatePresence>
-            {filteredVehicles.filter(Boolean).map((vehicle) => (
+            {filteredVehicles.map((vehicle) => (
               <motion.div
                 key={vehicle.id}
                 layout
@@ -193,14 +224,14 @@ export default function VehiclesPage() {
               </motion.div>
             ))}
           </AnimatePresence>
-        </div>
+        </motion.div>
       )}
     </motion.div>
   )
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9' },
+  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9', fontFamily: 'Inter, sans-serif' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
   title: { fontSize: 32, fontWeight: 700, background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 },
   addButton: { background: '#22c55e', color: '#020617', border: 'none', padding: '12px 24px', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer' },
@@ -209,14 +240,13 @@ const styles: Record<string, React.CSSProperties> = {
   statLabel: { fontSize: 14, textTransform: 'uppercase', opacity: 0.7 },
   statValue: { fontSize: 28, fontWeight: 700, display: 'block', marginTop: 8 },
   controls: { display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 30 },
-  searchInput: { width: '100%', padding: '12px 16px', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, color: '#f1f5f9' },
+  searchInput: { width: '100%', padding: '12px 16px', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, color: '#f1f5f9', fontSize: 16, outline: 'none' },
   filterButtons: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   filterButton: { padding: '8px 16px', borderRadius: 30, border: '1px solid', fontSize: 14, fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px,1fr))', gap: 24 },
-  loadingGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px,1fr))', gap: 24 },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 24 },
+  loadingGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 24 },
   skeletonCard: { height: 350, background: '#0f172a', borderRadius: 16, border: '1px solid #1e293b', animation: 'pulse 2s infinite' },
   emptyState: { textAlign: 'center', padding: '60px 20px', color: '#64748b' },
-  addLink: { background: '#22c55e', color: '#020617', border: 'none', padding: '10px 20px', borderRadius: 8, marginTop: 16, cursor: 'pointer', fontWeight: 600 },
   errorContainer: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#ef4444' },
   retryButton: { marginTop: 16, padding: '10px 24px', background: '#22c55e', border: 'none', borderRadius: 8, color: '#020617', fontWeight: 'bold', cursor: 'pointer' },
 }

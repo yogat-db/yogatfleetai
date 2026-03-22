@@ -1,53 +1,36 @@
-"use client"
+import VehicleCardPremium from './VehicleCardPremium'
+import theme from '@/app/theme'
 
-import Link from "next/link"
-import type { VehicleRow } from "@/app/dashboard/hooks/useVehicles"
+const MyComponent = () => (
+  <div style={{ background: theme.colors.background.main, color: theme.colors.text.primary }}>
+    <h1 style={{ background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+      Hello
+    </h1>
+  </div>
+)
+interface VehicleGridProps {
+  vehicles: any[]
+  onVehicleClick?: (id: string) => void
+  onEdit?: (id: string) => void
+  onDelete?: (id: string) => void
+}
 
-export default function VehicleGrid({ vehicles }: { vehicles: VehicleRow[] }) {
-  if (!vehicles.length) return <div style={{ opacity: 0.8 }}>No vehicles found</div>
-
+export default function VehicleGrid({ vehicles, onVehicleClick, onEdit, onDelete }: VehicleGridProps) {
   return (
-    <div style={grid}>
-      {vehicles.map((v) => (
-        <Link key={v.id} href={`/vehicles/${v.id}`} style={card as any}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontWeight: 800 }}>{v.plate}</div>
-            <div style={pill}>{v.status ?? "active"}</div>
-          </div>
-
-          <div style={{ marginTop: 8, opacity: 0.85 }}>
-            {(v.make ?? "Unknown")} {(v.model ?? "")}
-          </div>
-
-          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
-            {v.year ?? "—"} • {v.mileage ?? "—"} miles
-          </div>
-        </Link>
+    <div style={styles.grid}>
+      {vehicles.map(v => (
+        <VehicleCardPremium
+          key={v.id}
+          vehicle={v}
+          onClick={() => onVehicleClick?.(v.id)}
+          onEdit={() => onEdit?.(v.id)}
+          onDelete={() => onDelete?.(v.id)}
+        />
       ))}
     </div>
   )
 }
 
-const grid: any = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, 1fr)",
-  gap: 12
-}
-
-const card: any = {
-  display: "block",
-  textDecoration: "none",
-  color: "white",
-  border: "1px solid #1e293b",
-  background: "#020617",
-  borderRadius: 12,
-  padding: 14
-}
-
-const pill: any = {
-  fontSize: 12,
-  padding: "4px 8px",
-  borderRadius: 999,
-  border: "1px solid #1e293b",
-  opacity: 0.9
-}
+const styles = {
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 24 },
+} as const

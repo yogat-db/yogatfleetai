@@ -7,6 +7,7 @@ import VehiclePicker from '@/components/VehiclePicker'
 import QrScanner from '@/components/QrScanner'
 import type { Vehicle } from '@/app/types/fleet'
 
+
 type ScanResult = {
   code: string
   description: string
@@ -119,6 +120,7 @@ export default function DiagnosticsPage() {
           </div>
 
           {/* QR Scanner */}
+         
           <AnimatePresence>
             {showScanner && (
               <motion.div

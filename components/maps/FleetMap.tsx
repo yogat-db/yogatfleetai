@@ -1,116 +1,141 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import L from 'leaflet'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import MarkerClusterGroup from 'react-leaflet-cluster'
 import 'leaflet/dist/leaflet.css'
+import theme from '@/app/theme'
 
-// Manual fix for default markers in Next.js
-delete (L.Icon.Default.prototype as any)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
-})
+const MyComponent = () => (
+  <div style={{ background: theme.colors.background.main, color: theme.colors.text.primary }}>
+    <h1 style={{ background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+      Hello
+    </h1>
+  </div>
+)
+// Fix for default marker icons in Next.js
+const fixLeafletIcon = () => {
+  delete (L.Icon.Default.prototype as any)._getIconUrl
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  })
+}
 
-interface Vehicle {
+// Helper to get marker color based on health score
+const getMarkerColor = (healthScore?: number | null) => {
+  if (healthScore == null) return '#94a3b8' // grey
+  if (healthScore >= 70) return '#22c55e' // green
+  if (healthScore >= 40) return '#f59e0b' // orange
+  return '#ef4444' // red
+}
+
+interface VehicleMarker {
   id: string
+  position: [number, number]
   license_plate: string
   make?: string | null
   model?: string | null
-  lat?: number | null
-  lng?: number | null
+
   health_score?: number | null
+  onClick?: () => void
 }
 
 interface FleetMapProps {
-  vehicles: Vehicle[]
+  vehicles: VehicleMarker[]
+  center?: [number, number]
+  zoom?: number
 }
 
-// Component to fit bounds when vehicles change
-function FitBounds({ vehicles }: { vehicles: Vehicle[] }) {
+// Custom marker icon generator
+const createMarkerIcon = (color: string) => {
+  return L.divIcon({
+    className: 'custom-marker',
+    html: `<div style="background-color: ${color}; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"></div>`,
+    iconSize: [24, 24],
+    popupAnchor: [0, -12],
+  })
+}
+
+// Component to adjust map bounds when vehicles change
+function MapBounds({ vehicles }: { vehicles: VehicleMarker[] }) {
   const map = useMap()
-  const initialized = useRef(false)
 
+  
   useEffect(() => {
-    if (vehicles.length === 0) return
-
-    const validCoords = vehicles.filter(v => v.lat && v.lng) as (Vehicle & { lat: number; lng: number })[]
-    if (validCoords.length === 0) return
-
-    const bounds = L.latLngBounds(validCoords.map(v => [v.lat, v.lng]))
-    map.fitBounds(bounds, { padding: [50, 50] })
-    initialized.current = true
+    if (vehicles.length > 0) {
+      const bounds = L.latLngBounds(vehicles.map(v => v.position))
+      map.fitBounds(bounds, { padding: [50, 50] })
+    }
   }, [vehicles, map])
-
+ 
   return null
 }
 
-export default function FleetMap({ vehicles }: FleetMapProps) {
-  // Filter vehicles with valid coordinates
-  const validVehicles = vehicles.filter((v): v is Vehicle & { lat: number; lng: number } =>
-    v.lat != null && v.lng != null && !isNaN(v.lat) && !isNaN(v.lng)
+export default function FleetMap({ vehicles, center = [51.505, -0.09], zoom = 13 }: FleetMapProps) {
+  // Fix leaflet icons on mount
+  useEffect(() => {
+    fixLeafletIcon()
+  }, [])
+
+  // Filter out vehicles with invalid coordinates
+  const validVehicles = vehicles.filter(
+    v => v.position && Array.isArray(v.position) && v.position.length === 2 &&
+         !isNaN(v.position[0]) && !isNaN(v.position[1])
   )
-
-  // Default center (Leicester, UK)
-  const defaultCenter: [number, number] = [52.6369, -1.1398]
-
-  if (validVehicles.length === 0) {
-    return (
-      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1e293b', color: '#94a3b8' }}>
-        No location data available
-      </div>
-    )
-  }
 
   return (
     <MapContainer
-      center={defaultCenter}
-      zoom={10}
-      style={{ height: '100%', width: '100%', background: '#1e293b' }}
-      zoomControl={true}
-      scrollWheelZoom={true}
+      center={center}
+      zoom={zoom}
+      style={{ height: '100%', width: '100%' }}
+      zoomControl={false}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-
-      <MarkerClusterGroup chunkedLoading>
-        {validVehicles.map((vehicle) => {
-          const score = vehicle.health_score ?? 100
-          let color = '#22c55e'
-          if (score < 40) color = '#ef4444'
-          else if (score < 70) color = '#f59e0b'
-
-          const icon = L.divIcon({
-            className: 'custom-marker',
-            html: `<div style="background-color: ${color}; width: 24px; height: 24px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12],
-            popupAnchor: [0, -12],
-          })
-
-          return (
-            <Marker
-              key={vehicle.id}
-              position={[vehicle.lat, vehicle.lng]}
-              icon={icon}
-            >
-              <Popup>
-                <div style={{ minWidth: '200px' }}>
-                  <strong>{vehicle.license_plate}</strong><br />
-                  {vehicle.make} {vehicle.model}<br />
-                  Health: <span style={{ color, fontWeight: 'bold' }}>{score}%</span>
-                </div>
-              </Popup>
-            </Marker>
-          )
-        })}
-      </MarkerClusterGroup>
-
-      <FitBounds vehicles={validVehicles} />
+      {validVehicles.length > 0 && (
+        <>
+          <MapBounds vehicles={validVehicles} />
+          <MarkerClusterGroup chunkedLoading>
+            {validVehicles.map((vehicle) => {
+              const color = getMarkerColor(vehicle.health_score) // ✅ corrected usage
+              return (
+                <Marker
+                  key={vehicle.id}
+                  position={vehicle.position}
+                  icon={createMarkerIcon(color)}
+                  eventHandlers={{
+                    click: () => vehicle.onClick?.(),
+                  }}
+                >
+                  <Popup>
+                    <div style={styles.popup}>
+                      <strong>{vehicle.license_plate}</strong>
+                      <div>{vehicle.make} {vehicle.model}</div>
+                      {vehicle.health_score != null && (
+                        <div style={{ color: getMarkerColor(vehicle.health_score) }}>
+                          Health: {vehicle.health_score}%
+                        </div>
+                      )}
+                    </div>
+                  </Popup>
+                </Marker>
+              )
+            })}
+          </MarkerClusterGroup>
+        </>
+      )}
     </MapContainer>
   )
+}
+
+const styles = {
+  popup: {
+    minWidth: '150px',
+    padding: '4px',
+  },
 }

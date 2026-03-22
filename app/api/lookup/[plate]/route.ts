@@ -1,54 +1,33 @@
-import { NextResponse } from "next/server"
-import { runVehicleLookup } from "@/lib/vehicleAI/lookup"
+import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+import { computeFleetBrain } from '@/lib/ai'
 
 export async function GET(
   req: Request,
-  context: { params: Promise<{ plate: string }> }
+  { params }: { params: Promise<{ plate: string }> }
 ) {
   try {
-    const { plate } = await context.params
-
-    if (!plate) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Plate parameter missing"
-        },
-        { status: 400 }
-      )
+    const { plate } = await params
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const normalizedPlate = plate
-      .toUpperCase()
-      .replace(/\s+/g, "")
+    const { data: vehicle, error } = await supabase
+      .from('vehicles')
+      .select('*')
+      .ilike('license_plate', plate)
+      .eq('user_id', user.id)
+      .single()
 
-    const result = await runVehicleLookup(normalizedPlate)
-
-    if (!result) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Vehicle not found"
-        },
-        { status: 404 }
-      )
+    if (error || !vehicle) {
+      return NextResponse.json({ error: 'Vehicle not found' }, { status: 404 })
     }
 
-    return NextResponse.json({
-      success: true,
-      plate: normalizedPlate,
-      vehicle: result
-    })
-
+    const enriched = computeFleetBrain([vehicle])[0]
+    return NextResponse.json(enriched)
   } catch (err: any) {
-    console.error("Lookup API error:", err)
-
-    return NextResponse.json(
-      {
-        success: false,
-        error: err?.message || "Vehicle lookup failed"
-      },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }

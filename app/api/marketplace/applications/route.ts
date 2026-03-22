@@ -1,95 +1,119 @@
-import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+// app/api/marketplace/applications/route.ts
+import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function POST(req: Request) {
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+}
+
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
+// GET /api/marketplace/applications?jobId=123&userId=456&status=pending&limit=10&offset=0
+export async function GET(request: NextRequest) {
   try {
-    // Regular user client (for auth and fetching)
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-        },
-      }
-    )
+    const { searchParams } = new URL(request.url);
+    const jobId = searchParams.get('jobId');
+    const userId = searchParams.get('userId');
+    const status = searchParams.get('status');
+    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    let query = supabaseAdmin.from('applications').select('*, user:user_id(*), job:job_id(*)', { count: 'exact' });
 
-    const { jobId, mechanicId, bidAmount, message } = await req.json()
+    if (jobId) query = query.eq('job_id', jobId);
+    if (userId) query = query.eq('user_id', userId);
+    if (status) query = query.eq('status', status);
 
-    if (!jobId || !mechanicId || !bidAmount) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+    const { data: applications, error, count } = await query
+      .range(offset, offset + limit - 1)
+      .order('applied_at', { ascending: false });
+
+    if (error) {
+      console.error('Applications GET error:', error);
+      return NextResponse.json(
+        { error: 'Failed to fetch applications' },
+        { status: 500 }
+      );
     }
 
-    // Verify mechanic belongs to user
-    const { data: mechanic } = await supabase
-      .from('mechanics')
-      .select('id')
-      .eq('id', mechanicId)
-      .eq('user_id', user.id)
-      .single()
+    return NextResponse.json({ applications, count }, { status: 200 });
+  } catch (error) {
+    console.error('Unexpected error in applications GET:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
 
-    if (!mechanic) {
-      return NextResponse.json({ error: 'Invalid mechanic' }, { status: 403 })
+// POST /api/marketplace/applications – create a new application
+interface CreateApplicationPayload {
+  job_id: string;
+  user_id: string;
+  cover_letter?: string;
+  resume_url?: string;
+  additional_info?: Record<string, unknown>;
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body: CreateApplicationPayload = await request.json();
+
+    // Validation
+    if (!body.job_id || !body.user_id) {
+      return NextResponse.json(
+        { error: 'Missing required fields: job_id, user_id' },
+        { status: 400 }
+      );
     }
 
-    // Check if already applied
-    const { data: existing } = await supabase
+    // Check if user already applied for this job
+    const { data: existing, error: checkError } = await supabaseAdmin
       .from('applications')
       .select('id')
-      .eq('job_id', jobId)
-      .eq('mechanic_id', mechanicId)
-      .maybeSingle()
+      .eq('job_id', body.job_id)
+      .eq('user_id', body.user_id)
+      .maybeSingle();
 
     if (existing) {
-      return NextResponse.json({ error: 'You have already applied to this job' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'You have already applied for this job' },
+        { status: 409 }
+      );
     }
 
-    // Insert application
-    const { data: application, error: appError } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('applications')
       .insert({
-        job_id: jobId,
-        mechanic_id: mechanicId,
-        bid_amount: bidAmount,
-        message,
+        ...body,
         status: 'pending',
+        applied_at: new Date().toISOString(),
       })
-      .select('*, job:jobs(user_id, title)')
-      .single()
+      .select()
+      .single();
 
-    if (appError) return NextResponse.json({ error: appError.message }, { status: 400 })
+    if (error) {
+      console.error('Applications POST error:', error);
+      return NextResponse.json(
+        { error: 'Failed to create application' },
+        { status: 500 }
+      );
+    }
 
-    // --- Create notification for job owner ---
-    // Use service role client to bypass RLS
-    const supabaseAdmin = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-        },
-      }
-    )
+    // Optional: Send notifications via Resend (similar to earlier example)
+    // ...
 
-    const jobOwnerId = application.job.user_id
-    const jobTitle = application.job.title
-
-    await supabaseAdmin.from('notifications').insert({
-      user_id: jobOwnerId,
-      type: 'job_application',
-      title: 'New Job Application',
-      message: `A mechanic applied to your job "${jobTitle}" with a bid of £${bidAmount}.`,
-      link: `/marketplace/jobs/${jobId}`,
-    })
-
-    return NextResponse.json(application, { status: 201 })
-  } catch (err: any) {
-    console.error('Application error:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json(data, { status: 201 });
+  } catch (error) {
+    console.error('Unexpected error in applications POST:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

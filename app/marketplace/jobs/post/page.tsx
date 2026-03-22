@@ -1,11 +1,11 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { getDTCInfo } from '@/lib/ai/diagnostics'
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabase/client';
+import VehiclePicker from '@/components/VehiclePicker';
 
-// Common job titles (same as before)
 const JOB_TITLES = [
   'Oil change',
   'Brake pad replacement',
@@ -27,210 +27,166 @@ const JOB_TITLES = [
   'Starter motor replacement',
   'Radiator replacement',
   'Catalytic converter replacement',
-]
+];
 
 export default function PostJobPage() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const dtcCode = searchParams.get('dtc')
-  const vehicleIdParam = searchParams.get('vehicleId')
+  const router = useRouter();
+  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [selectedVehicle, setSelectedVehicle] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
+  const [customTitle, setCustomTitle] = useState('');
+  const [useCustomTitle, setUseCustomTitle] = useState(false);
+  const [description, setDescription] = useState('');
+  const [budget, setBudget] = useState('');
+  const [location, setLocation] = useState('');
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
+  const [detectingLocation, setDetectingLocation] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
-  const [vehicles, setVehicles] = useState<any[]>([])
-  const [selectedVehicle, setSelectedVehicle] = useState('')
-  const [jobTitle, setJobTitle] = useState('')
-  const [customTitle, setCustomTitle] = useState('')
-  const [useCustomTitle, setUseCustomTitle] = useState(false)
-  const [description, setDescription] = useState('')
-  const [budget, setBudget] = useState('')
-  const [location, setLocation] = useState('')
-  const [lat, setLat] = useState<number | null>(null)
-  const [lng, setLng] = useState<number | null>(null)
-  const [detectingLocation, setDetectingLocation] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
-
-  // Fetch user's vehicles
   useEffect(() => {
-    fetchVehicles()
-  }, [])
-
-  // Pre‑fill based on query params
-  useEffect(() => {
-    if (dtcCode) {
-  const info = getDTCInfo(dtcCode)
-  if (info) {
-    // Safely get first sentence or fallback
-    const shortTitle = info.description?.split('.')[0]?.trim() || 'Diagnostic issue'
-    setJobTitle(shortTitle)
-
-    // Build description safely
-    const causesText = Array.isArray(info.causes) && info.causes.length
-      ? `Possible causes: ${info.causes.join(', ')}`
-      : ''
-    setDescription(
-      `DTC Code: ${dtcCode}\n\n${info.description || ''}\n\n${causesText}`.trim()
-    )
-  } else {
-    setDescription(`DTC Code: ${dtcCode}`)
-  }
-}
-    if (vehicleIdParam && vehicles.length > 0) {
-      const match = vehicles.find(v => v.id === vehicleIdParam)
-      if (match) {
-        setSelectedVehicle(vehicleIdParam)
-      }
-    }
-  }, [dtcCode, vehicleIdParam, vehicles])
+    fetchVehicles();
+  }, []);
 
   async function fetchVehicles() {
     try {
-      const res = await fetch('/api/vehicles')
-      const data = await res.json()
-      setVehicles(data)
-      // If vehicleIdParam is provided and matches, select it after data loads
-      if (vehicleIdParam && data.some((v: any) => v.id === vehicleIdParam)) {
-        setSelectedVehicle(vehicleIdParam)
-      }
+      const { data, error } = await supabase
+        .from('vehicles')
+        .select('id, license_plate, make, model, year')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setVehicles(data || []);
+      if (data && data.length > 0) setSelectedVehicle(data[0].id);
     } catch (err) {
-      console.error('Failed to fetch vehicles')
+      console.error('Failed to fetch vehicles');
     }
   }
+
+  // Reverse geocode using Mapbox
+  const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+    const accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    if (!accessToken) throw new Error('Mapbox token missing');
+
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${accessToken}&types=address,place,postcode,locality,neighborhood&limit=1`;
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Geocoding failed');
+    const data = await res.json();
+    if (data.features && data.features.length > 0) {
+      return data.features[0].place_name;
+    }
+    throw new Error('No address found');
+  };
 
   const detectLocation = () => {
-    setDetectingLocation(true)
+    setDetectingLocation(true);
     if (!navigator.geolocation) {
-      setError('Geolocation not supported')
-      setDetectingLocation(false)
-      return
+      setError('Geolocation not supported');
+      setDetectingLocation(false);
+      return;
     }
+
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
-        const { latitude, longitude } = pos.coords
-        setLat(latitude)
-        setLng(longitude)
+        const { latitude, longitude } = pos.coords;
+        setLat(latitude);
+        setLng(longitude);
+
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-          )
-          const data = await res.json()
-          setLocation(data.display_name || `${latitude}, ${longitude}`)
-        } catch {
-          setLocation(`${latitude}, ${longitude}`)
+          const address = await reverseGeocode(latitude, longitude);
+          setLocation(address);
+        } catch (err) {
+          console.error('Reverse geocoding error:', err);
+          // Fallback to coordinate string
+          setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+          setError('Could not get full address – using coordinates.');
+        } finally {
+          setDetectingLocation(false);
         }
-        setDetectingLocation(false)
       },
       (err) => {
-        setError('Unable to detect location: ' + err.message)
-        setDetectingLocation(false)
+        setError('Unable to detect location: ' + err.message);
+        setDetectingLocation(false);
       }
-    )
-  }
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
 
-    const title = useCustomTitle ? customTitle : jobTitle
-    if (!title.trim()) {
-      setError('Job title is required')
-      setLoading(false)
-      return
+    const finalTitle = useCustomTitle ? customTitle : jobTitle;
+    if (!finalTitle.trim()) {
+      setError('Job title is required');
+      setLoading(false);
+      return;
     }
 
     try {
       const payload = {
         vehicle_id: selectedVehicle || null,
-        title,
+        title: finalTitle,
         description,
         budget: budget ? parseInt(budget) : null,
         location: location || null,
         lat,
         lng,
-        dtc_codes: dtcCode ? [dtcCode] : [],
-      }
+      };
 
       const res = await fetch('/api/marketplace/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      })
+      });
 
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to post job')
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to post job');
 
-      setSuccess(true)
-      setTimeout(() => router.push('/marketplace/jobs'), 2000)
+      setSuccess(true);
+      setTimeout(() => router.push('/marketplace/jobs'), 2000);
     } catch (err: any) {
-      setError(err.message)
+      setError(err.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={styles.page}>
-      <button onClick={() => router.back()} style={styles.backButton}>← Back</button>
-      <h1 style={styles.title}>Post a Repair Job</h1>
+      <button onClick={() => router.back()} style={styles.backButton}>
+        ← Back
+      </button>
 
-      {dtcCode && (
-        <div style={styles.infoBox}>
-          <strong>DTC Code detected:</strong> {dtcCode} – This will be included with your job posting.
-        </div>
-      )}
+      <h1 style={styles.title}>Post a Repair Job</h1>
 
       <form onSubmit={handleSubmit} style={styles.form}>
         {/* Vehicle Selection */}
         <div style={styles.field}>
           <label style={styles.label}>Vehicle *</label>
-          <select
-            value={selectedVehicle}
-            onChange={(e) => setSelectedVehicle(e.target.value)}
-            style={styles.select}
-            required
-          >
-            <option value="" disabled>Select a vehicle</option>
-            {vehicles.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.make} {v.model} – {v.license_plate}
-              </option>
-            ))}
-          </select>
+          <VehiclePicker vehicles={vehicles} activeId={selectedVehicle} onChange={setSelectedVehicle} />
         </div>
 
-        {/* Job Title with Suggestions */}
+        {/* Job Title */}
         <div style={styles.field}>
           <label style={styles.label}>Job Title *</label>
           <div style={styles.radioGroup}>
             <label style={styles.radioLabel}>
-              <input
-                type="radio"
-                checked={!useCustomTitle}
-                onChange={() => setUseCustomTitle(false)}
-              /> Select from list
+              <input type="radio" checked={!useCustomTitle} onChange={() => setUseCustomTitle(false)} /> Select from list
             </label>
             <label style={styles.radioLabel}>
-              <input
-                type="radio"
-                checked={useCustomTitle}
-                onChange={() => setUseCustomTitle(true)}
-              /> Enter custom title
+              <input type="radio" checked={useCustomTitle} onChange={() => setUseCustomTitle(true)} /> Enter custom title
             </label>
           </div>
 
           {!useCustomTitle ? (
-            <select
-              value={jobTitle}
-              onChange={(e) => setJobTitle(e.target.value)}
-              style={styles.select}
-              required
-            >
+            <select value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} style={styles.select} required>
               <option value="" disabled>Choose a job type</option>
               {JOB_TITLES.map((title) => (
-                <option key={title} value={title}>
-                  {title}
-                </option>
+                <option key={title} value={title}>{title}</option>
               ))}
             </select>
           ) : (
@@ -238,7 +194,7 @@ export default function PostJobPage() {
               type="text"
               value={customTitle}
               onChange={(e) => setCustomTitle(e.target.value)}
-              placeholder="e.g. Gearbox overhaul"
+              placeholder="e.g., Gearbox overhaul"
               style={styles.input}
               required
             />
@@ -264,12 +220,12 @@ export default function PostJobPage() {
             type="number"
             value={budget}
             onChange={(e) => setBudget(e.target.value)}
-            placeholder="e.g. 200"
+            placeholder="e.g., 200"
             style={styles.input}
           />
         </div>
 
-        {/* Location with detection */}
+        {/* Location */}
         <div style={styles.field}>
           <label style={styles.label}>Location</label>
           <div style={styles.locationRow}>
@@ -280,49 +236,120 @@ export default function PostJobPage() {
               placeholder="Enter your location or detect automatically"
               style={{ ...styles.input, flex: 1 }}
             />
-            <button
-              type="button"
-              onClick={detectLocation}
-              disabled={detectingLocation}
-              style={styles.detectButton}
-            >
+            <button type="button" onClick={detectLocation} disabled={detectingLocation} style={styles.detectButton}>
               {detectingLocation ? 'Detecting...' : '📍 Detect'}
             </button>
           </div>
           {lat && lng && (
-            <p style={styles.coords}>✓ Location detected automatically</p>
+            <p style={styles.coords}>📍 Coordinates: {lat.toFixed(6)}, {lng.toFixed(6)}</p>
           )}
         </div>
 
         {/* Error / Success */}
         {error && <div style={styles.errorBox}>{error}</div>}
-        {success && <div style={styles.successBox}>✓ Job posted successfully! Redirecting...</div>}
+        {success && (
+          <div style={styles.successBox}>
+            ✓ Job posted successfully! Redirecting...
+          </div>
+        )}
 
-        {/* Submit */}
         <button type="submit" disabled={loading || success} style={styles.submitButton}>
           {loading ? 'Posting...' : 'Post Job'}
         </button>
       </form>
     </motion.div>
-  )
+  );
 }
 
+// ... styles remain the same (I'll copy them from your original to save space)
 const styles: Record<string, React.CSSProperties> = {
-  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9' },
-  backButton: { background: 'transparent', border: '1px solid #334155', color: '#f1f5f9', padding: '8px 16px', borderRadius: 8, marginBottom: 24, cursor: 'pointer' },
-  title: { fontSize: 32, fontWeight: 700, background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 32 },
-  infoBox: { background: '#1e293b', border: '1px solid #3b82f6', borderRadius: 8, padding: 12, marginBottom: 24, color: '#3b82f6' },
-  form: { maxWidth: 600 },
-  field: { marginBottom: 20 },
-  label: { display: 'block', fontSize: 14, fontWeight: 500, color: '#94a3b8', marginBottom: 6 },
-  input: { width: '100%', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, padding: '12px 16px', color: '#f1f5f9', fontSize: 16 },
-  select: { width: '100%', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, padding: '12px 16px', color: '#f1f5f9', fontSize: 16 },
-  radioGroup: { display: 'flex', gap: 20, marginBottom: 12 },
-  radioLabel: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 14, color: '#94a3b8' },
-  locationRow: { display: 'flex', gap: 8 },
-  detectButton: { background: '#334155', border: 'none', borderRadius: 12, padding: '0 20px', color: '#f1f5f9', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' },
-  coords: { fontSize: 12, color: '#22c55e', marginTop: 4 },
-  errorBox: { marginTop: 16, padding: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444', borderRadius: 8, color: '#ef4444' },
-  successBox: { marginTop: 16, padding: 12, background: 'rgba(34,197,94,0.1)', border: '1px solid #22c55e', borderRadius: 8, color: '#22c55e' },
-  submitButton: { width: '100%', background: '#22c55e', color: '#020617', border: 'none', padding: '14px', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer' },
-}
+  page: {
+    padding: '40px',
+    background: '#020617',
+    minHeight: '100vh',
+    color: '#f1f5f9',
+    fontFamily: 'Inter, sans-serif',
+  },
+  backButton: {
+    background: 'transparent',
+    border: '1px solid #334155',
+    color: '#f1f5f9',
+    padding: '8px 16px',
+    borderRadius: '8px',
+    marginBottom: '24px',
+    cursor: 'pointer',
+  },
+  title: {
+    fontSize: '32px',
+    fontWeight: 700,
+    marginBottom: '32px',
+    background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+  },
+  form: { maxWidth: '600px' },
+  field: { marginBottom: '24px' },
+  label: { display: 'block', fontSize: '14px', fontWeight: 500, color: '#94a3b8', marginBottom: '8px' },
+  input: {
+    width: '100%',
+    background: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: '8px',
+    padding: '12px',
+    color: '#f1f5f9',
+    fontSize: '16px',
+    outline: 'none',
+  },
+  select: {
+    width: '100%',
+    background: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: '8px',
+    padding: '12px',
+    color: '#f1f5f9',
+    fontSize: '16px',
+  },
+  radioGroup: { display: 'flex', gap: '20px', marginBottom: '12px' },
+  radioLabel: { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '14px', color: '#94a3b8' },
+  locationRow: { display: 'flex', gap: '8px' },
+  detectButton: {
+    background: '#334155',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '0 20px',
+    color: '#f1f5f9',
+    fontWeight: 600,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  coords: { fontSize: '12px', color: '#22c55e', marginTop: '4px' },
+  errorBox: {
+    marginTop: '16px',
+    padding: '12px',
+    background: 'rgba(239,68,68,0.1)',
+    border: '1px solid #ef4444',
+    borderRadius: '8px',
+    color: '#ef4444',
+  },
+  successBox: {
+    marginTop: '16px',
+    padding: '12px',
+    background: 'rgba(34,197,94,0.1)',
+    border: '1px solid #22c55e',
+    borderRadius: '8px',
+    color: '#22c55e',
+    textAlign: 'center',
+  },
+  submitButton: {
+    width: '100%',
+    background: '#22c55e',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '14px',
+    color: '#020617',
+    fontSize: '16px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    marginTop: '16px',
+  },
+};

@@ -1,75 +1,122 @@
-// supabase/functions/delete-user/index.ts
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-// If using Algolia:
-// import algoliasearch from 'https://esm.sh/algoliasearch';
-
-interface DeleteUserPayload {
-  userId: string; // The UUID of the user to delete
-}
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 serve(async (req) => {
   try {
-    // 1. Verify authentication (optional but recommended)
-    const authHeader = req.headers.get('Authorization');
+    // Only allow POST requests
+    if (req.method !== 'POST') {
+      return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+        status: 405,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Parse request body
+    const { user_id } = await req.json()
+    if (!user_id) {
+      return new Response(JSON.stringify({ error: 'user_id required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Verify the caller's JWT – ensures they can only delete their own account
+    const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing Authorization header' }), { status: 401 });
+      return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
+    const token = authHeader.replace('Bearer ', '')
 
-    // 2. Create Supabase admin client (bypasses RLS)
+    // Create a Supabase client with the service role key (admin)
     const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-      { auth: { persistSession: false } }
-    );
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+      }
+    )
 
-    // 3. Optionally, verify that the request comes from an authenticated user with admin privileges
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    // Verify token and get user
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token)
     if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401 });
-    }
-    // Check if user has admin role (adjust as needed)
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-    if (profile?.role !== 'admin') {
-      return new Response(JSON.stringify({ error: 'Insufficient permissions' }), { status: 403 });
+      return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
-    // 4. Parse request body
-    const { userId }: DeleteUserPayload = await req.json();
-    if (!userId) {
-      return new Response(JSON.stringify({ error: 'userId is required' }), { status: 400 });
+    // Ensure the user is deleting their own account
+    if (user.id !== user_id) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
-    // 5. Delete user from Supabase Auth (this will also trigger cascading deletes if set up)
-    const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    // Delete user's data from all related tables (order matters for foreign keys)
+    // Add/remove tables based on your schema
+    const tables = [
+      'user_preferences',
+      'applications',
+      'jobs',
+      'service_events',
+      'vehicles',
+      'mechanics',
+    ]
+
+    for (const table of tables) {
+      try {
+        if (table === 'user_preferences' || table === 'mechanics' || table === 'jobs') {
+          await supabaseAdmin.from(table).delete().eq('user_id', user_id)
+        } else if (table === 'vehicles') {
+          await supabaseAdmin.from(table).delete().eq('user_id', user_id)
+        } else if (table === 'service_events') {
+          // Delete via vehicles
+          const { data: vehicles } = await supabaseAdmin
+            .from('vehicles')
+            .select('id')
+            .eq('user_id', user_id)
+          if (vehicles) {
+            const vehicleIds = vehicles.map(v => v.id)
+            if (vehicleIds.length > 0) {
+              await supabaseAdmin.from('service_events').delete().in('vehicle_id', vehicleIds)
+            }
+          }
+        } else if (table === 'applications') {
+          // Applications are linked to mechanics, not directly to user
+          const { data: mechanic } = await supabaseAdmin
+            .from('mechanics')
+            .select('id')
+            .eq('user_id', user_id)
+            .maybeSingle()
+          if (mechanic) {
+            await supabaseAdmin.from('applications').delete().eq('mechanic_id', mechanic.id)
+          }
+        }
+      } catch (err) {
+        console.error(`Error deleting from ${table}:`, err)
+        // Continue with next table
+      }
+    }
+
+    // Finally, delete the user from auth
+    const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(user_id)
     if (deleteError) {
-      console.error('Auth deletion error:', deleteError);
-      return new Response(JSON.stringify({ error: 'Failed to delete user from auth' }), { status: 500 });
+      throw new Error(`Failed to delete auth user: ${deleteError.message}`)
     }
 
-    // 6. Delete user from external search index (if applicable)
-    // Example with Algolia:
-    /*
-    const algoliaClient = algoliasearch(
-      Deno.env.get('ALGOLIA_APP_ID')!,
-      Deno.env.get('ALGOLIA_ADMIN_API_KEY')!
-    );
-    const index = algoliaClient.initIndex('users');
-    await index.deleteObject(userId);
-    */
-
-    // 7. Return success response
-    return new Response(
-      JSON.stringify({ message: 'User deleted successfully' }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    );
-  } catch (error) {
-    console.error('Unexpected error:', error);
-    return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500 });
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  } catch (err) {
+    console.error('Delete user error:', err)
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
-});
+})

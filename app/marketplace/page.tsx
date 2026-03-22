@@ -1,5 +1,5 @@
 'use client'
-
+import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 

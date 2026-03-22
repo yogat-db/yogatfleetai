@@ -1,45 +1,81 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts'
 import { supabase } from '@/lib/supabase/client'
-import type { Mechanic, Job, Application } from '@/app/types/marketplace'
+import { format } from 'date-fns'
 
-type Earnings = {
+// Types based on your database schema (update if needed)
+type Mechanic = {
+  id: string
+  user_id: string
+  business_name: string
+  phone: string | null
+  verified: boolean
+  subscription_status: string
+  stripe_account_id: string | null
+  created_at: string
+}
+
+type Application = {
   id: string
   job_id: string
-  amount: number
-  status: 'pending' | 'paid' | 'failed'
+  mechanic_id: string
+  bid_amount: number
+  status: 'pending' | 'accepted' | 'rejected' | 'completed'
   created_at: string
-  job?: Job
+  job?: {
+    title: string
+    budget: number | null
+  }
+}
+
+type Job = {
+  id: string
+  title: string
+  budget: number | null
+  location: string | null
+  status: string
+  created_at: string
+}
+
+type EarningsRecord = {
+  amount: number
+  created_at: string
 }
 
 export default function MechanicDashboardPage() {
   const router = useRouter()
   const [mechanic, setMechanic] = useState<Mechanic | null>(null)
-  const [jobs, setJobs] = useState<Job[]>([])
   const [applications, setApplications] = useState<Application[]>([])
-  const [earnings, setEarnings] = useState<Earnings[]>([])
-  const [totalEarned, setTotalEarned] = useState(0)
+  const [openJobs, setOpenJobs] = useState<Job[]>([])
+  const [earnings, setEarnings] = useState<EarningsRecord[]>([])
   const [loading, setLoading] = useState(true)
-  const [loadingPortal, setLoadingPortal] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [loadingPortal, setLoadingPortal] = useState(false)
 
-  useEffect(() => {
-    fetchMechanicData()
-  }, [])
+  // Separate loading states for sections
+  const [loadingApps, setLoadingApps] = useState(true)
+  const [loadingJobs, setLoadingJobs] = useState(true)
+  const [loadingEarnings, setLoadingEarnings] = useState(true)
 
-  async function fetchMechanicData() {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
+      setError(null)
+
+      // 1. Auth check
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError || !user) {
         router.push('/login')
         return
       }
 
-      // Get mechanic profile
+      // 2. Get mechanic profile
       const { data: mech, error: mechError } = await supabase
         .from('mechanics')
         .select('*')
@@ -47,55 +83,67 @@ export default function MechanicDashboardPage() {
         .single()
 
       if (mechError || !mech) {
+        // No profile, redirect to registration
         router.push('/marketplace/mechanics/register')
         return
       }
       setMechanic(mech)
 
-      // Fetch applications with job details
+      // 3. Fetch applications (with job details)
+      setLoadingApps(true)
       const { data: apps, error: appsError } = await supabase
         .from('applications')
         .select(`
           *,
-          job:jobs (*)
+          job:jobs(title, budget)
         `)
         .eq('mechanic_id', mech.id)
         .order('created_at', { ascending: false })
+        .limit(20)
 
       if (!appsError) setApplications(apps || [])
+      setLoadingApps(false)
 
-      // Fetch open jobs (limit 10)
-      const { data: openJobs, error: jobsError } = await supabase
+      // 4. Fetch open jobs
+      setLoadingJobs(true)
+      const { data: jobs, error: jobsError } = await supabase
         .from('jobs')
         .select('*')
         .eq('status', 'open')
         .order('created_at', { ascending: false })
         .limit(10)
 
-      if (!jobsError) setJobs(openJobs || [])
+      if (!jobsError) setOpenJobs(jobs || [])
+      setLoadingJobs(false)
 
-      // Fetch earnings
+      // 5. Fetch earnings (if earnings table exists)
+      setLoadingEarnings(true)
       const { data: earningsData, error: earningsError } = await supabase
         .from('earnings')
-        .select(`
-          *,
-          job:jobs (*)
-        `)
+        .select('amount, created_at')
         .eq('mechanic_id', mech.id)
-        .order('created_at', { ascending: false })
-        .limit(20)
+        .order('created_at', { ascending: true })
+        .limit(90) // last 90 days
 
       if (!earningsError && earningsData) {
         setEarnings(earningsData)
-        const total = earningsData.reduce((sum, e) => sum + e.amount, 0)
-        setTotalEarned(total)
+      } else {
+        // If no earnings table yet, use empty array (will show empty state)
+        setEarnings([])
       }
+      setLoadingEarnings(false)
+
     } catch (err: any) {
-      setError(err.message)
+      console.error('Dashboard error:', err)
+      setError(err.message || 'Something went wrong')
     } finally {
       setLoading(false)
     }
-  }
+  }, [router])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
 
   const handleManageBilling = async () => {
     setLoadingPortal(true)
@@ -115,41 +163,60 @@ export default function MechanicDashboardPage() {
     router.push('/marketplace/mechanics/subscribe')
   }
 
+  const stats = useMemo(() => ({
+    total: applications.length,
+    pending: applications.filter(a => a.status === 'pending').length,
+    accepted: applications.filter(a => a.status === 'accepted').length,
+    completed: applications.filter(a => a.status === 'completed').length,
+    totalEarned: earnings.reduce((sum, e) => sum + e.amount, 0),
+  }), [applications, earnings])
+
+  // Prepare chart data (last 7 days)
+  const last7Days = useMemo(() => {
+    if (!earnings.length) return []
+    const now = new Date()
+    const days = []
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(now)
+      date.setDate(now.getDate() - i)
+      const dateStr = format(date, 'yyyy-MM-dd')
+      const dayEarnings = earnings
+        .filter(e => format(new Date(e.created_at), 'yyyy-MM-dd') === dateStr)
+        .reduce((sum, e) => sum + e.amount, 0)
+      days.push({ date: format(date, 'MMM dd'), amount: dayEarnings })
+    }
+    return days
+  }, [earnings])
+
   if (loading) {
-    return (
-      <div style={styles.centered}>
-        <div className="spinner" />
-        <p>Loading dashboard...</p>
-      </div>
-    )
+    return <LoadingSkeleton />
   }
 
   if (error) {
     return (
       <div style={styles.centered}>
-        <h2>Error</h2>
+        <h2>Error Loading Dashboard</h2>
         <p>{error}</p>
-        <button onClick={fetchMechanicData} style={styles.retryButton}>Retry</button>
+        <button onClick={fetchData} style={styles.retryButton}>Retry</button>
       </div>
     )
   }
 
   if (!mechanic) return null
 
-  const pendingApplications = applications.filter(a => a.status === 'pending')
-  const acceptedApplications = applications.filter(a => a.status === 'accepted')
-  const completedApplications = applications.filter(a => a.status === 'completed')
-
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
       <h1 style={styles.title}>Mechanic Dashboard</h1>
 
-      {/* Subscription Status */}
+      {/* Subscription & Business Card */}
       <div style={styles.subscriptionCard}>
         <div>
-          <h3 style={styles.subscriptionTitle}>Subscription Status</h3>
+          <div style={styles.businessHeader}>
+            <h2 style={styles.businessName}>{mechanic.business_name}</h2>
+            {mechanic.verified && <span style={styles.verifiedBadge}>✓ Verified</span>}
+          </div>
           <p style={styles.subscriptionStatus}>
-            <strong>Status:</strong>{' '}
+            <strong>Subscription:</strong>{' '}
             <span style={{
               color: mechanic.subscription_status === 'active' ? '#22c55e' : '#ef4444',
               fontWeight: 600,
@@ -159,11 +226,7 @@ export default function MechanicDashboardPage() {
           </p>
         </div>
         {mechanic.subscription_status === 'active' ? (
-          <button
-            onClick={handleManageBilling}
-            disabled={loadingPortal}
-            style={styles.portalButton}
-          >
+          <button onClick={handleManageBilling} disabled={loadingPortal} style={styles.portalButton}>
             {loadingPortal ? 'Loading...' : 'Manage Billing'}
           </button>
         ) : (
@@ -177,47 +240,51 @@ export default function MechanicDashboardPage() {
       <div style={styles.statsGrid}>
         <div style={styles.statCard}>
           <span style={styles.statLabel}>Total Applications</span>
-          <span style={styles.statValue}>{applications.length}</span>
+          <span style={styles.statValue}>{stats.total}</span>
         </div>
-        <div style={styles.statCard}>
+        <div style={{ ...styles.statCard, borderTopColor: '#f59e0b' }}>
           <span style={styles.statLabel}>Pending</span>
-          <span style={styles.statValue}>{pendingApplications.length}</span>
+          <span style={{ ...styles.statValue, color: '#f59e0b' }}>{stats.pending}</span>
         </div>
-        <div style={styles.statCard}>
+        <div style={{ ...styles.statCard, borderTopColor: '#22c55e' }}>
           <span style={styles.statLabel}>Accepted</span>
-          <span style={styles.statValue}>{acceptedApplications.length}</span>
+          <span style={{ ...styles.statValue, color: '#22c55e' }}>{stats.accepted}</span>
         </div>
-        <div style={styles.statCard}>
+        <div style={{ ...styles.statCard, borderTopColor: '#64748b' }}>
           <span style={styles.statLabel}>Completed</span>
-          <span style={styles.statValue}>{completedApplications.length}</span>
+          <span style={{ ...styles.statValue, color: '#64748b' }}>{stats.completed}</span>
         </div>
       </div>
 
-      {/* Earnings Summary */}
+      {/* Earnings Chart */}
       <div style={styles.earningsCard}>
-        <h3 style={styles.earningsTitle}>Earnings</h3>
-        <p style={styles.totalEarned}>Total Earned: £{(totalEarned / 100).toFixed(2)}</p>
-        {earnings.length > 0 ? (
-          <div style={styles.earningsList}>
-            {earnings.map(e => (
-              <div key={e.id} style={styles.earningItem}>
-                <span>{e.job?.title || 'Job'}</span>
-                <span>£{(e.amount / 100).toFixed(2)}</span>
-                <span style={{ color: e.status === 'paid' ? '#22c55e' : '#f59e0b' }}>
-                  {e.status}
-                </span>
-              </div>
-            ))}
-          </div>
+        <h3 style={styles.earningsTitle}>Earnings (last 7 days)</h3>
+        <p style={styles.totalEarned}>Total: £{stats.totalEarned.toFixed(2)}</p>
+        {loadingEarnings ? (
+          <div style={styles.loadingChart}>Loading earnings data...</div>
+        ) : earnings.length === 0 ? (
+          <p style={styles.emptyText}>No earnings records yet.</p>
         ) : (
-          <p style={styles.emptyEarnings}>No earnings yet.</p>
+          <div style={styles.chartContainer}>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={last7Days}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="date" stroke="#94a3b8" />
+                <YAxis stroke="#94a3b8" />
+                <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
+                <Line type="monotone" dataKey="amount" stroke="#22c55e" name="Earnings (£)" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         )}
       </div>
 
       {/* Recent Applications */}
       <div style={styles.section}>
         <h2 style={styles.sectionTitle}>Recent Applications</h2>
-        {applications.length === 0 ? (
+        {loadingApps ? (
+          <TableSkeleton rows={3} />
+        ) : applications.length === 0 ? (
           <p style={styles.emptyText}>You haven't applied to any jobs yet.</p>
         ) : (
           <div style={styles.tableWrapper}>
@@ -229,8 +296,7 @@ export default function MechanicDashboardPage() {
                   <th>Status</th>
                   <th>Applied</th>
                   <th>Action</th>
-                </tr>
-              </thead>
+                </thead>
               <tbody>
                 {applications.slice(0, 5).map(app => (
                   <tr key={app.id}>
@@ -239,7 +305,7 @@ export default function MechanicDashboardPage() {
                     <td>
                       <span style={{
                         ...styles.statusBadge,
-                        backgroundColor: 
+                        backgroundColor:
                           app.status === 'accepted' ? '#22c55e20' :
                           app.status === 'pending' ? '#f59e0b20' : '#64748b20',
                         color:
@@ -255,7 +321,7 @@ export default function MechanicDashboardPage() {
                         onClick={() => router.push(`/marketplace/jobs/${app.job_id}`)}
                         style={styles.viewButton}
                       >
-                        View Job
+                        View
                       </button>
                     </td>
                   </tr>
@@ -269,7 +335,9 @@ export default function MechanicDashboardPage() {
       {/* Open Jobs Near You */}
       <div style={styles.section}>
         <h2 style={styles.sectionTitle}>Open Jobs Near You</h2>
-        {jobs.length === 0 ? (
+        {loadingJobs ? (
+          <TableSkeleton rows={3} />
+        ) : openJobs.length === 0 ? (
           <p style={styles.emptyText}>No open jobs available.</p>
         ) : (
           <div style={styles.tableWrapper}>
@@ -281,10 +349,9 @@ export default function MechanicDashboardPage() {
                   <th>Location</th>
                   <th>Posted</th>
                   <th>Action</th>
-                </tr>
-              </thead>
+                </thead>
               <tbody>
-                {jobs.slice(0, 5).map(job => (
+                {openJobs.map(job => (
                   <tr key={job.id}>
                     <td>{job.title}</td>
                     <td>£{job.budget}</td>
@@ -295,7 +362,7 @@ export default function MechanicDashboardPage() {
                         onClick={() => router.push(`/marketplace/jobs/${job.id}`)}
                         style={styles.viewButton}
                       >
-                        View
+                        Apply
                       </button>
                     </td>
                   </tr>
@@ -323,176 +390,65 @@ export default function MechanicDashboardPage() {
   )
 }
 
+// Loading skeleton component
+function LoadingSkeleton() {
+  return (
+    <div style={styles.centered}>
+      <div className="spinner" />
+      <p>Loading dashboard...</p>
+    </div>
+  )
+}
+
+function TableSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div style={styles.tableWrapper}>
+      <table style={styles.table}>
+        <thead>
+          <tr>
+            <th colSpan={5}>Loading...</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Array(rows).fill(0).map((_, i) => (
+            <tr key={i}>
+              <td colSpan={5} style={{ textAlign: 'center', padding: '16px' }}>
+                <div style={{ height: '20px', background: '#1e293b', borderRadius: '4px', width: '80%', margin: '0 auto' }} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    padding: '40px',
-    background: '#020617',
-    minHeight: '100vh',
-    color: '#f1f5f9',
-    fontFamily: 'Inter, sans-serif',
-  },
-  centered: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#94a3b8',
-  },
-  title: {
-    fontSize: '32px',
-    fontWeight: 700,
-    background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    marginBottom: '24px',
-  },
-  subscriptionCard: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '16px',
-    padding: '20px',
-    marginBottom: '24px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: '16px',
-  },
-  subscriptionTitle: {
-    fontSize: '16px',
-    fontWeight: 600,
-    color: '#94a3b8',
-    marginBottom: '4px',
-  },
-  subscriptionStatus: {
-    fontSize: '14px',
-    color: '#f1f5f9',
-  },
-  portalButton: {
-    background: '#3b82f6',
-    color: '#fff',
-    border: 'none',
-    padding: '10px 20px',
-    borderRadius: '8px',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  subscribeButton: {
-    background: '#22c55e',
-    color: '#020617',
-    border: 'none',
-    padding: '10px 20px',
-    borderRadius: '8px',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  statsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: '20px',
-    marginBottom: '32px',
-  },
-  statCard: {
-    background: '#0f172a',
-    padding: '20px',
-    borderRadius: '12px',
-    border: '1px solid #1e293b',
-  },
-  statLabel: {
-    fontSize: '14px',
-    color: '#64748b',
-    display: 'block',
-  },
-  statValue: {
-    fontSize: '28px',
-    fontWeight: 700,
-    marginTop: '4px',
-  },
-  earningsCard: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '16px',
-    padding: '20px',
-    marginBottom: '24px',
-  },
-  earningsTitle: {
-    fontSize: '18px',
-    fontWeight: 600,
-    color: '#94a3b8',
-    marginBottom: '12px',
-  },
-  totalEarned: {
-    fontSize: '24px',
-    fontWeight: 700,
-    color: '#22c55e',
-    marginBottom: '16px',
-  },
-  earningsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  earningItem: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    padding: '8px 0',
-    borderBottom: '1px solid #1e293b',
-    fontSize: '14px',
-  },
-  emptyEarnings: {
-    color: '#64748b',
-    textAlign: 'center',
-    padding: '20px',
-  },
-  section: {
-    marginBottom: '32px',
-  },
-  sectionTitle: {
-    fontSize: '20px',
-    fontWeight: 600,
-    color: '#94a3b8',
-    marginBottom: '16px',
-  },
-  tableWrapper: {
-    background: '#0f172a',
-    borderRadius: '12px',
-    border: '1px solid #1e293b',
-    overflow: 'auto',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '14px',
-  },
-  statusBadge: {
-    padding: '4px 8px',
-    borderRadius: '12px',
-    fontSize: '12px',
-    fontWeight: 500,
-    textTransform: 'capitalize',
-  },
-  viewButton: {
-    background: 'transparent',
-    border: '1px solid #334155',
-    color: '#94a3b8',
-    padding: '4px 8px',
-    borderRadius: '4px',
-    fontSize: '12px',
-    cursor: 'pointer',
-  },
-  emptyText: {
-    color: '#64748b',
-    textAlign: 'center',
-    padding: '40px',
-  },
-  retryButton: {
-    marginTop: '16px',
-    padding: '8px 16px',
-    background: '#22c55e',
-    border: 'none',
-    borderRadius: '4px',
-    color: '#020617',
-    cursor: 'pointer',
-  },
+  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9', fontFamily: 'Inter, sans-serif' },
+  centered: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' },
+  title: { fontSize: 32, fontWeight: 700, marginBottom: 24, background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  subscriptionCard: { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16, padding: 24, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 },
+  businessHeader: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 },
+  businessName: { fontSize: 20, fontWeight: 700, margin: 0 },
+  verifiedBadge: { background: '#22c55e20', color: '#22c55e', padding: '4px 10px', borderRadius: 30, fontSize: 12, fontWeight: 600 },
+  subscriptionStatus: { fontSize: 14, color: '#94a3b8', margin: 0 },
+  portalButton: { background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' },
+  subscribeButton: { background: '#22c55e', color: '#020617', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' },
+  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 32 },
+  statCard: { background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #1e293b', borderTop: '3px solid transparent' },
+  statLabel: { fontSize: 14, color: '#64748b', display: 'block' },
+  statValue: { fontSize: 28, fontWeight: 700, marginTop: 4 },
+  earningsCard: { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16, padding: 20, marginBottom: 24 },
+  earningsTitle: { fontSize: 18, fontWeight: 600, color: '#94a3b8', marginBottom: 8 },
+  totalEarned: { fontSize: 24, fontWeight: 700, color: '#22c55e', marginBottom: 16 },
+  chartContainer: { height: 200, width: '100%' },
+  loadingChart: { height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' },
+  section: { marginBottom: 32 },
+  sectionTitle: { fontSize: 20, fontWeight: 600, color: '#94a3b8', marginBottom: 16 },
+  tableWrapper: { background: '#0f172a', borderRadius: 12, border: '1px solid #1e293b', overflow: 'auto' },
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: 14 },
+  statusBadge: { padding: '4px 8px', borderRadius: 12, fontSize: 12, fontWeight: 500, textTransform: 'capitalize', display: 'inline-block' },
+  viewButton: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '4px 8px', borderRadius: 4, fontSize: 12, cursor: 'pointer' },
+  emptyText: { color: '#64748b', textAlign: 'center', padding: 40 },
+  retryButton: { marginTop: 16, padding: '8px 16px', background: '#22c55e', border: 'none', borderRadius: 4, color: '#020617', cursor: 'pointer' },
 }

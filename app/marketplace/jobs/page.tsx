@@ -1,167 +1,275 @@
-'use client'
+'use client';
 
-import { useEffect, useState, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { Search, MapPin, DollarSign, Clock } from 'lucide-react'
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabase/client';
+import VehiclePicker from '@/components/VehiclePicker';
 
-type Job = {
-  id: string
-  title: string
-  description: string | null
-  budget: number | null
-  location: string | null
-  status: string
-  created_at: string
-  vehicle?: {
-    make: string | null
-    model: string | null
-    license_plate: string
-  }
-  user?: {
-    email: string
-  }
-}
+const JOB_TITLES = [
+  'Oil change',
+  'Brake pad replacement',
+  'Engine diagnostic',
+  'Tire replacement',
+  'Battery replacement',
+  'AC recharge',
+  'Timing belt replacement',
+  'Wheel alignment',
+  'Transmission repair',
+  'Exhaust repair',
+  'Clutch replacement',
+  'Head gasket repair',
+  'Coolant flush',
+  'Spark plug replacement',
+  'Fuel injector cleaning',
+  'Suspension repair',
+  'Alternator replacement',
+  'Starter motor replacement',
+  'Radiator replacement',
+  'Catalytic converter replacement',
+];
 
-export default function JobsPage() {
-  const router = useRouter()
-  const [jobs, setJobs] = useState<Job[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [searchTerm, setSearchTerm] = useState('')
+export default function PostJobPage() {
+  const router = useRouter();
+  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [selectedVehicle, setSelectedVehicle] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
+  const [customTitle, setCustomTitle] = useState('');
+  const [useCustomTitle, setUseCustomTitle] = useState(false);
+  const [description, setDescription] = useState('');
+  const [budget, setBudget] = useState('');
+  const [location, setLocation] = useState('');
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
+  const [detectingLocation, setDetectingLocation] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    fetchJobs()
-  }, [])
+    fetchVehicles();
+  }, []);
 
-  async function fetchJobs() {
+  async function fetchVehicles() {
     try {
-      setLoading(true)
-      const res = await fetch('/api/marketplace/jobs')
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Failed to load jobs')
-      }
-      const data = await res.json()
-      // Ensure data is an array
-      setJobs(Array.isArray(data) ? data : [])
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+      const { data, error } = await supabase
+        .from('vehicles')
+        .select('id, license_plate, make, model, year')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setVehicles(data || []);
+      if (data && data.length > 0) setSelectedVehicle(data[0].id);
+    } catch (err) {
+      console.error('Failed to fetch vehicles');
     }
   }
 
-  const filteredJobs = useMemo(() => {
-    if (!searchTerm) return jobs
-    const term = searchTerm.toLowerCase()
-    return jobs.filter(job =>
-      job.title.toLowerCase().includes(term) ||
-      job.description?.toLowerCase().includes(term) ||
-      job.location?.toLowerCase().includes(term) ||
-      job.vehicle?.license_plate.toLowerCase().includes(term)
-    )
-  }, [jobs, searchTerm])
+  // Reverse geocode using Mapbox
+  const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+    const accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    if (!accessToken) throw new Error('Mapbox token missing');
 
-  if (error) {
-    return (
-      <div style={styles.errorContainer}>
-        <h2>Error loading jobs</h2>
-        <p>{error}</p>
-        <button onClick={fetchJobs} style={styles.retryButton}>Retry</button>
-      </div>
-    )
-  }
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${accessToken}&types=address,place,postcode,locality,neighborhood&limit=1`;
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Geocoding failed');
+    const data = await res.json();
+    if (data.features && data.features.length > 0) {
+      return data.features[0].place_name;
+    }
+    throw new Error('No address found');
+  };
+
+  const detectLocation = () => {
+    setDetectingLocation(true);
+    if (!navigator.geolocation) {
+      setError('Geolocation not supported');
+      setDetectingLocation(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setLat(latitude);
+        setLng(longitude);
+
+        try {
+          const address = await reverseGeocode(latitude, longitude);
+          setLocation(address);
+        } catch (err) {
+          console.error('Reverse geocoding error:', err);
+          setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+          setError('Could not get full address – using coordinates.');
+        } finally {
+          setDetectingLocation(false);
+        }
+      },
+      (err) => {
+        setError('Unable to detect location: ' + err.message);
+        setDetectingLocation(false);
+      }
+    );
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    const finalTitle = useCustomTitle ? customTitle : jobTitle;
+    if (!finalTitle.trim()) {
+      setError('Job title is required');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // 1. Get the session and token
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session?.access_token) {
+        throw new Error('You must be logged in to post a job');
+      }
+      const token = session.access_token;
+
+      // 2. Build payload
+      const payload = {
+        vehicle_id: selectedVehicle || null,
+        title: finalTitle,
+        description,
+        budget: budget ? parseInt(budget) : null,
+        location: location || null,
+        lat,
+        lng,
+      };
+
+      // 3. Send request with Authorization header
+      const res = await fetch('/api/marketplace/jobs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to post job');
+
+      setSuccess(true);
+      setTimeout(() => router.push('/marketplace'), 2000);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      style={styles.page}
-    >
-      <div style={styles.header}>
-        <h1 style={styles.title}>Repair Jobs</h1>
-        <button
-          onClick={() => router.push('/marketplace/jobs/post')}
-          style={styles.postButton}
-        >
-          + Post a Job
-        </button>
-      </div>
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={styles.page}>
+      <button onClick={() => router.back()} style={styles.backButton}>
+        ← Back
+      </button>
 
-      {/* Search */}
-      <div style={styles.searchWrapper}>
-        <Search size={18} color="#64748b" style={styles.searchIcon} />
-        <input
-          type="text"
-          placeholder="Search jobs, vehicles, locations..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          style={styles.searchInput}
-        />
-      </div>
+      <h1 style={styles.title}>Post a Repair Job</h1>
 
-      {/* Job Grid */}
-      {loading ? (
-        <div style={styles.loadingGrid}>
-          {[...Array(6)].map((_, i) => <div key={i} style={styles.skeletonCard} />)}
+      <form onSubmit={handleSubmit} style={styles.form}>
+        {/* Vehicle Selection */}
+        <div style={styles.field}>
+          <label style={styles.label}>Vehicle *</label>
+          <VehiclePicker vehicles={vehicles} activeId={selectedVehicle} onChange={setSelectedVehicle} />
         </div>
-      ) : filteredJobs.length === 0 ? (
-        <div style={styles.emptyState}>
-          <p>No jobs found</p>
-          {jobs.length === 0 ? (
-            <button onClick={() => router.push('/marketplace/jobs/post')} style={styles.emptyButton}>
-              Post the first job
-            </button>
+
+        {/* Job Title */}
+        <div style={styles.field}>
+          <label style={styles.label}>Job Title *</label>
+          <div style={styles.radioGroup}>
+            <label style={styles.radioLabel}>
+              <input type="radio" checked={!useCustomTitle} onChange={() => setUseCustomTitle(false)} /> Select from list
+            </label>
+            <label style={styles.radioLabel}>
+              <input type="radio" checked={useCustomTitle} onChange={() => setUseCustomTitle(true)} /> Enter custom title
+            </label>
+          </div>
+
+          {!useCustomTitle ? (
+            <select value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} style={styles.select} required>
+              <option value="" disabled>Choose a job type</option>
+              {JOB_TITLES.map((title) => (
+                <option key={title} value={title}>{title}</option>
+              ))}
+            </select>
           ) : (
-            <p>Try adjusting your search</p>
+            <input
+              type="text"
+              value={customTitle}
+              onChange={(e) => setCustomTitle(e.target.value)}
+              placeholder="e.g., Gearbox overhaul"
+              style={styles.input}
+              required
+            />
           )}
         </div>
-      ) : (
-        <div style={styles.grid}>
-          {filteredJobs.map((job) => (
-            <motion.div
-              key={job.id}
-              whileHover={{ scale: 1.02 }}
-              style={styles.jobCard}
-              onClick={() => router.push(`/marketplace/jobs/£{job.id}`)}
-            >
-              <div style={styles.jobHeader}>
-                <h3 style={styles.jobTitle}>{job.title}</h3>
-                <span style={styles.jobStatus}>{job.status}</span>
-              </div>
 
-              {job.description && (
-                <p style={styles.jobDescription}>{job.description}</p>
-              )}
-
-              <div style={styles.jobMeta}>
-                {job.budget && (
-                  <span style={styles.metaItem}>
-                    <DollarSign size={14} /> £{job.budget}
-                  </span>
-                )}
-                {job.location && (
-                  <span style={styles.metaItem}>
-                    <MapPin size={14} /> {job.location}
-                  </span>
-                )}
-                <span style={styles.metaItem}>
-                  <Clock size={14} /> {new Date(job.created_at).toLocaleDateString()}
-                </span>
-              </div>
-
-              {job.vehicle && (
-                <div style={styles.vehicleInfo}>
-                  {job.vehicle.license_plate} – {job.vehicle.make} {job.vehicle.model}
-                </div>
-              )}
-            </motion.div>
-          ))}
+        {/* Description */}
+        <div style={styles.field}>
+          <label style={styles.label}>Description</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the issue in detail..."
+            rows={4}
+            style={{ ...styles.input, resize: 'vertical' }}
+          />
         </div>
-      )}
+
+        {/* Budget */}
+        <div style={styles.field}>
+          <label style={styles.label}>Budget (£) – optional</label>
+          <input
+            type="number"
+            value={budget}
+            onChange={(e) => setBudget(e.target.value)}
+            placeholder="e.g., 200"
+            style={styles.input}
+          />
+        </div>
+
+        {/* Location */}
+        <div style={styles.field}>
+          <label style={styles.label}>Location</label>
+          <div style={styles.locationRow}>
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="Enter your location or detect automatically"
+              style={{ ...styles.input, flex: 1 }}
+            />
+            <button type="button" onClick={detectLocation} disabled={detectingLocation} style={styles.detectButton}>
+              {detectingLocation ? 'Detecting...' : '📍 Detect'}
+            </button>
+          </div>
+          {lat && lng && (
+            <p style={styles.coords}>📍 Coordinates: {lat.toFixed(6)}, {lng.toFixed(6)}</p>
+          )}
+        </div>
+
+        {/* Error / Success */}
+        {error && <div style={styles.errorBox}>{error}</div>}
+        {success && (
+          <div style={styles.successBox}>
+            ✓ Job posted successfully! Redirecting...
+          </div>
+        )}
+
+        <button type="submit" disabled={loading || success} style={styles.submitButton}>
+          {loading ? 'Posting...' : 'Post Job'}
+        </button>
+      </form>
     </motion.div>
-  )
+  );
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -172,150 +280,86 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#f1f5f9',
     fontFamily: 'Inter, sans-serif',
   },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 30,
+  backButton: {
+    background: 'transparent',
+    border: '1px solid #334155',
+    color: '#f1f5f9',
+    padding: '8px 16px',
+    borderRadius: '8px',
+    marginBottom: '24px',
+    cursor: 'pointer',
   },
   title: {
-    fontSize: 32,
+    fontSize: '32px',
     fontWeight: 700,
+    marginBottom: '32px',
     background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
-    margin: 0,
   },
-  postButton: {
-    background: '#22c55e',
-    color: '#020617',
-    border: 'none',
-    padding: '10px 20px',
-    borderRadius: 30,
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  searchWrapper: {
-    position: 'relative',
-    marginBottom: 30,
-  },
-  searchIcon: {
-    position: 'absolute',
-    left: 12,
-    top: '50%',
-    transform: 'translateY(-50%)',
-  },
-  searchInput: {
+  form: { maxWidth: '600px' },
+  field: { marginBottom: '24px' },
+  label: { display: 'block', fontSize: '14px', fontWeight: 500, color: '#94a3b8', marginBottom: '8px' },
+  input: {
     width: '100%',
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: 30,
-    padding: '12px 16px 12px 40px',
+    background: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: '8px',
+    padding: '12px',
     color: '#f1f5f9',
-    fontSize: 14,
+    fontSize: '16px',
     outline: 'none',
   },
-  loadingGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: 20,
+  select: {
+    width: '100%',
+    background: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: '8px',
+    padding: '12px',
+    color: '#f1f5f9',
+    fontSize: '16px',
   },
-  skeletonCard: {
-    height: 220,
-    background: '#0f172a',
-    borderRadius: 16,
-    border: '1px solid #1e293b',
-    animation: 'pulse 2s infinite',
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '60px 20px',
-    color: '#64748b',
-  },
-  emptyButton: {
-    marginTop: 16,
-    background: '#22c55e',
-    color: '#020617',
+  radioGroup: { display: 'flex', gap: '20px', marginBottom: '12px' },
+  radioLabel: { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '14px', color: '#94a3b8' },
+  locationRow: { display: 'flex', gap: '8px' },
+  detectButton: {
+    background: '#334155',
     border: 'none',
-    padding: '10px 20px',
-    borderRadius: 30,
-    fontSize: 14,
+    borderRadius: '8px',
+    padding: '0 20px',
+    color: '#f1f5f9',
     fontWeight: 600,
     cursor: 'pointer',
+    whiteSpace: 'nowrap',
   },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: 20,
-  },
-  jobCard: {
-    background: '#0f172a',
-    borderRadius: 16,
-    padding: 20,
-    border: '1px solid #1e293b',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  jobHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  jobTitle: {
-    fontSize: 18,
-    fontWeight: 600,
-  },
-  jobStatus: {
-    fontSize: 12,
-    padding: '4px 8px',
-    borderRadius: 20,
-    background: '#22c55e20',
-    color: '#22c55e',
-    textTransform: 'capitalize',
-  },
-  jobDescription: {
-    fontSize: 14,
-    color: '#94a3b8',
-    marginBottom: 16,
-    lineHeight: 1.5,
-  },
-  jobMeta: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 12,
-  },
-  metaItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 4,
-    fontSize: 13,
-    color: '#94a3b8',
-  },
-  vehicleInfo: {
-    fontSize: 13,
-    color: '#64748b',
-    borderTop: '1px solid #1e293b',
-    paddingTop: 12,
-  },
-  errorContainer: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
+  coords: { fontSize: '12px', color: '#22c55e', marginTop: '4px' },
+  errorBox: {
+    marginTop: '16px',
+    padding: '12px',
+    background: 'rgba(239,68,68,0.1)',
+    border: '1px solid #ef4444',
+    borderRadius: '8px',
     color: '#ef4444',
   },
-  retryButton: {
-    marginTop: 16,
-    padding: '10px 24px',
+  successBox: {
+    marginTop: '16px',
+    padding: '12px',
+    background: 'rgba(34,197,94,0.1)',
+    border: '1px solid #22c55e',
+    borderRadius: '8px',
+    color: '#22c55e',
+    textAlign: 'center',
+  },
+  submitButton: {
+    width: '100%',
     background: '#22c55e',
     border: 'none',
-    borderRadius: 8,
+    borderRadius: '8px',
+    padding: '14px',
     color: '#020617',
-    fontWeight: 'bold',
+    fontSize: '16px',
+    fontWeight: 600,
     cursor: 'pointer',
+    marginTop: '16px',
   },
-}
+};

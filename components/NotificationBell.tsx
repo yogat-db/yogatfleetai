@@ -1,220 +1,175 @@
-'use client'
+// components/NotificationBell.tsx
+'use client';
 
-import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Bell, CheckCheck } from 'lucide-react'
-import { useNotifications } from '@/hooks/useNotifications'
-import { formatDistanceToNow } from 'date-fns'
+import { useState, useEffect, useRef } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { BellIcon } from '@heroicons/react/24/outline';
 
-export default function NotificationBell() {
-  const router = useRouter()
-  const [isOpen, setIsOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const { notifications, unreadCount, markAsRead, markAllAsRead, loading } = useNotifications()
+interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  read: boolean;
+  created_at: string;
+  link?: string;
+}
 
-  // Close dropdown when clicking outside
+interface NotificationBellProps {
+  userId: string;
+}
+
+export default function NotificationBell({ userId }: NotificationBellProps) {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isOpen, setIsOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const supabase = createClient();
+
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+    const fetchNotifications = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(20);
 
-  const handleNotificationClick = async (notification: any) => {
-    if (!notification.read) {
-      await markAsRead(notification.id)
+        if (error) throw error;
+        setNotifications(data || []);
+        setUnreadCount(data?.filter((n) => !n.read).length || 0);
+      } catch (err) {
+        console.error('Failed to fetch notifications:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchNotifications();
+
+    // Subscribe to new notifications
+    const channel = supabase
+      .channel(`notifications:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const newNotif = payload.new as Notification;
+          setNotifications((prev) => [newNotif, ...prev]);
+          setUnreadCount((prev) => prev + 1);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId, supabase]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const markAsRead = async (notificationId: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('id', notificationId);
+
+      if (error) throw error;
+
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
+      );
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+    } catch (err) {
+      console.error('Failed to mark notification as read:', err);
     }
-    // Navigate based on notification data (if job_id present)
-    if (notification.data?.job_id) {
-      router.push(`/marketplace/jobs/${notification.data.job_id}`)
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('user_id', userId)
+        .eq('read', false);
+
+      if (error) throw error;
+
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setUnreadCount(0);
+    } catch (err) {
+      console.error('Failed to mark all as read:', err);
     }
-    setIsOpen(false)
-  }
+  };
 
   return (
-    <div ref={menuRef} style={styles.container}>
-      <button onClick={() => setIsOpen(!isOpen)} style={styles.bellButton}>
-        <Bell size={20} color="#94a3b8" />
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="relative p-2 rounded-full hover:bg-gray-100 focus:outline-none"
+      >
+        <BellIcon className="h-6 w-6" />
         {unreadCount > 0 && (
-          <span style={styles.badge}>{unreadCount > 9 ? '9+' : unreadCount}</span>
+          <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-red-500 rounded-full">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
         )}
       </button>
 
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
-            style={styles.dropdown}
-          >
-            <div style={styles.dropdownHeader}>
-              <h3 style={styles.dropdownTitle}>Notifications</h3>
-              {unreadCount > 0 && (
-                <button onClick={markAllAsRead} style={styles.markAllButton}>
-                  <CheckCheck size={16} />
-                  Mark all read
-                </button>
-              )}
-            </div>
-
-            <div style={styles.notificationList}>
-              {loading ? (
-                <div style={styles.loading}>Loading...</div>
-              ) : notifications.length === 0 ? (
-                <div style={styles.empty}>No notifications</div>
-              ) : (
-                notifications.map((notif) => (
-                  <motion.div
-                    key={notif.id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    style={{
-                      ...styles.notificationItem,
-                      backgroundColor: notif.read ? 'transparent' : 'rgba(34,197,94,0.05)',
-                    }}
-                    onClick={() => handleNotificationClick(notif)}
-                  >
-                    <div style={styles.notificationContent}>
-                      <strong style={styles.notificationTitle}>{notif.title}</strong>
-                      <p style={styles.notificationMessage}>{notif.message}</p>
-                      <span style={styles.notificationTime}>
-                        {formatDistanceToNow(new Date(notif.created_at), { addSuffix: true })}
-                      </span>
-                    </div>
-                    {!notif.read && <span style={styles.unreadDot} />}
-                  </motion.div>
-                ))
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {isOpen && (
+        <div className="absolute right-0 mt-2 w-80 bg-white rounded-md shadow-lg z-10 border">
+          <div className="p-3 border-b flex justify-between items-center">
+            <h3 className="font-semibold">Notifications</h3>
+            {unreadCount > 0 && (
+              <button
+                onClick={markAllAsRead}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Mark all as read
+              </button>
+            )}
+          </div>
+          <div className="max-h-96 overflow-y-auto">
+            {loading ? (
+              <div className="p-4 text-center text-gray-500">Loading...</div>
+            ) : notifications.length === 0 ? (
+              <div className="p-4 text-center text-gray-500">No notifications</div>
+            ) : (
+              notifications.map((notif) => (
+                <div
+                  key={notif.id}
+                  className={`p-3 border-b hover:bg-gray-50 cursor-pointer ${
+                    !notif.read ? 'bg-blue-50' : ''
+                  }`}
+                  onClick={() => markAsRead(notif.id)}
+                >
+                  <div className="font-medium text-sm">{notif.title}</div>
+                  <div className="text-xs text-gray-600 mt-1">{notif.message}</div>
+                  <div className="text-xs text-gray-400 mt-1">
+                    {new Date(notif.created_at).toLocaleString()}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
-  )
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    position: 'relative',
-    display: 'inline-block',
-  },
-  bellButton: {
-    position: 'relative',
-    background: 'transparent',
-    border: 'none',
-    padding: '8px',
-    cursor: 'pointer',
-    borderRadius: '50%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badge: {
-    position: 'absolute',
-    top: '0',
-    right: '0',
-    background: '#ef4444',
-    color: '#fff',
-    fontSize: '10px',
-    fontWeight: 600,
-    minWidth: '16px',
-    height: '16px',
-    borderRadius: '8px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '0 4px',
-  },
-  dropdown: {
-    position: 'absolute',
-    top: 'calc(100% + 8px)',
-    right: '0',
-    width: '350px',
-    maxWidth: '90vw',
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '12px',
-    boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
-    zIndex: 1000,
-    overflow: 'hidden',
-  },
-  dropdownHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '12px 16px',
-    borderBottom: '1px solid #1e293b',
-  },
-  dropdownTitle: {
-    fontSize: '16px',
-    fontWeight: 600,
-    color: '#f1f5f9',
-    margin: 0,
-  },
-  markAllButton: {
-    background: 'transparent',
-    border: 'none',
-    color: '#22c55e',
-    fontSize: '12px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-  },
-  notificationList: {
-    maxHeight: '400px',
-    overflowY: 'auto',
-  },
-  notificationItem: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '12px',
-    padding: '12px 16px',
-    cursor: 'pointer',
-    borderBottom: '1px solid #1e293b',
-    transition: 'background 0.2s',
-  },
-  notificationContent: {
-    flex: 1,
-  },
-  notificationTitle: {
-    display: 'block',
-    fontSize: '14px',
-    fontWeight: 600,
-    color: '#f1f5f9',
-    marginBottom: '4px',
-  },
-  notificationMessage: {
-    fontSize: '13px',
-    color: '#94a3b8',
-    marginBottom: '4px',
-    lineHeight: 1.4,
-  },
-  notificationTime: {
-    fontSize: '11px',
-    color: '#64748b',
-  },
-  unreadDot: {
-    width: '8px',
-    height: '8px',
-    background: '#22c55e',
-    borderRadius: '50%',
-    marginTop: '4px',
-  },
-  loading: {
-    padding: '20px',
-    textAlign: 'center',
-    color: '#94a3b8',
-  },
-  empty: {
-    padding: '20px',
-    textAlign: 'center',
-    color: '#64748b',
-  },
+  );
 }

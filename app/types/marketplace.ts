@@ -1,66 +1,103 @@
-import type { Vehicle } from './fleet'
-import type { User } from '@supabase/supabase-js'
+// app/types/marketplace.ts
 
-export interface Mechanic {
-  id: string
-  user_id: string
-  business_name: string
-  phone: string | null
-  address: string | null
-  lat: number | null
-  lng: number | null
-  service_radius: number | null
-  verified: boolean
-  subscription_status: 'inactive' | 'active' | 'past_due'
-  stripe_account_id: string | null
-  created_at: string
+export type JobStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
+export type ApplicationStatus = 'pending' | 'accepted' | 'rejected';
+export type UserRole = 'client' | 'freelancer' | 'admin';
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  avatar?: string;
+  createdAt: string;
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  email?: string;
+  website?: string;
+  logo?: string;
+  createdAt: string;
 }
 
 export interface Job {
-  id: string
-  user_id: string
-  vehicle_id: string | null
-  title: string
-  description: string | null
-  dtc_codes: string[] | null
-  complexity: 'DIY' | 'mechanic' | null
-  status: 'open' | 'assigned' | 'completed' | 'cancelled'
-  location: string | null
-  lat: number | null
-  lng: number | null
-  budget: number | null
-  created_at: string
-  vehicle?: Vehicle
-  user?: User
+  id: string;
+  title: string;
+  description: string;
+  budget?: number;
+  category?: string;
+  status: JobStatus;
+  client_id: string;
+  company_id?: string;
+  created_at: string;
+  updated_at?: string;
+  completed_at?: string;
+  client_feedback?: string;
+  // Relations (optional)
+  client?: User;
+  company?: Company;
+  applications?: Application[];
 }
 
 export interface Application {
-  id: string
-  job_id: string
-  mechanic_id: string
-  bid_amount: number | null
-  message: string | null
-  status: 'pending' | 'accepted' | 'rejected' | 'completed'
-  created_at: string
-  mechanic?: Mechanic
-  job?: Job
+  id: string;
+  job_id: string;
+  user_id: string;
+  cover_letter?: string;
+  resume_url?: string;
+  status: ApplicationStatus;
+  applied_at: string;
+  notes?: string;
+  // Relations
+  job?: Job;
+  user?: User;
 }
 
-export interface Job {
-  id: string
-  user_id: string
-  vehicle_id: string | null
-  title: string
-  description: string | null
-  dtc_codes: string[] | null
-  complexity: 'DIY' | 'mechanic' | null
-  status: 'open' | 'assigned' | 'completed' | 'cancelled'
-  location: string | null
-  lat: number | null
-  lng: number | null
-  budget: number | null
-  assigned_mechanic_id: string | null   // <-- add this
-  created_at: string
-  vehicle?: Vehicle
-  user?: User
+export interface CreateJobPayload {
+  title: string;
+  description: string;
+  budget?: number;
+  category?: string;
+  client_id: string;
+  company_id?: string;
+}
+
+export interface CreateApplicationPayload {
+  job_id: string;
+  user_id: string;
+  cover_letter?: string;
+  resume_url?: string;
+  additional_info?: Record<string, unknown>;
+}
+
+export interface UpdateJobPayload {
+  title?: string;
+  description?: string;
+  budget?: number;
+  category?: string;
+  status?: JobStatus;
+  client_feedback?: string;
+}
+
+export interface UpdateApplicationPayload {
+  status?: ApplicationStatus;
+  notes?: string;
+}
+
+// For API responses
+export interface ApiResponse<T = unknown> {
+  success?: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+}
+
+// For paginated responses
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
 }

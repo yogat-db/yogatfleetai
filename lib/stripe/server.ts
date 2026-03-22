@@ -1,5 +1,10 @@
-import Stripe from 'stripe'
+import Stripe from 'stripe';
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+if (!process.env.STRIPE_SECRET_KEY) {
+  throw new Error('Missing STRIPE_SECRET_KEY');
+}
+
+export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2025-02-24.acacia',
-})
+  appInfo: { name: 'Yogat Fleet AI', version: '1.0.0' },
+});

@@ -1,153 +1,80 @@
-"use client"
+'use client'
 
-import dynamic from "next/dynamic"
-import { useMemo } from "react"
-import L from "leaflet"
+import { useEffect } from 'react'
+import L from 'leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import MarkerClusterGroup from 'react-leaflet-cluster'
+import 'leaflet/dist/leaflet.css'
+import theme from '@/app/theme'
 
-import "leaflet/dist/leaflet.css"
-
-const MapContainer = dynamic(
-  () => import("react-leaflet").then((m) => m.MapContainer),
-  { ssr: false }
+const MyComponent = () => (
+  <div style={{ background: theme.colors.background.main, color: theme.colors.text.primary }}>
+    <h1 style={{ background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+      Hello
+    </h1>
+  </div>
 )
-
-const TileLayer = dynamic(
-  () => import("react-leaflet").then((m) => m.TileLayer),
-  { ssr: false }
-)
-
-const Marker = dynamic(
-  () => import("react-leaflet").then((m) => m.Marker),
-  { ssr: false }
-)
-
-const Popup = dynamic(
-  () => import("react-leaflet").then((m) => m.Popup),
-  { ssr: false }
-)
-
-const MarkerClusterGroup = dynamic(
-  () => import("react-leaflet-cluster"),
-  { ssr: false }
-)
-
-type Vehicle = {
-  id: string
-  plate: string
-  make?: string | null
-  model?: string | null
-  mileage?: number | null
-  health_score?: number | null
-  lat?: number | null
-  lng?: number | null
-}
-
-const UK_CENTER: [number, number] = [54.5, -3]
-
-const mapStyle = {
-  width: "100%",
-  height: "500px",
-  borderRadius: "10px"
-}
-
-function markerColor(v: Vehicle) {
-
-  if (!v.health_score) return "#9CA3AF"
-
-  if (v.health_score > 80) return "#22C55E"
-
-  if (v.health_score > 50) return "#F59E0B"
-
-  return "#EF4444"
-}
-
-function createIcon(color: string) {
-
-  return new L.DivIcon({
-    className: "",
-    html: `<div style="
-      background:${color};
-      width:16px;
-      height:16px;
-      border-radius:50%;
-      border:2px solid white;
-      box-shadow:0 0 6px rgba(0,0,0,0.5)
-    "></div>`
+const fixLeafletIcon = () => {
+  delete (L.Icon.Default.prototype as any)._getIconUrl
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
   })
 }
 
-export default function FleetMap({ vehicles }: { vehicles: Vehicle[] }) {
+const getMarkerColor = (health?: number) => {
+  if (health == null) return '#94a3b8'
+  if (health >= 70) return '#22c55e'
+  if (health >= 40) return '#f59e0b'
+  return '#ef4444'
+}
 
-  const safeVehicles = useMemo(
-    () =>
-      vehicles?.filter(
-        (v) =>
-          typeof v.lat === "number" &&
-          typeof v.lng === "number"
-      ) ?? [],
-    [vehicles]
-  )
+const createMarkerIcon = (color: string) => L.divIcon({
+  className: 'custom-marker',
+  html: `<div style="background:${color}; width:24px; height:24px; border-radius:50%; border:3px solid white; box-shadow:0 2px 5px rgba(0,0,0,0.3);"></div>`,
+  iconSize: [24, 24],
+  popupAnchor: [0, -12],
+})
+
+function MapBounds({ vehicles }: { vehicles: any[] }) {
+  const map = useMap()
+  useEffect(() => {
+    if (vehicles.length) {
+      const bounds = L.latLngBounds(vehicles.map(v => v.position))
+      map.fitBounds(bounds, { padding: [50, 50] })
+    }
+  }, [vehicles])
+  return null
+}
+
+export default function FleetMap({ vehicles }: { vehicles: any[] }) {
+  useEffect(() => { fixLeafletIcon() }, [])
+  const validVehicles = vehicles.filter(v => v.position?.length === 2 && !isNaN(v.position[0]))
 
   return (
-    <MapContainer
-      center={UK_CENTER}
-      zoom={6}
-      scrollWheelZoom
-      style={mapStyle}
-    >
-
-      <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-
-      <MarkerClusterGroup>
-
-        {safeVehicles.map((v) => {
-
-          const icon = createIcon(markerColor(v))
-
-          return (
-
-            <Marker
-              key={v.id}
-              position={[v.lat!, v.lng!]}
-              icon={icon}
-            >
-
-              <Popup>
-
-                <div style={{ minWidth: 150 }}>
-
-                  <strong>{v.plate}</strong>
-
-                  <div>
-                    {v.make} {v.model}
-                  </div>
-
-                  {v.mileage && (
-                    <div>
-                      Mileage: {v.mileage.toLocaleString()}
-                    </div>
-                  )}
-
-                  {v.health_score && (
-                    <div>
-                      Health: {v.health_score}%
-                    </div>
-                  )}
-
-                </div>
-
-              </Popup>
-
-            </Marker>
-
-          )
-
-        })}
-
-      </MarkerClusterGroup>
-
+    <MapContainer center={[51.505, -0.09]} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      {validVehicles.length > 0 && (
+        <>
+          <MapBounds vehicles={validVehicles} />
+          <MarkerClusterGroup>
+            {validVehicles.map(v => (
+              <Marker
+                key={v.id}
+                position={v.position}
+                icon={createMarkerIcon(getMarkerColor(v.health_score))}
+              >
+                <Popup>
+                  <strong>{v.license_plate}</strong><br />
+                  {v.make} {v.model}<br />
+                  Health: {v.health_score ?? 'N/A'}%
+                </Popup>
+              </Marker>
+            ))}
+          </MarkerClusterGroup>
+        </>
+      )}
     </MapContainer>
   )
 }

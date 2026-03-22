@@ -1,91 +1,54 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-import { diagnose } from '@/lib/diagnostics' // your large diagnostics engine
-import type { DiagnoseInput, DiagnoseResult } from '@/lib/diagnostics'
+import { createClient } from '@/lib/supabase/server'
+import OpenAI from 'openai'
 
-export async function POST(request: Request) {
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
+
+export async function POST(req: Request) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-        },
-      }
-    )
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const body = await request.json()
-    const { codes, symptoms, vehicleId, lat, lng } = body as {
-      codes?: string[]
-      symptoms?: string
-      vehicleId?: string
-      lat?: number
-      lng?: number
+    const { code, vehicle } = await req.json()
+    if (!code) {
+      return NextResponse.json({ error: 'DTC code is required' }, { status: 400 })
     }
 
-    // Prepare input for diagnose()
-    const input: DiagnoseInput = {
-      obdCodes: codes,
-      symptoms,
-    }
+    const prompt = `
+You are an automotive diagnostic expert. Explain the OBD2 trouble code ${code}${vehicle ? ` for a ${vehicle.make} ${vehicle.model} (${vehicle.year})` : ''}.
 
-    // If vehicleId provided, enrich with vehicle data and optional MOT/DVLA
-    if (vehicleId) {
-      const { data: vehicle, error: vehicleError } = await supabase
-        .from('vehicles')
-        .select('*')
-        .eq('id', vehicleId)
-        .eq('user_id', user.id)
-        .single()
+Provide the response as a JSON object with the following fields:
+- description: a brief description of the code
+- causes: an array of common causes
+- fix: step‑by‑step repair instructions
+- estimatedCost: estimated repair cost in GBP (as a number) or null if unknown
+- mechanicNeeded: boolean indicating if a professional mechanic is likely required
 
-      if (!vehicleError && vehicle) {
-        input.vehicle = {
-          make: vehicle.make,
-          model: vehicle.model,
-          year: vehicle.year,
-          mileage: vehicle.mileage,
-          fuel: vehicle.fuel_type,
-          transmission: vehicle.transmission,
-          engine: vehicle.engine,
-        }
+Return only valid JSON, no extra text.
+    `
 
-        // Optionally fetch MOT & DVLA data (if you have those tables/APIs)
-        // For now, leave them empty; the engine will work without them.
-      }
-    }
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4-turbo',
+      messages: [
+        { role: 'system', content: 'You are a helpful automotive diagnostic assistant.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      response_format: { type: 'json_object' },
+    })
 
-    // If location provided, add for context (optional, not used by engine yet)
-    if (lat && lng) {
-      // could be used for local parts/mechanic suggestions later
-    }
+    const content = completion.choices[0]?.message?.content
+    if (!content) throw new Error('OpenAI returned empty response')
 
-    // Run diagnostics
-    const result: DiagnoseResult = diagnose(input)
-
+    const result = JSON.parse(content)
     return NextResponse.json(result)
   } catch (err: any) {
-    console.error('Diagnostics AI error:', err)
+    console.error('AI diagnose error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
-}
-
-// Optional GET for simple DTC lookup (delegates to /api/dtc/[code])
-export async function GET(request: Request) {
-  const url = new URL(request.url)
-  const code = url.searchParams.get('code')
-  if (!code) {
-    return NextResponse.json({ error: 'Missing code parameter' }, { status: 400 })
-  }
-  // Forward to the DTC endpoint
-  const dtcRes = await fetch(new URL(`/api/dtc/${code}`, request.url).toString())
-  const dtcData = await dtcRes.json()
-  return NextResponse.json(dtcData, { status: dtcRes.status })
 }

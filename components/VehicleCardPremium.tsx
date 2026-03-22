@@ -12,6 +12,8 @@ interface VehicleCardPremiumProps {
   onDelete?: () => void
 }
 
+const FALLBACK_IMAGE = 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'600\' height=\'400\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' strokeWidth=\'1\' strokeLinecap=\'round\' strokeLinejoin=\'round\'%3E%3Crect x=\'2\' y=\'6\' width=\'20\' height=\'12\' rx=\'2\'/%3E%3Ccircle cx=\'7\' cy=\'16\' r=\'2\'/%3E%3Ccircle cx=\'17\' cy=\'16\' r=\'2\'/%3E%3Cpath d=\'M9 10h6\'/%3E%3C/svg%3E'
+
 export default function VehicleCardPremium({
   vehicle,
   onClick,
@@ -30,10 +32,7 @@ export default function VehicleCardPremium({
     return '#ef4444'
   }
 
-  // Data URL fallback – no external file needed
-  const fallbackImage = 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'600\' height=\'400\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' strokeWidth=\'1\' strokeLinecap=\'round\' strokeLinejoin=\'round\'%3E%3Crect x=\'2\' y=\'6\' width=\'20\' height=\'12\' rx=\'2\'/%3E%3Ccircle cx=\'7\' cy=\'16\' r=\'2\'/%3E%3Ccircle cx=\'17\' cy=\'16\' r=\'2\'/%3E%3Cpath d=\'M9 10h6\'/%3E%3C/svg%3E'
-
-  const imageUrl = !imgError && vehicle.image_url ? vehicle.image_url : fallbackImage
+  const imageUrl = !imgError && vehicle.image_url ? vehicle.image_url : FALLBACK_IMAGE
 
   return (
     <motion.div
@@ -41,36 +40,23 @@ export default function VehicleCardPremium({
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       whileHover={{ scale: 1.02 }}
-      className="bg-[#0f172a] border border-gray-800 rounded-xl overflow-hidden cursor-pointer shadow-lg"
+      style={styles.card}
       onClick={() => {
         setExpanded(!expanded)
         onClick?.()
       }}
     >
-      <div style={{ position: 'relative', height: '180px', width: '100%', background: '#1e293b' }}>
+      <div style={styles.imageContainer}>
         <Image
           src={imageUrl}
           alt={`${vehicle.make || 'Unknown'} ${vehicle.model || ''}`}
           fill
-          className="object-cover"
+          style={{ objectFit: 'cover' }}
           sizes="(max-width: 768px) 100vw, 300px"
           onError={() => setImgError(true)}
         />
-        <div style={{
-          position: 'absolute',
-          top: '12px',
-          right: '12px',
-          display: 'flex',
-          gap: '8px'
-        }}>
-          <div style={{
-            background: 'rgba(0,0,0,0.6)',
-            borderRadius: '9999px',
-            padding: '4px 12px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: getHealthColor()
-          }}>
+        <div style={styles.badgeContainer}>
+          <div style={{ ...styles.healthBadge, color: getHealthColor() }}>
             {healthScore}%
           </div>
           {onDelete && (
@@ -79,19 +65,7 @@ export default function VehicleCardPremium({
                 e.stopPropagation()
                 onDelete()
               }}
-              style={{
-                background: '#ef4444cc',
-                borderRadius: '9999px',
-                width: '32px',
-                height: '32px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                fontWeight: 'bold',
-                border: 'none',
-                cursor: 'pointer'
-              }}
+              style={styles.deleteButton}
               title="Delete vehicle"
             >
               ✕
@@ -99,14 +73,14 @@ export default function VehicleCardPremium({
           )}
         </div>
       </div>
-      <div className="p-4">
-        <h3 className="text-lg font-semibold text-white">
+      <div style={styles.content}>
+        <h3 style={styles.title}>
           {vehicle.make || 'Unknown'} {vehicle.model || ''}
         </h3>
-        <p className="text-sm text-gray-400">{vehicle.license_plate || 'No plate'}</p>
-        <div className="flex justify-between items-center mt-2">
-          <span className="text-xs text-gray-500">Year: {vehicle.year || '—'}</span>
-          <span className="text-xs text-gray-500">
+        <p style={styles.plate}>{vehicle.license_plate || 'No plate'}</p>
+        <div style={styles.details}>
+          <span style={styles.detailText}>Year: {vehicle.year || '—'}</span>
+          <span style={styles.detailText}>
             Mileage: {vehicle.mileage?.toLocaleString() ?? '—'} mi
           </span>
         </div>
@@ -117,25 +91,24 @@ export default function VehicleCardPremium({
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="mt-4 pt-4 border-t border-gray-800"
+              style={styles.expandedContent}
             >
-              <p className="text-sm text-gray-300">
-                <span className="font-medium text-gray-400">Status:</span>{' '}
-                {vehicle.status || 'Active'}
+              <p style={styles.expandedText}>
+                <span style={styles.label}>Status:</span> {vehicle.status || 'Active'}
               </p>
-              <p className="text-sm text-gray-300 mt-1">
-                <span className="font-medium text-gray-400">Health Score:</span>{' '}
+              <p style={styles.expandedText}>
+                <span style={styles.label}>Health Score:</span>{' '}
                 <span style={{ color: getHealthColor() }}>{healthScore}%</span>
               </p>
               {(onEdit || onDelete) && (
-                <div className="flex gap-2 mt-3">
+                <div style={styles.buttonGroup}>
                   {onEdit && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
                         onEdit()
                       }}
-                      className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition"
+                      style={styles.editButton}
                     >
                       Edit
                     </button>
@@ -146,7 +119,7 @@ export default function VehicleCardPremium({
                         e.stopPropagation()
                         onDelete()
                       }}
-                      className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 transition"
+                      style={styles.deleteButtonSmall}
                     >
                       Delete
                     </button>
@@ -159,4 +132,111 @@ export default function VehicleCardPremium({
       </div>
     </motion.div>
   )
+}
+
+const styles: { [key: string]: React.CSSProperties } = {
+  card: {
+    background: '#0f172a',
+    border: '1px solid #1e293b',
+    borderRadius: '12px',
+    overflow: 'hidden',
+    cursor: 'pointer',
+    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+  },
+  imageContainer: {
+    position: 'relative',
+    height: '180px',
+    width: '100%',
+    background: '#1e293b',
+  },
+  badgeContainer: {
+    position: 'absolute',
+    top: '12px',
+    right: '12px',
+    display: 'flex',
+    gap: '8px',
+  },
+  healthBadge: {
+    background: 'rgba(0,0,0,0.6)',
+    borderRadius: '9999px',
+    padding: '4px 12px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+  },
+  deleteButton: {
+    background: '#ef4444cc',
+    borderRadius: '9999px',
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'white',
+    fontWeight: 'bold',
+    border: 'none',
+    cursor: 'pointer',
+  },
+  content: {
+    padding: '16px',
+  },
+  title: {
+    fontSize: '18px',
+    fontWeight: 600,
+    color: '#ffffff',
+    margin: '0 0 4px 0',
+  },
+  plate: {
+    fontSize: '14px',
+    color: '#94a3b8',
+    margin: '0 0 8px 0',
+  },
+  details: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: '8px',
+  },
+  detailText: {
+    fontSize: '12px',
+    color: '#64748b',
+  },
+  expandedContent: {
+    marginTop: '16px',
+    paddingTop: '16px',
+    borderTop: '1px solid #1e293b',
+  },
+  expandedText: {
+    fontSize: '14px',
+    color: '#cbd5e1',
+    margin: '0 0 4px 0',
+  },
+  label: {
+    fontWeight: 500,
+    color: '#94a3b8',
+  },
+  buttonGroup: {
+    display: 'flex',
+    gap: '8px',
+    marginTop: '12px',
+  },
+  editButton: {
+    background: '#2563eb',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '6px',
+    padding: '4px 12px',
+    fontSize: '12px',
+    fontWeight: 500,
+    cursor: 'pointer',
+  },
+  deleteButtonSmall: {
+    background: '#dc2626',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '6px',
+    padding: '4px 12px',
+    fontSize: '12px',
+    fontWeight: 500,
+    cursor: 'pointer',
+  },
 }

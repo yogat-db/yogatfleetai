@@ -1,62 +1,39 @@
-"use client"
+'use client'
 
-import { useEffect, useState } from "react"
-import { supabase } from "@/lib/supabaseClient"
-import type { ServiceEvent } from "@/types/fleet"
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
 
-export function useServiceEvents(vehicleId: string | undefined) {
+export type ServiceEvent = {
+  id: string
+  vehicle_id: string
+  title: string
+  description: string | null
+  mileage: number | null
+  occurred_at: string
+  created_at: string
+}
+
+export function useServiceEvents(vehicleId?: string) {
   const [events, setEvents] = useState<ServiceEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  async function fetchEvents(id: string) {
-    setLoading(true)
-    setError(null)
-
-    const { data, error } = await supabase
-      .from("service_events")
-      .select("*")
-      .eq("vehicle_id", id)
-      .order("occurred_at", { ascending: false })
-
-    if (error) {
-      setError(error.message)
-      setEvents([])
-      setLoading(false)
-      return
-    }
-
-    setEvents((data || []) as ServiceEvent[])
-    setLoading(false)
-  }
-
   useEffect(() => {
-    if (!vehicleId) return
-    fetchEvents(vehicleId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vehicleId])
-
-  // Optimistic add
-  async function addEvent(payload: Omit<ServiceEvent, "id">) {
-    const tempId = `temp_${Math.random().toString(16).slice(2)}`
-    const optimistic: ServiceEvent = { ...(payload as any), id: tempId }
-
-    setEvents(prev => [optimistic, ...prev])
-
-    const { data, error } = await supabase
-      .from("service_events")
-      .insert(payload)
-      .select("*")
-      .single()
-
-    if (error) {
-      setEvents(prev => prev.filter(e => e.id !== tempId))
-      setError(error.message)
-      return
+    const fetchEvents = async () => {
+      try {
+        let query = supabase.from('service_events').select('*')
+        if (vehicleId) query = query.eq('vehicle_id', vehicleId)
+        query = query.order('occurred_at', { ascending: false })
+        const { data, error } = await query
+        if (error) throw error
+        setEvents(data || [])
+      } catch (err: any) {
+        setError(err.message)
+      } finally {
+        setLoading(false)
+      }
     }
-
-    setEvents(prev => prev.map(e => (e.id === tempId ? (data as any) : e)))
-  }
-
-  return { events, loading, error, refetch: () => vehicleId && fetchEvents(vehicleId), addEvent }
+    fetchEvents()
+  }, [vehicleId])
+  return { events, loading, error }
 }

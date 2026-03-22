@@ -1,31 +1,32 @@
-import { NextResponse } from "next/server"
-import { rebuildTwin } from "@/lib/vehicleAI/rebuildTwin"
+import { NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import { computeFleetBrain } from '@/lib/ai'
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
+  try {
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) { return cookieStore.get(name)?.value },
+        },
+      }
+    )
 
- try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { vehicleId } = await req.json()
+    const { data: vehicles } = await supabase
+      .from('vehicles')
+      .select('*')
+      .eq('user_id', user.id)
 
-  if (!vehicleId)
-   return NextResponse.json(
-    { error: "vehicleId required" },
-    { status: 400 }
-   )
-
-  const result = await rebuildTwin(vehicleId)
-
-  return NextResponse.json({
-   success: true,
-   ...result
-  })
-
- } catch (e: any) {
-
-  return NextResponse.json(
-   { error: e.message },
-   { status: 500 }
-  )
-
- }
+    const twins = computeFleetBrain(vehicles || [])
+    return NextResponse.json(twins)
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
 }

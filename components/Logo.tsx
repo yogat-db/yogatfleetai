@@ -1,25 +1,16 @@
-export default function Logo() {
+import theme from '@/app/theme'
+
+const MyComponent = () => (
+  <div style={{ background: theme.colors.background.main, color: theme.colors.text.primary }}>
+    <h1 style={{ background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+      Hello
+    </h1>
+  </div>
+)
+export default function Logo({ size = 32 }: { size?: number }) {
   return (
-    <div style={styles.logo}>
-      <div style={styles.dot}></div>
-      <span>Garage</span>
+    <div style={{ fontSize: size, fontWeight: 800, color: '#22c55e', letterSpacing: '-0.5px' }}>
+      Yogat
     </div>
   )
-}
-
-const styles = {
-  logo: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    fontWeight: 700,
-    fontSize: 16,
-  } as React.CSSProperties,
-
-  dot: {
-    width: 12,
-    height: 12,
-    borderRadius: "50%",
-    background: "linear-gradient(135deg,#2563eb,#7c3aed)",
-  } as React.CSSProperties,
 }

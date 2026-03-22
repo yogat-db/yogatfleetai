@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import Image from 'next/image'
-import { providers, type BreakdownProvider } from '@/lib/data/breakdownProviders'
+import { providers, searchProviders, sortByPrice, sortByRating } from '@/lib/data/breakdownProviders'
 
 export default function BreakdownCoverPage() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
