@@ -46,3 +46,4 @@ export default function DeleteJobButton({ jobId, deleteAction }: DeleteJobButton
     </form>
   );
 }
+

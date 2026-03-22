@@ -452,3 +452,4 @@ const styles: Record<string, React.CSSProperties> = {
   emptyText: { color: '#64748b', textAlign: 'center', padding: 40 },
   retryButton: { marginTop: 16, padding: '8px 16px', background: '#22c55e', border: 'none', borderRadius: 4, color: '#020617', cursor: 'pointer' },
 }
+

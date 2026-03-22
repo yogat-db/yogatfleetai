@@ -70,4 +70,3 @@ function enrichVehicle(vehicle: Vehicle): VehicleAI {
 export function computeFleetBrain(vehicles: Vehicle[]): VehicleAI[] {
   return vehicles.map(vehicle => enrichVehicle(vehicle))
 }
-

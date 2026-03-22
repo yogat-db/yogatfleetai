@@ -7,7 +7,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts'
-import { supabase } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase/client';
 
 interface Vehicle {
   id: string

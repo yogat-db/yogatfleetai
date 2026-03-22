@@ -40,3 +40,4 @@ If you cannot answer, suggest contacting admin at support@yogat.com. Keep answer
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
+

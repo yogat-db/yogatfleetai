@@ -45,3 +45,4 @@ export async function releasePayment(formData: FormData) {
   revalidatePath('/admin/jobs');
   redirect('/admin/jobs');
 }
+

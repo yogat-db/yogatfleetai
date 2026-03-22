@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useOrg } from '../hooks/useOrg'
-import { supabase } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase/client';
 
 export default function DashboardSettingsPage() {
   const { org, loading, error } = useOrg()

@@ -9,7 +9,7 @@ const MyComponent = () => (
   </div>
 )
 import { useRouter } from 'next/navigation'
-import NotificationBell from './NotificationBell'
+import NotificationBell from './NotificationBell';
 
 export default function Topbar() {
   const router = useRouter()

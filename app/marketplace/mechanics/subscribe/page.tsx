@@ -257,6 +257,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.primary,
     lineHeight: 1,
+    
   },
   period: {
     fontSize: theme.fontSizes.base,

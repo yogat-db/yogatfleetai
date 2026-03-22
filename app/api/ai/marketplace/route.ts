@@ -227,4 +227,3 @@ export async function GET() {
     status: "Marketplace AI API running"
   })
 }
-

@@ -11,6 +11,7 @@ export default function SubscriptionSuccessPage() {
   const sessionId = searchParams.get('session_id')
   const [countdown, setCountdown] = useState(5)
 
+  
   useEffect(() => {
     if (sessionId) {
       // Optionally verify the session with your backend
