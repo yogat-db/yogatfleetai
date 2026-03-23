@@ -1,108 +1,114 @@
-'use client'
-import { supabase } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
+'use client';
 
-const categories = [
-  {
-    title: 'Repair Jobs',
-    description: 'Post a repair job or find work',
-    icon: '🔧',
-    href: '/marketplace/jobs',
-    color: '#22c55e',
-  },
-  {
-    title: 'Mechanics Directory',
-    description: 'Find trusted mechanics near you',
-    icon: '🔩',
-    href: '/marketplace/mechanics',
-    color: '#3b82f6',
-  },
-  {
-    title: 'Breakdown Cover',
-    description: 'Compare roadside assistance plans',
-    icon: '🚛',
-    href: '/marketplace/breakdown-cover',
-    color: '#f59e0b',
-  },
-]
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { Briefcase, Shield, LayoutDashboard } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
+import theme from '@/app/theme';
 
 export default function MarketplacePage() {
-  const router = useRouter()
+  const router = useRouter();
+  const [isMechanic, setIsMechanic] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkMechanic = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: mechanic } = await supabase
+          .from('mechanics')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        setIsMechanic(!!mechanic);
+      }
+      setLoading(false);
+    };
+    checkMechanic();
+  }, []);
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      style={styles.page}
-    >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
       <h1 style={styles.title}>Marketplace</h1>
-      <p style={styles.subtitle}>
-        Everything you need to keep your vehicle on the road
-      </p>
+      <p style={styles.subtitle}>Everything you need to keep your vehicle on the road</p>
 
       <div style={styles.grid}>
-        {categories.map((cat, i) => (
+        {/* Repair Jobs */}
+        <motion.div
+          whileHover={{ scale: 1.02 }}
+          transition={{ type: 'spring', stiffness: 300 }}
+          style={styles.card}
+          onClick={() => router.push('/marketplace/jobs')}
+        >
+          <Briefcase size={32} color={theme.colors.primary} />
+          <h2>Repair Jobs</h2>
+          <p>Post a repair job or find work</p>
+        </motion.div>
+
+        {/* Breakdown Cover */}
+        <motion.div
+          whileHover={{ scale: 1.02 }}
+          transition={{ type: 'spring', stiffness: 300 }}
+          style={styles.card}
+          onClick={() => router.push('/marketplace/breakdown-cover')}
+        >
+          <Shield size={32} color={theme.colors.primary} />
+          <h2>Breakdown Cover</h2>
+          <p>Compare roadside assistance plans</p>
+        </motion.div>
+
+        {/* Mechanic Dashboard (only for mechanics) */}
+        {!loading && isMechanic && (
           <motion.div
-            key={cat.title}
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: i * 0.1 }}
-            whileHover={{ scale: 1.03 }}
-            style={{ ...styles.card, borderTopColor: cat.color }}
-            onClick={() => router.push(cat.href)}
+            whileHover={{ scale: 1.02 }}
+            transition={{ type: 'spring', stiffness: 300 }}
+            style={styles.card}
+            onClick={() => router.push('/marketplace/mechanics/dashboard')}
           >
-            <div style={{ fontSize: 48, marginBottom: 16 }}>{cat.icon}</div>
-            <h2 style={styles.cardTitle}>{cat.title}</h2>
-            <p style={styles.cardDesc}>{cat.description}</p>
+            <LayoutDashboard size={32} color={theme.colors.primary} />
+            <h2>Mechanic Dashboard</h2>
+            <p>View your applications, earnings, and manage your profile</p>
           </motion.div>
-        ))}
+        )}
       </div>
     </motion.div>
-  )
+  );
 }
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    padding: '40px',
-    background: '#020617',
+    padding: theme.spacing[10],
+    background: theme.colors.background.main,
     minHeight: '100vh',
-    color: '#f1f5f9',
-    fontFamily: 'Inter, sans-serif',
+    color: theme.colors.text.primary,
+    fontFamily: theme.fontFamilies.sans,
   },
   title: {
-    fontSize: '32px',
-    fontWeight: 700,
-    background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
+    fontSize: theme.fontSizes['4xl'],
+    fontWeight: theme.fontWeights.bold,
+    marginBottom: theme.spacing[2],
+    background: theme.gradients.title,
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
-    marginBottom: '8px',
   },
   subtitle: {
-    color: '#94a3b8',
-    marginBottom: '40px',
+    fontSize: theme.fontSizes.base,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[8],
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: '24px',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+    gap: theme.spacing[6],
   },
   card: {
-    background: '#0f172a',
-    borderRadius: '16px',
-    padding: '24px',
-    border: '1px solid #1e293b',
-    borderTop: '4px solid transparent',
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.light}`,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[6],
     cursor: 'pointer',
-    transition: 'all 0.2s',
+    textAlign: 'center',
+    transition: 'box-shadow 0.2s ease',
   },
-  cardTitle: {
-    fontSize: '20px',
-    fontWeight: 600,
-    marginBottom: '8px',
-  },
-  cardDesc: {
-    color: '#94a3b8',
-    fontSize: '14px',
-  },
-}
+};

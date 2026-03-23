@@ -1,47 +1,101 @@
-'use client'
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
-import { useState, useCallback, useEffect } from 'react'
-
-type NotificationPermission = 'default' | 'granted' | 'denied'
-
-interface UseNotificationReturn {
-  permission: NotificationPermission
-  supported: boolean
-  requestPermission: () => Promise<NotificationPermission>
-  sendNotification: (title: string, options?: NotificationOptions) => void
+export interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  read: boolean;
+  link?: string | null;
+  created_at: string;
 }
 
-export function useNotification(): UseNotificationReturn {
-  const [permission, setPermission] = useState<NotificationPermission>(
-    typeof window !== 'undefined' && 'Notification' in window
-      ? Notification.permission
-      : 'denied'
-  )
+export function useNotifications() {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const supported = typeof window !== 'undefined' && 'Notification' in window
+  const fetchNotifications = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50);
 
-  const requestPermission = useCallback(async () => {
-    if (!supported) return 'denied'
-    const result = await Notification.requestPermission()
-    setPermission(result)
-    return result
-  }, [supported])
+    if (!error && data) {
+      setNotifications(data);
+      setUnreadCount(data.filter(n => !n.read).length);
+    }
+    setLoading(false);
+  };
 
-  const sendNotification = useCallback(
-    (title: string, options?: NotificationOptions) => {
-      if (permission !== 'granted') {
-        console.warn('Notification permission not granted')
-        return
-      }
-      new Notification(title, options)
-    },
-    [permission]
-  )
+  const markAsRead = async (id: string) => {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('id', id);
+    if (!error) {
+      setNotifications(prev =>
+        prev.map(n => (n.id === id ? { ...n, read: true } : n))
+      );
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    }
+  };
+
+  const markAllAsRead = async () => {
+    const ids = notifications.filter(n => !n.read).map(n => n.id);
+    if (ids.length === 0) return;
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .in('id', ids);
+    if (!error) {
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setUnreadCount(0);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+
+    let channel: RealtimeChannel | null = null;
+    const setupSubscription = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      channel = supabase
+        .channel('notifications')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${user.id}`,
+          },
+          (payload) => {
+            const newNotif = payload.new as Notification;
+            setNotifications(prev => [newNotif, ...prev]);
+            if (!newNotif.read) setUnreadCount(prev => prev + 1);
+          }
+        )
+        .subscribe();
+    };
+    setupSubscription();
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, []);
 
   return {
-    permission,
-    supported,
-    requestPermission,
-    sendNotification,
-  }
+    notifications,
+    unreadCount,
+    loading,
+    markAsRead,
+    markAllAsRead,
+    refetch: fetchNotifications,
+  };
 }

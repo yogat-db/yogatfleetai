@@ -1,54 +1,97 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { stripe } from '@/lib/stripe/server';
+import Stripe from 'stripe';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2025-02-24.acacia',
+});
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Authenticate – await the server client
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-    // Check if mechanic already has a Stripe account
-    const { data: existing } = await supabase
+    if (userError || !user) {
+      console.error('Auth error:', userError);
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // 2. Fetch the mechanic profile
+    const { data: mechanic, error: mechanicError } = await supabaseAdmin
       .from('mechanics')
-      .select('stripe_account_id')
+      .select('id, stripe_account_id')
       .eq('user_id', user.id)
       .single();
 
-    if (existing?.stripe_account_id) {
-      // Return onboarding link to finish setup
-      const accountLink = await stripe.accountLinks.create({
-        account: existing.stripe_account_id,
-        refresh_url: `${req.headers.get('origin')}/marketplace/mechanics/dashboard`,
-        return_url: `${req.headers.get('origin')}/marketplace/mechanics/dashboard`,
-        type: 'account_onboarding',
-      });
-      return NextResponse.json({ url: accountLink.url });
+    if (mechanicError || !mechanic) {
+      return NextResponse.json({ error: 'Mechanic profile not found' }, { status: 404 });
     }
 
-    // Create new Connect account
+    // 3. If the mechanic already has a Stripe account, return an onboarding link
+    if (mechanic.stripe_account_id) {
+      const accountLink = await stripe.accountLinks.create({
+        account: mechanic.stripe_account_id,
+        refresh_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?refresh=true`,
+        return_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?onboarding=complete`,
+        type: 'account_onboarding',
+      });
+      return NextResponse.json({
+        accountId: mechanic.stripe_account_id,
+        onboardingUrl: accountLink.url,
+        existing: true,
+      });
+    }
+
+    // 4. Create a new Stripe Express account
     const account = await stripe.accounts.create({
       type: 'express',
       country: 'GB',
       email: user.email,
-      capabilities: { transfers: { requested: true } },
+      capabilities: {
+        transfers: { requested: true },
+      },
+      business_type: 'individual',
+      business_profile: {
+        mcc: '7538', // Automotive repair and maintenance
+        url: process.env.NEXT_PUBLIC_APP_URL,
+      },
     });
 
-    await supabase
+    // 5. Store the account ID
+    const { error: updateError } = await supabaseAdmin
       .from('mechanics')
       .update({ stripe_account_id: account.id })
-      .eq('user_id', user.id);
+      .eq('id', mechanic.id);
 
+    if (updateError) {
+      console.error('Failed to save Stripe account ID:', updateError);
+      // Clean up Stripe account
+      await stripe.accounts.del(account.id);
+      return NextResponse.json(
+        { error: 'Failed to save account information' },
+        { status: 500 }
+      );
+    }
+
+    // 6. Generate account onboarding link
     const accountLink = await stripe.accountLinks.create({
       account: account.id,
-      refresh_url: `${req.headers.get('origin')}/marketplace/mechanics/dashboard`,
-      return_url: `${req.headers.get('origin')}/marketplace/mechanics/dashboard`,
+      refresh_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?refresh=true`,
+      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?onboarding=complete`,
       type: 'account_onboarding',
     });
 
-    return NextResponse.json({ url: accountLink.url });
+    return NextResponse.json({
+      accountId: account.id,
+      onboardingUrl: accountLink.url,
+    });
   } catch (err: any) {
-    console.error('Stripe create account error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('Stripe Connect account creation error:', err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to create Stripe account' },
+      { status: 500 }
+    );
   }
 }

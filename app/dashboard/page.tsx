@@ -52,89 +52,49 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [user, setUser] = useState<any>(null);
 
   const loadDashboard = useCallback(async () => {
-    try {
-      setError(null);
-      setLoading(true);
+  try {
+    setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not logged in');
+    setUser(user);
 
-      // 1. Fetch vehicles
-      const res = await fetch('/api/vehicles');
-      if (!res.ok) throw new Error('Failed to fetch vehicles');
-      const vehiclesData = await res.json();
-      const vehiclesList = Array.isArray(vehiclesData) ? vehiclesData : [];
-      setVehicles(vehiclesList);
+    // Fetch vehicles
+    const { data: vehiclesData, error: vehiclesError } = await supabase
+      .from('vehicles')
+      .select('*')
+      .eq('user_id', user.id);
+    if (vehiclesError) throw vehiclesError;
+    setVehicles(vehiclesData || []);
 
-      // 2. Fetch upcoming service reminders – gracefully handle errors
-      try {
-        const { data: remindersData, error: remindersError } = await supabase
-          .from('service_reminders')
-          .select(`
-            id,
-            reminder_type,
-            next_due_mileage,
-            next_due_date,
-            vehicle:vehicle_id (
-              license_plate,
-              make,
-              model
-            )
-          `)
-          .eq('active', true)
-          .or('next_due_mileage.not.is.null,next_due_date.not.is.null')
-          .order('next_due_date', { ascending: true, nullsFirst: false })
-          .limit(5);
+    // Fetch reminders
+    const { data: remindersData, error: remindersError } = await supabase
+      .from('reminders')
+      .select(`*, vehicle:vehicles(license_plate, make, model)`)
+      .eq('user_id', user.id);
 
-        if (remindersError) {
-          console.error('Reminders fetch error:', remindersError);
-          setReminders([]);
-        } else {
-          setReminders(remindersData || []);
-        }
-      } catch (err) {
-        console.error('Unexpected reminders error:', err);
-        setReminders([]);
-      }
-
-      // 3. Fetch AI predictions – gracefully handle failures
-      let preds: AIPrediction[] = [];
-      try {
-        const predRes = await fetch('/api/predictive-maintenance');
-        if (predRes.ok) {
-          preds = await predRes.json();
-        } else {
-          // Fallback: generate mock predictions
-          preds = generateMockPredictions(vehiclesList);
-        }
-      } catch {
-        preds = generateMockPredictions(vehiclesList);
-      }
-      setPredictions(preds);
-    } catch (err: any) {
-      console.error('Dashboard load error:', err);
-      setError(err.message || 'Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    if (remindersError) {
+      console.error('Reminders fetch error:', remindersError);
+      setReminders([]);
+    } else {
+      const transformed = (remindersData || []).map((reminder: any) => ({
+        ...reminder,
+        vehicle: Array.isArray(reminder.vehicle) ? reminder.vehicle[0] : reminder.vehicle,
+      }));
+      setReminders(transformed);
     }
-  }, []);
+  } catch (err: any) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+}, []);
 
-  // Helper to generate fallback predictions
-  const generateMockPredictions = (vehicles: Vehicle[]): AIPrediction[] => {
-    return vehicles.slice(0, 3).map(v => ({
-      vehicle_id: v.id,
-      license_plate: v.license_plate,
-      make: v.make || 'Unknown',
-      model: v.model || '',
-      predicted_cost: Math.floor(Math.random() * 500) + 100,
-      predicted_days: Math.floor(Math.random() * 60) + 15,
-    }));
-  };
-
-  useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
-
+useEffect(() => {
+  loadDashboard();
+}, [loadDashboard]);
   // Compute fleet health and critical alerts
   const vehiclesWithAI = useMemo(() => computeFleetBrain(vehicles), [vehicles]);
 

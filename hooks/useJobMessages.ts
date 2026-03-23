@@ -1,122 +1,76 @@
-// app/hooks/useJobMessages.ts
-import { useEffect, useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabase/client';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client'; // ✅ import supabase instance
 
 interface Message {
   id: string;
   job_id: string;
-  user_id: string;
+  sender_id: string;
   content: string;
   created_at: string;
-  user?: {
-    id: string;
-    name: string;
-    avatar?: string;
-  };
 }
 
-interface UseJobMessagesOptions {
-  jobId: string;
-  userId?: string;
-  onNewMessage?: (message: Message) => void;
-}
-
-export function useJobMessages({ jobId, userId, onNewMessage }: UseJobMessagesOptions) {
+export function useJobMessages(jobId: string, currentUserId: string) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const supabase = createClient();
 
   const fetchMessages = useCallback(async () => {
     try {
-      setLoading(true);
-      const { data, error: fetchError } = await supabase
-        .from('job_messages')
-        .select('*, user:user_id(id, name, avatar)')
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('*')
         .eq('job_id', jobId)
         .order('created_at', { ascending: true });
 
-      if (fetchError) throw fetchError;
+      if (error) throw error;
       setMessages(data || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load messages');
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [jobId, supabase]);
+  }, [jobId]);
 
   useEffect(() => {
     fetchMessages();
 
-    let channel: RealtimeChannel | null = null;
-
-    const setupSubscription = () => {
-      channel = supabase
-        .channel(`job-messages:${jobId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'job_messages',
-            filter: `job_id=eq.${jobId}`,
-          },
-          (payload) => {
-            const newMessage = payload.new as Message;
-            // Optionally fetch user data if not included
-            const messageWithUser = { ...newMessage, user: undefined };
-            setMessages((prev) => [...prev, messageWithUser]);
-            if (onNewMessage) onNewMessage(messageWithUser);
+    // Subscribe to new messages
+    const channel = supabase
+      .channel(`job:${jobId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `job_id=eq.${jobId}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as Message;
+          if (newMsg.sender_id !== currentUserId) {
+            setMessages((prev) => [...prev, newMsg]);
           }
-        )
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            console.log(`Subscribed to job messages for job ${jobId}`);
-          }
-        });
-    };
-
-    setupSubscription();
+        }
+      )
+      .subscribe();
 
     return () => {
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
+      supabase.removeChannel(channel);
     };
-  }, [jobId, supabase, fetchMessages, onNewMessage]);
+  }, [jobId, currentUserId, fetchMessages]);
 
-  const sendMessage = useCallback(
-    async (content: string) => {
-      if (!userId) {
-        setError('User not authenticated');
-        return false;
-      }
-      try {
-        const { error: insertError } = await supabase
-          .from('job_messages')
-          .insert({
-            job_id: jobId,
-            user_id: userId,
-            content,
-            created_at: new Date().toISOString(),
-          });
+  const sendMessage = useCallback(async (content: string) => {
+    try {
+      const { error } = await supabase.from('chat_messages').insert({
+        job_id: jobId,
+        sender_id: currentUserId,
+        content,
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }, [jobId, currentUserId]);
 
-        if (insertError) throw insertError;
-        return true;
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to send message');
-        return false;
-      }
-    },
-    [jobId, userId, supabase]
-  );
-
-  return {
-    messages,
-    loading,
-    error,
-    sendMessage,
-    refresh: fetchMessages,
-  };
+  return { messages, loading, error, sendMessage };
 }

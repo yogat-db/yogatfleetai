@@ -29,15 +29,12 @@ export default function RegisterPage() {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/login`, // optional
+          emailRedirectTo: `${window.location.origin}/login`,
         },
       });
 
       if (signUpError) throw signUpError;
 
-      // The database trigger will automatically create a profile row.
-      // No manual insert needed.
-      // Redirect to login with success message
       router.push('/login?registered=true');
     } catch (err: any) {
       setError(err.message || 'An error occurred during registration');
@@ -155,9 +152,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: theme.fontSizes.base,
     outline: 'none',
     transition: theme.transitions.default,
-    ':focus': {
-      borderColor: theme.colors.primary,
-    },
   },
   errorBox: {
     padding: theme.spacing[2],
@@ -178,15 +172,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: theme.fontWeights.semibold,
     cursor: 'pointer',
     transition: theme.transitions.default,
-    ':hover': {
-      background: theme.colors.primaryDark,
-      transform: 'scale(1.02)',
-    },
-    ':disabled': {
-      opacity: 0.5,
-      cursor: 'not-allowed',
-      transform: 'none',
-    },
   },
   loginLink: {
     marginTop: theme.spacing[4],
@@ -198,8 +183,5 @@ const styles: Record<string, React.CSSProperties> = {
     color: theme.colors.primary,
     textDecoration: 'none',
     cursor: 'pointer',
-    ':hover': {
-      textDecoration: 'underline',
-    },
   },
 };

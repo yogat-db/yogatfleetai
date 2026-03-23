@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { supabaseAdmin } from '@/lib/supabase/admin'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies()
@@ -16,17 +17,22 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError || !user) {
+    redirect('/login')
+  }
 
-  // Check if user is admin – using regular client works if RLS allows reading own row
-  const { data: admin } = await supabase
+  // Check admin using admin client (bypasses RLS)
+  const { data: admin, error: adminError } = await supabaseAdmin
     .from('admins')
     .select('id')
-    .eq('id', user.id)
-    .single()
+    .eq('user_id', user.id)
+    .maybeSingle()
 
-  if (!admin) redirect('/dashboard')
+  if (adminError || !admin) {
+    // Not an admin – redirect to dashboard or show 404
+    redirect('/dashboard')
+  }
 
   return <>{children}</>
 }

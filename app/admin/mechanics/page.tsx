@@ -1,181 +1,149 @@
-import { supabaseAdmin } from '@/lib/supabase/admin'
-import { CheckCircle, XCircle, Mail, Phone, MapPin, Star } from 'lucide-react'
-import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import theme from '@/app/theme';
 
-type Mechanic = {
-  id: string
-  user_id: string
-  business_name: string
-  phone: string | null
-  address: string | null
-  lat: number | null
-  lng: number | null
-  verified: boolean
-  subscription_status: string
-  created_at: string
+export const metadata = {
+  title: 'Manage Mechanics | Admin',
+};
+
+async function verifyMechanic(formData: FormData) {
+  'use server';
+  const id = formData.get('id') as string;
+  await supabaseAdmin.from('mechanics').update({ verified: true }).eq('id', id);
+  revalidatePath('/admin/mechanics');
+  redirect('/admin/mechanics');
 }
 
-// Server action to toggle verification
-async function toggleVerification(formData: FormData) {
-  'use server'
-  const mechanicId = formData.get('mechanicId') as string
-  const currentVerified = formData.get('currentVerified') === 'true'
-
-  const { error } = await supabaseAdmin
-    .from('mechanics')
-    .update({ verified: !currentVerified })
-    .eq('id', mechanicId)
-
-  if (error) {
-    console.error('Verification update failed:', error)
-    throw new Error('Failed to update verification')
-  }
-
-  revalidatePath('/admin/mechanics')
-  redirect('/admin/mechanics')
+async function removeMechanic(formData: FormData) {
+  'use server';
+  const id = formData.get('id') as string;
+  await supabaseAdmin.from('mechanics').delete().eq('id', id);
+  revalidatePath('/admin/mechanics');
+  redirect('/admin/mechanics');
 }
 
 export default async function AdminMechanicsPage() {
-  try {
-    // Fetch mechanics
-    const { data: mechanics, error: mechanicsError } = await supabaseAdmin
-      .from('mechanics')
-      .select('*')
-      .order('created_at', { ascending: false })
+  const { data: mechanics, error } = await supabaseAdmin
+    .from('mechanics')
+    .select('*')
+    .order('created_at', { ascending: false });
 
-    if (mechanicsError) throw new Error(mechanicsError.message)
+  if (error) throw new Error(error.message);
 
-    const typedMechanics = (mechanics as Mechanic[]) || []
-
-    // Get all user IDs
-    const userIds = typedMechanics.map((m) => m.user_id).filter(Boolean)
-
-    // Fetch user emails using Admin API
-    let userEmails: Record<string, string> = {}
-    if (userIds.length) {
-      const { data: users, error: usersError } = await supabaseAdmin.auth.admin.listUsers()
-      if (!usersError && users) {
-        userEmails = users.users.reduce((acc, u) => {
-          acc[u.id] = u.email || ''
-          return acc
-        }, {} as Record<string, string>)
-      } else {
-        console.error('Failed to fetch users:', usersError)
-      }
-    }
-
-    // Enrich mechanics with email
-    const enrichedMechanics = typedMechanics.map((m) => ({
-      ...m,
-      user: { email: userEmails[m.user_id] || '' },
-    }))
-
-    return (
-      <div style={styles.page}>
-        <h1 style={styles.title}>Mechanic Verification</h1>
-        <div style={styles.grid}>
-          {enrichedMechanics.map((mechanic) => (
-            <div
-              key={mechanic.id}
-              style={{ ...styles.card, borderColor: mechanic.verified ? '#22c55e' : '#1e293b' }}
-            >
-              <div style={styles.cardHeader}>
-                <h3 style={styles.businessName}>{mechanic.business_name}</h3>
-                {mechanic.verified ? (
-                  <CheckCircle size={20} color="#22c55e" />
-                ) : (
-                  <XCircle size={20} color="#ef4444" />
-                )}
-              </div>
-              <div style={styles.detailRow}>
-                <Mail size={14} color="#64748b" />
-                <span>{mechanic.user?.email}</span>
-              </div>
-              {mechanic.phone && (
-                <div style={styles.detailRow}>
-                  <Phone size={14} color="#64748b" />
-                  <span>{mechanic.phone}</span>
-                </div>
-              )}
-              {mechanic.address && (
-                <div style={styles.detailRow}>
-                  <MapPin size={14} color="#64748b" />
-                  <span>{mechanic.address}</span>
-                </div>
-              )}
-              <div style={styles.detailRow}>
-                <Star size={14} color="#64748b" />
-                <span>Subscription: {mechanic.subscription_status}</span>
-              </div>
-              <div style={styles.cardFooter}>
-                <span style={styles.date}>
-                  Joined: {new Date(mechanic.created_at).toLocaleDateString()}
-                </span>
-                <form action={toggleVerification}>
-                  <input type="hidden" name="mechanicId" value={mechanic.id} />
-                  <input type="hidden" name="currentVerified" value={String(mechanic.verified)} />
-                  <button
-                    type="submit"
-                    style={mechanic.verified ? styles.unverifyButton : styles.verifyButton}
-                  >
-                    {mechanic.verified ? 'Remove' : 'Verify'}
-                  </button>
-                </form>
-              </div>
-            </div>
-          ))}
-        </div>
+  return (
+    <div style={styles.container}>
+      <h1 style={styles.title}>Manage Mechanics</h1>
+      <div style={styles.tableWrapper}>
+        <table style={styles.table}>
+          <thead>
+            <tr style={styles.tableRow}>
+              <th style={styles.tableHeader}>Business Name</th>
+              <th style={styles.tableHeader}>Phone</th>
+              <th style={styles.tableHeader}>Address</th>
+              <th style={styles.tableHeader}>Verified</th>
+              <th style={styles.tableHeader}>Subscription</th>
+              <th style={styles.tableHeader}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mechanics?.map(mech => (
+              <tr key={mech.id} style={styles.tableRow}>
+                <td style={styles.tableCell}>{mech.business_name}</td>
+                <td style={styles.tableCell}>{mech.phone || '—'}</td>
+                <td style={styles.tableCell}>{mech.address || '—'}</td>
+                <td style={styles.tableCell}>{mech.verified ? '✓' : '✗'}</td>
+                <td style={styles.tableCell}>{mech.subscription_status || 'inactive'}</td>
+                <td style={styles.tableCell}>
+                  <div style={styles.actions}>
+                    {!mech.verified && (
+                      <form action={verifyMechanic}>
+                        <input type="hidden" name="id" value={mech.id} />
+                        <button type="submit" style={styles.verifyButton}>
+                          Verify
+                        </button>
+                      </form>
+                    )}
+                    <form action={removeMechanic}>
+                      <input type="hidden" name="id" value={mech.id} />
+                      <button type="submit" style={styles.removeButton}>
+                        Remove
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-    )
-  } catch (err) {
-    console.error(err)
-    return (
-      <div style={styles.page}>
-        <h1 style={styles.title}>Mechanic Verification</h1>
-        <div style={{ color: '#ef4444', padding: 20, background: '#0f172a', borderRadius: 8 }}>
-          Failed to load mechanics. Please try again later.
-        </div>
-      </div>
-    )
-  }
+    </div>
+  );
 }
 
-const styles = {
-  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9' },
+// Inline styles – no CSS module, no :hover pseudo-classes
+const styles: Record<string, React.CSSProperties> = {
+  container: {
+    padding: theme.spacing[10],
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+    color: theme.colors.text.primary,
+    fontFamily: theme.fontFamilies.sans,
+  },
   title: {
-    fontSize: 32,
-    fontWeight: 700,
-    marginBottom: 32,
-    background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
+    fontSize: theme.fontSizes['4xl'],
+    fontWeight: theme.fontWeights.bold,
+    marginBottom: theme.spacing[6],
+    background: theme.gradients.title,
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
   },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 },
-  card: { background: '#0f172a', border: '1px solid', borderRadius: 16, padding: 20 },
-  cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  businessName: { fontSize: 18, fontWeight: 600, margin: 0 },
-  detailRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 14, color: '#94a3b8' },
-  cardFooter: { marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  date: { fontSize: 12, color: '#64748b' },
+  tableWrapper: {
+    background: theme.colors.background.card,
+    borderRadius: theme.borderRadius.xl,
+    overflow: 'auto',
+    border: `1px solid ${theme.colors.border.light}`,
+  },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: theme.fontSizes.sm,
+  },
+  tableRow: {
+    borderBottom: `1px solid ${theme.colors.border.light}`,
+  },
+  tableHeader: {
+    padding: theme.spacing[3],
+    textAlign: 'left',
+    fontWeight: theme.fontWeights.semibold,
+    color: theme.colors.text.secondary,
+  },
+  tableCell: {
+    padding: theme.spacing[3],
+    color: theme.colors.text.primary,
+  },
+  actions: {
+    display: 'flex',
+    gap: theme.spacing[2],
+  },
   verifyButton: {
-    background: '#22c55e',
-    color: '#020617',
+    background: theme.colors.primary,
     border: 'none',
-    borderRadius: 6,
-    padding: '4px 12px',
-    fontSize: 12,
-    fontWeight: 600,
+    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
+    borderRadius: theme.borderRadius.lg,
+    color: theme.colors.background.main,
+    fontWeight: theme.fontWeights.medium,
     cursor: 'pointer',
+    transition: 'background 0.2s ease', // transition but no :hover
   },
-  unverifyButton: {
-    background: '#ef4444',
+  removeButton: {
+    background: theme.colors.error,
+    border: 'none',
+    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
+    borderRadius: theme.borderRadius.lg,
     color: '#fff',
-    border: 'none',
-    borderRadius: 6,
-    padding: '4px 12px',
-    fontSize: 12,
-    fontWeight: 600,
+    fontWeight: theme.fontWeights.medium,
     cursor: 'pointer',
+    transition: 'background 0.2s ease',
   },
-} as const
+};

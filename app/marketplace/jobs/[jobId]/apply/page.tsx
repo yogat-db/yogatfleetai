@@ -1,4 +1,3 @@
-// app/marketplace/jobs/[jobId]/apply/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -17,52 +16,59 @@ export default function ApplyPage() {
   const [bid, setBid] = useState('');
   const [message, setMessage] = useState('');
   const [mechanicId, setMechanicId] = useState<string | null>(null);
-  const [user, setUser] = useState<any>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [alreadyApplied, setAlreadyApplied] = useState(false);
+  const [jobTitle, setJobTitle] = useState('');
 
   useEffect(() => {
-    const checkAuth = async () => {
-      // 1. Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError('You must be logged in to apply.');
-        setAuthChecked(true);
-        return;
-      }
-      setUser(user);
-
-      // 2. Fetch mechanic profile
-      const { data: mechanic, error: mechError } = await supabase
-        .from('mechanics')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (mechError || !mechanic) {
-        setError('You need to register as a mechanic before applying.');
-        setAuthChecked(true);
-        return;
-      }
-      setMechanicId(mechanic.id);
-
-      // 3. Check if already applied to this job
-      const { data: existing, error: existingError } = await supabase
-        .from('applications')
-        .select('id')
-        .eq('job_id', jobId)
-        .eq('mechanic_id', mechanic.id)
-        .maybeSingle();
-
-      if (existing) {
-        setAlreadyApplied(true);
-        setError('You have already applied to this job.');
-      }
-
-      setAuthChecked(true);
-    };
-    checkAuth();
+    checkAuthAndJob();
   }, [jobId]);
+
+  const checkAuthAndJob = async () => {
+    // 1. Get current user
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    // 2. Fetch mechanic profile
+    const { data: mechanic, error: mechError } = await supabase
+      .from('mechanics')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (mechError || !mechanic) {
+      setError('You need to register as a mechanic before applying.');
+      setAuthChecked(true);
+      return;
+    }
+    setMechanicId(mechanic.id);
+
+    // 3. Get job title for display
+    const { data: job } = await supabase
+      .from('jobs')
+      .select('title')
+      .eq('id', jobId)
+      .single();
+    if (job) setJobTitle(job.title);
+
+    // 4. Check if already applied
+    const { data: existing } = await supabase
+      .from('applications')
+      .select('id')
+      .eq('job_id', jobId)
+      .eq('mechanic_id', mechanic.id)
+      .maybeSingle();
+
+    if (existing) {
+      setAlreadyApplied(true);
+      setError('You have already applied to this job.');
+    }
+
+    setAuthChecked(true);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,8 +107,6 @@ export default function ApplyPage() {
 
       if (insertError) throw insertError;
 
-      // Optional: show success message, then redirect
-      alert('Application submitted successfully!'); // Or use a toast notification
       router.push(`/marketplace/jobs/${jobId}`);
     } catch (err: any) {
       setError(err.message || 'Failed to submit application.');
@@ -114,8 +118,21 @@ export default function ApplyPage() {
   if (!authChecked) {
     return (
       <div style={styles.centered}>
-        <div style={styles.spinner} />
+        <div className="spinner" />
         <p>Loading...</p>
+        <style jsx>{`
+          .spinner {
+            border: 3px solid ${theme.colors.border.medium};
+            border-top: 3px solid ${theme.colors.primary};
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -140,9 +157,9 @@ export default function ApplyPage() {
       style={styles.page}
     >
       <button onClick={() => router.back()} style={styles.backButton}>
-        ← Back
+        ← Back to Job
       </button>
-      <h1 style={styles.title}>Apply to Job</h1>
+      <h1 style={styles.title}>Apply to Job: {jobTitle || 'Repair Job'}</h1>
 
       {error && <div style={styles.errorBox}>{error}</div>}
 
@@ -175,10 +192,7 @@ export default function ApplyPage() {
         <button
           type="submit"
           disabled={loading}
-          style={{
-            ...styles.submitButton,
-            ...(loading ? styles.submitButtonDisabled : {}),
-          }}
+          style={styles.submitButton}
         >
           {loading ? 'Submitting...' : 'Submit Application'}
         </button>
@@ -187,7 +201,6 @@ export default function ApplyPage() {
   );
 }
 
-// Styles using your theme
 const styles: Record<string, React.CSSProperties> = {
   page: {
     padding: theme.spacing[10],
@@ -196,47 +209,27 @@ const styles: Record<string, React.CSSProperties> = {
     color: theme.colors.text.primary,
     fontFamily: theme.fontFamilies.sans,
   },
-  centered: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: theme.colors.text.secondary,
-  },
-  spinner: {
-    width: '40px',
-    height: '40px',
-    border: `3px solid ${theme.colors.border.medium}`,
-    borderTop: `3px solid ${theme.colors.primary}`,
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite',
-    marginBottom: theme.spacing[4],
-  },
   backButton: {
     background: 'transparent',
     border: `1px solid ${theme.colors.border.medium}`,
-    color: theme.colors.text.primary,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
     borderRadius: theme.borderRadius.lg,
-    marginBottom: theme.spacing[6],
+    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
+    color: theme.colors.text.secondary,
     cursor: 'pointer',
-    transition: theme.transitions.default,
-    ':hover': {
-      background: theme.colors.background.elevated,
-      borderColor: theme.colors.border.light,
-    },
+    marginBottom: theme.spacing[6],
+    transition: 'background 0.2s ease',
   },
   title: {
-    fontSize: theme.fontSizes['4xl'],
+    fontSize: theme.fontSizes['3xl'],
     fontWeight: theme.fontWeights.bold,
-    marginBottom: theme.spacing[8],
+    marginBottom: theme.spacing[6],
     background: theme.gradients.title,
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
   },
   form: {
-    maxWidth: '500px',
+    maxWidth: '600px',
+    marginTop: theme.spacing[4],
   },
   field: {
     marginBottom: theme.spacing[6],
@@ -250,32 +243,26 @@ const styles: Record<string, React.CSSProperties> = {
   },
   input: {
     width: '100%',
-    background: theme.colors.background.card,
+    background: theme.colors.background.elevated,
     border: `1px solid ${theme.colors.border.medium}`,
     borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[3]} ${theme.spacing[4]}`,
+    padding: theme.spacing[3],
     color: theme.colors.text.primary,
     fontSize: theme.fontSizes.base,
     outline: 'none',
-    transition: theme.transitions.default,
-    ':focus': {
-      borderColor: theme.colors.primary,
-    },
+    transition: 'border 0.2s ease',
   },
   textarea: {
     width: '100%',
-    background: theme.colors.background.card,
+    background: theme.colors.background.elevated,
     border: `1px solid ${theme.colors.border.medium}`,
     borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[3]} ${theme.spacing[4]}`,
+    padding: theme.spacing[3],
     color: theme.colors.text.primary,
     fontSize: theme.fontSizes.base,
     outline: 'none',
     resize: 'vertical',
-    transition: theme.transitions.default,
-    ':focus': {
-      borderColor: theme.colors.primary,
-    },
+    fontFamily: 'inherit',
   },
   hint: {
     fontSize: theme.fontSizes.xs,
@@ -285,7 +272,7 @@ const styles: Record<string, React.CSSProperties> = {
   errorBox: {
     marginBottom: theme.spacing[5],
     padding: theme.spacing[3],
-    background: `rgba(239,68,68,0.1)`,
+    background: `${theme.colors.error}20`,
     border: `1px solid ${theme.colors.error}`,
     borderRadius: theme.borderRadius.lg,
     color: theme.colors.error,
@@ -296,28 +283,20 @@ const styles: Record<string, React.CSSProperties> = {
     background: theme.colors.primary,
     border: 'none',
     borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[3]} ${theme.spacing[4]}`,
+    padding: theme.spacing[3],
     color: theme.colors.background.main,
     fontSize: theme.fontSizes.base,
     fontWeight: theme.fontWeights.semibold,
     cursor: 'pointer',
-    transition: theme.transitions.default,
-    ':hover': {
-      background: theme.colors.primaryDark,
-      transform: 'scale(1.02)',
-    },
+    transition: 'background 0.2s ease',
+    marginTop: theme.spacing[2],
   },
-  submitButtonDisabled: {
-    opacity: 0.5,
-    cursor: 'not-allowed',
-    transform: 'none',
+  centered: {
+    minHeight: '100vh',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: theme.colors.text.secondary,
   },
 };
-
-// Add keyframes for spinner (if you have global CSS, add this there)
-// Alternatively, include in a <style> tag or use CSS modules. For simplicity, we'll rely on existing global CSS.
-// If not, add this to your global.css:
-// @keyframes spin {
-//   0% { transform: rotate(0deg); }
-//   100% { transform: rotate(360deg); }
-// }

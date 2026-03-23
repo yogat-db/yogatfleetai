@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import { Briefcase, CreditCard, Users, CheckCircle, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import theme from '@/app/theme';
 
 type Mechanic = {
   id: string;
@@ -29,6 +31,7 @@ export default function MechanicDashboardPage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -43,6 +46,9 @@ export default function MechanicDashboardPage() {
         return;
       }
 
+      // Check admin
+      if (user.email === 'teebaxy@gmail.com') setIsAdmin(true);
+
       const { data: mech, error: mechError } = await supabase
         .from('mechanics')
         .select('*')
@@ -53,7 +59,7 @@ export default function MechanicDashboardPage() {
         router.push('/marketplace/mechanics/register');
         return;
       }
-
+ 
       setMechanic(mech);
 
       // If subscription is not active, redirect to subscribe
@@ -79,8 +85,37 @@ export default function MechanicDashboardPage() {
     }
   }
 
-  if (loading) return <div style={styles.centered}>Loading dashboard...</div>;
-  if (error) return <div style={styles.centered}>Error: {error}</div>;
+  if (loading) {
+    return (
+      <div style={styles.centered}>
+        <div className="spinner" />
+        <p>Loading dashboard...</p>
+        <style jsx>{`
+          .spinner {
+            border: 3px solid ${theme.colors.border.medium};
+            border-top: 3px solid ${theme.colors.primary};
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={styles.centered}>
+        <p style={{ color: theme.colors.error }}>Error: {error}</p>
+        <button onClick={fetchData} style={styles.retryButton}>Retry</button>
+      </div>
+    );
+  }
+
   if (!mechanic) return null;
 
   const pending = applications.filter(a => a.status === 'pending').length;
@@ -94,19 +129,20 @@ export default function MechanicDashboardPage() {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
       <h1 style={styles.title}>Mechanic Dashboard</h1>
 
+      {/* Subscription & verification status */}
       <div style={styles.subscriptionCard}>
         <div>
           <h2 style={styles.businessName}>{mechanic.business_name}</h2>
           <p style={styles.status}>
             Subscription:{' '}
-            <span style={{ color: mechanic.subscription_status === 'active' ? '#22c55e' : '#ef4444' }}>
+            <span style={{ color: mechanic.subscription_status === 'active' ? theme.colors.primary : theme.colors.error }}>
               {mechanic.subscription_status === 'active' ? 'Active' : 'Inactive'}
             </span>
           </p>
           {mechanic.verified ? (
             <span style={styles.verifiedBadge}>✓ Verified</span>
           ) : (
-            <span style={{ ...styles.verifiedBadge, background: '#ef444420', color: '#ef4444' }}>
+            <span style={{ ...styles.verifiedBadge, background: `${theme.colors.error}20`, color: theme.colors.error }}>
               ⚠️ Not Verified – Complete your profile
             </span>
           )}
@@ -118,6 +154,34 @@ export default function MechanicDashboardPage() {
         )}
       </div>
 
+      {/* Quick actions */}
+      <div style={styles.quickActions}>
+        <div style={styles.actionCard} onClick={() => router.push('/marketplace/jobs')}>
+          <Briefcase size={24} color={theme.colors.primary} />
+          <div>
+            <h3>Browse Jobs</h3>
+            <p>Find new repair jobs to apply for</p>
+          </div>
+        </div>
+        <div style={styles.actionCard} onClick={() => router.push('/marketplace/mechanics/subscribe')}>
+          <CreditCard size={24} color={theme.colors.primary} />
+          <div>
+            <h3>Manage Subscription</h3>
+            <p>Upgrade or change your plan</p>
+          </div>
+        </div>
+        {isAdmin && (
+          <div style={styles.actionCard} onClick={() => router.push('/admin')}>
+            <Users size={24} color={theme.colors.primary} />
+            <div>
+              <h3>Admin Dashboard</h3>
+              <p>Manage jobs, mechanics, users</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Statistics */}
       <div style={styles.statsGrid}>
         <div style={styles.statCard}>
           <span style={styles.statLabel}>Total Applications</span>
@@ -141,6 +205,7 @@ export default function MechanicDashboardPage() {
         </div>
       </div>
 
+      {/* Recent Applications */}
       <h2 style={styles.sectionTitle}>Recent Applications</h2>
       {applications.length === 0 ? (
         <p style={styles.empty}>You haven’t applied to any jobs yet. Browse the marketplace to start.</p>
@@ -158,22 +223,22 @@ export default function MechanicDashboardPage() {
             </thead>
             <tbody>
               {applications.slice(0, 5).map(app => (
-                <tr key={app.id}>
-                  <td>{app.job?.title || 'Unknown'}</td>
-                  <td>£{app.bid_amount}</td>
-                  <td>
+                <tr key={app.id} style={styles.tableRow}>
+                  <td style={styles.tableCell}>{app.job?.title || 'Unknown'}</td>
+                  <td style={styles.tableCell}>£{app.bid_amount}</td>
+                  <td style={styles.tableCell}>
                     <span
                       style={{
                         ...styles.statusBadge,
-                        background: app.status === 'accepted' ? '#22c55e20' : app.status === 'pending' ? '#f59e0b20' : '#64748b20',
-                        color: app.status === 'accepted' ? '#22c55e' : app.status === 'pending' ? '#f59e0b' : '#64748b',
+                        background: app.status === 'accepted' ? `${theme.colors.primary}20` : app.status === 'pending' ? `${theme.colors.warning}20` : `${theme.colors.text.muted}20`,
+                        color: app.status === 'accepted' ? theme.colors.primary : app.status === 'pending' ? theme.colors.warning : theme.colors.text.muted,
                       }}
                     >
                       {app.status}
                     </span>
                   </td>
-                  <td>{new Date(app.created_at).toLocaleDateString()}</td>
-                  <td>
+                  <td style={styles.tableCell}>{new Date(app.created_at).toLocaleDateString()}</td>
+                  <td style={styles.tableCell}>
                     <button onClick={() => router.push(`/marketplace/jobs/${app.job_id}`)} style={styles.viewButton}>
                       View Job
                     </button>
@@ -188,23 +253,161 @@ export default function MechanicDashboardPage() {
   );
 }
 
-const styles: { [key: string]: React.CSSProperties } = {
-  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9', fontFamily: 'Inter, sans-serif' },
-  centered: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' },
-  title: { fontSize: 32, fontWeight: 700, background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 24 },
-  subscriptionCard: { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16, padding: 20, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  businessName: { fontSize: 20, fontWeight: 600, marginBottom: 8 },
-  status: { color: '#94a3b8' },
-  verifiedBadge: { background: '#22c55e20', color: '#22c55e', padding: '4px 8px', borderRadius: 12, fontSize: 12, marginTop: 8, display: 'inline-block' },
-  subscribeButton: { background: '#22c55e', color: '#020617', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 600, cursor: 'pointer' },
-  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 20, marginBottom: 32 },
-  statCard: { background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #1e293b' },
-  statLabel: { fontSize: 14, color: '#64748b', display: 'block' },
-  statValue: { fontSize: 28, fontWeight: 700, marginTop: 4 },
-  sectionTitle: { fontSize: 20, fontWeight: 600, color: '#94a3b8', marginBottom: 16 },
-  tableWrapper: { background: '#0f172a', borderRadius: 12, border: '1px solid #1e293b', overflow: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 14 },
-  statusBadge: { padding: '4px 8px', borderRadius: 12, fontSize: 12, fontWeight: 500, textTransform: 'capitalize' },
-  viewButton: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '4px 8px', borderRadius: 4, fontSize: 12, cursor: 'pointer' },
-  empty: { color: '#64748b', textAlign: 'center', padding: 40 },
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    padding: theme.spacing[10],
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+    color: theme.colors.text.primary,
+    fontFamily: theme.fontFamilies.sans,
+  },
+  title: {
+    fontSize: theme.fontSizes['4xl'],
+    fontWeight: theme.fontWeights.bold,
+    marginBottom: theme.spacing[6],
+    background: theme.gradients.title,
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+  },
+  subscriptionCard: {
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.light}`,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[5],
+    marginBottom: theme.spacing[6],
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  businessName: {
+    fontSize: theme.fontSizes.xl,
+    fontWeight: theme.fontWeights.semibold,
+    marginBottom: theme.spacing[1],
+  },
+  status: {
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[1],
+  },
+  verifiedBadge: {
+    background: `${theme.colors.primary}20`,
+    color: theme.colors.primary,
+    padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+    borderRadius: theme.borderRadius.full,
+    fontSize: theme.fontSizes.xs,
+    display: 'inline-block',
+  },
+  subscribeButton: {
+    background: theme.colors.primary,
+    border: 'none',
+    borderRadius: theme.borderRadius.lg,
+    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
+    color: theme.colors.background.main,
+    fontWeight: theme.fontWeights.semibold,
+    cursor: 'pointer',
+    transition: 'background 0.2s ease',
+  },
+  quickActions: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+    gap: theme.spacing[5],
+    marginBottom: theme.spacing[8],
+  },
+  actionCard: {
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.light}`,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[5],
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[4],
+    cursor: 'pointer',
+    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+  },
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: theme.spacing[4],
+    marginBottom: theme.spacing[8],
+  },
+  statCard: {
+    background: theme.colors.background.card,
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    border: `1px solid ${theme.colors.border.light}`,
+    textAlign: 'center',
+  },
+  statLabel: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.muted,
+    display: 'block',
+    marginBottom: theme.spacing[1],
+  },
+  statValue: {
+    fontSize: theme.fontSizes['3xl'],
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.text.primary,
+  },
+  sectionTitle: {
+    fontSize: theme.fontSizes['2xl'],
+    fontWeight: theme.fontWeights.semibold,
+    marginBottom: theme.spacing[4],
+    color: theme.colors.text.primary,
+  },
+  tableWrapper: {
+    background: theme.colors.background.card,
+    borderRadius: theme.borderRadius.xl,
+    overflow: 'auto',
+    border: `1px solid ${theme.colors.border.light}`,
+  },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: theme.fontSizes.sm,
+  },
+  tableRow: {
+    borderBottom: `1px solid ${theme.colors.border.light}`,
+  },
+  tableCell: {
+    padding: theme.spacing[3],
+    color: theme.colors.text.primary,
+  },
+  statusBadge: {
+    display: 'inline-block',
+    padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+    borderRadius: theme.borderRadius.full,
+    fontSize: theme.fontSizes.xs,
+    fontWeight: theme.fontWeights.medium,
+    textTransform: 'capitalize',
+  },
+  viewButton: {
+    background: 'transparent',
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
+    color: theme.colors.text.secondary,
+    cursor: 'pointer',
+    transition: 'background 0.2s ease',
+  },
+  centered: {
+    minHeight: '100vh',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: theme.colors.text.secondary,
+  },
+  retryButton: {
+    marginTop: theme.spacing[4],
+    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
+    background: theme.colors.primary,
+    border: 'none',
+    borderRadius: theme.borderRadius.lg,
+    color: theme.colors.background.main,
+    cursor: 'pointer',
+  },
+  empty: {
+    textAlign: 'center',
+    padding: theme.spacing[12],
+    color: theme.colors.text.muted,
+  },
 };

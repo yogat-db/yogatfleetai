@@ -1,58 +1,193 @@
-import { supabaseAdmin } from '@/lib/supabase/admin'
-import Link from 'next/link'
-import { Users, Wrench, Briefcase, TrendingUp } from 'lucide-react'
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import Link from 'next/link';
+import { Briefcase, Users, UserCog, ArrowRight, AlertCircle } from 'lucide-react';
+import theme from '@/app/theme';
+
+export const metadata = {
+  title: 'Admin Dashboard | Yogat Fleet AI',
+};
 
 export default async function AdminDashboardPage() {
-  const [
-    { count: usersCount },
-    { count: mechanicsCount },
-    { count: jobsCount },
-  ] = await Promise.all([
-    supabaseAdmin.from('auth.users').select('*', { count: 'exact', head: true }),
-    supabaseAdmin.from('mechanics').select('*', { count: 'exact', head: true }),
-    supabaseAdmin.from('jobs').select('*', { count: 'exact', head: true }),
-  ])
+  let jobsCount = 0;
+  let mechanicsCount = 0;
+  let usersCount = 0;
+  let error = null;
 
-  const stats = {
-    users: usersCount || 0,
-    mechanics: mechanicsCount || 0,
-    jobs: jobsCount || 0,
-    revenue: 0, // placeholder
+  try {
+    const { count: jobs, error: jobsErr } = await supabaseAdmin
+      .from('jobs')
+      .select('*', { count: 'exact', head: true });
+    if (jobsErr) throw jobsErr;
+    jobsCount = jobs || 0;
+
+    const { count: mechanics, error: mechErr } = await supabaseAdmin
+      .from('mechanics')
+      .select('*', { count: 'exact', head: true });
+    if (mechErr) throw mechErr;
+    mechanicsCount = mechanics || 0;
+
+    const { data: usersData, error: usersErr } = await supabaseAdmin.auth.admin.listUsers();
+    if (usersErr) throw usersErr;
+    usersCount = usersData?.users.length || 0;
+  } catch (err: any) {
+    console.error('Admin dashboard error:', err);
+    error = err.message;
   }
 
-  const cards = [
-    { title: 'Total Users', value: stats.users, icon: Users, href: '/admin/users', color: '#3b82f6' },
-    { title: 'Mechanics', value: stats.mechanics, icon: Wrench, href: '/admin/mechanics', color: '#22c55e' },
-    { title: 'Jobs', value: stats.jobs, icon: Briefcase, href: '/admin/jobs', color: '#f59e0b' },
-    { title: 'Revenue', value: `£${stats.revenue}`, icon: TrendingUp, href: '/admin/revenue', color: '#ef4444' },
-  ]
+  const stats = [
+    { label: 'Total Jobs', value: jobsCount, icon: Briefcase, href: '/admin/jobs', color: '#22c55e' },
+    { label: 'Total Mechanics', value: mechanicsCount, icon: Users, href: '/admin/mechanics', color: '#3b82f6' },
+    { label: 'Total Users', value: usersCount, icon: UserCog, href: '/admin/users', color: '#f59e0b' },
+  ];
+
+  if (error) {
+    return (
+      <div style={styles.errorContainer}>
+        <AlertCircle size={48} color={theme.colors.error} />
+        <h2>Unable to load admin data</h2>
+        <p>{error}</p>
+        <p>Check that Supabase environment variables are set correctly and the service role key has permission.</p>
+      </div>
+    );
+  }
 
   return (
-    <div style={styles.page}>
+    <div style={styles.container}>
       <h1 style={styles.title}>Admin Dashboard</h1>
-      <div style={styles.grid}>
-        {cards.map((card) => (
-          <Link key={card.title} href={card.href} style={styles.card}>
-            <div style={{ ...styles.icon, background: `${card.color}20` }}>
-              <card.icon size={24} color={card.color} />
-            </div>
-            <div>
-              <p style={styles.cardLabel}>{card.title}</p>
-              <p style={{ ...styles.cardValue, color: card.color }}>{card.value}</p>
+      <p style={styles.subtitle}>Manage your platform from one place</p>
+
+      <div style={styles.statsGrid}>
+        {stats.map((stat) => (
+          <Link key={stat.label} href={stat.href} style={{ textDecoration: 'none' }}>
+            <div style={styles.statCard}>
+              <stat.icon size={32} color={stat.color} />
+              <div style={styles.statContent}>
+                <span style={styles.statValue}>{stat.value}</span>
+                <span style={styles.statLabel}>{stat.label}</span>
+              </div>
+              <ArrowRight size={18} style={styles.arrow} />
             </div>
           </Link>
         ))}
       </div>
+
+      <h2 style={styles.sectionTitle}>Quick Actions</h2>
+      <div style={styles.actionGrid}>
+        <Link href="/admin/jobs" style={{ textDecoration: 'none' }}>
+          <div style={styles.actionCard}>
+            <Briefcase size={24} color={theme.colors.primary} />
+            <div>
+              <h3>Manage Jobs</h3>
+              <p>View, edit, or delete repair jobs</p>
+            </div>
+          </div>
+        </Link>
+        <Link href="/admin/mechanics" style={{ textDecoration: 'none' }}>
+          <div style={styles.actionCard}>
+            <Users size={24} color={theme.colors.primary} />
+            <div>
+              <h3>Manage Mechanics</h3>
+              <p>Verify, edit, or remove mechanics</p>
+            </div>
+          </div>
+        </Link>
+        <Link href="/admin/users" style={{ textDecoration: 'none' }}>
+          <div style={styles.actionCard}>
+            <UserCog size={24} color={theme.colors.primary} />
+            <div>
+              <h3>Manage Users</h3>
+              <p>Promote users to admin, view details</p>
+            </div>
+          </div>
+        </Link>
+      </div>
     </div>
-  )
+  );
 }
 
-const styles = {
-  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9' },
-  title: { fontSize: 32, fontWeight: 700, marginBottom: 32, background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 20 },
-  card: { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16, padding: 20, display: 'flex', alignItems: 'center', gap: 16, textDecoration: 'none', color: 'inherit' },
-  icon: { width: 48, height: 48, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  cardLabel: { fontSize: 14, color: '#94a3b8', marginBottom: 4 },
-  cardValue: { fontSize: 24, fontWeight: 700 },
-} as const
+// Inline styles – no CSS module required, no :hover pseudo‑class
+const styles: Record<string, React.CSSProperties> = {
+  container: {
+    padding: theme.spacing[10],
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+    color: theme.colors.text.primary,
+    fontFamily: theme.fontFamilies.sans,
+  },
+  title: {
+    fontSize: theme.fontSizes['4xl'],
+    fontWeight: theme.fontWeights.bold,
+    marginBottom: theme.spacing[2],
+    background: theme.gradients.title,
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+  },
+  subtitle: {
+    fontSize: theme.fontSizes.base,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[8],
+  },
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: theme.spacing[6],
+    marginBottom: theme.spacing[12],
+  },
+  statCard: {
+    background: theme.colors.background.card,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[6],
+    border: `1px solid ${theme.colors.border.light}`,
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[4],
+    transition: 'transform 0.2s ease, box-shadow 0.2s ease', // no :hover, but element will still transform if we add JS hover? We'll omit hover to avoid inline pseudo.
+    cursor: 'pointer',
+  },
+  statContent: { flex: 1 },
+  statValue: {
+    fontSize: theme.fontSizes['3xl'],
+    fontWeight: theme.fontWeights.bold,
+    display: 'block',
+    color: theme.colors.text.primary,
+  },
+  statLabel: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.muted,
+  },
+  arrow: { color: theme.colors.text.muted },
+  sectionTitle: {
+    fontSize: theme.fontSizes['2xl'],
+    fontWeight: theme.fontWeights.semibold,
+    marginBottom: theme.spacing[6],
+    color: theme.colors.text.primary,
+  },
+  actionGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+    gap: theme.spacing[4],
+  },
+  actionCard: {
+    background: theme.colors.background.card,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[4],
+    border: `1px solid ${theme.colors.border.light}`,
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[4],
+    transition: 'background 0.2s ease',
+    cursor: 'pointer',
+  },
+  errorContainer: {
+    padding: theme.spacing[10],
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center',
+    color: theme.colors.text.primary,
+    gap: theme.spacing[4],
+  },
+};

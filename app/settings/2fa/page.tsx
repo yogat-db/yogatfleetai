@@ -52,33 +52,42 @@ export default function TwoFactorPage() {
   };
 
   const verify2FA = async () => {
-    if (!factorId) {
-      setError('No pending enrollment found. Please start over.');
-      return;
-    }
-    if (!verifyCode || verifyCode.length !== 6) {
-      setError('Please enter a valid 6‑digit code.');
-      return;
-    }
-    setError(null);
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.mfa.verify({
-        factorId,
-        code: verifyCode,
-      });
-      if (error) throw error;
-      setSuccess('Two‑factor authentication enabled successfully.');
-      setEnabled(true);
-      setQrCode(null);
-      setFactorId(null);
-      setVerifyCode('');
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (!factorId) {
+    setError('No pending 2FA enrollment found. Please start over.');
+    return;
+  }
+  if (!verifyCode || verifyCode.length !== 6) {
+    setError('Please enter a valid 6-digit code.');
+    return;
+  }
+  setError(null);
+  setLoading(true);
+  try {
+    // First, create a challenge for the factor
+    const { data: challengeData, error: challengeError } = await supabase.auth.mfa.challenge({
+      factorId,
+    });
+    if (challengeError) throw challengeError;
+
+    // Then verify the challenge with the code
+    const { error } = await supabase.auth.mfa.verify({
+      factorId,
+      challengeId: challengeData.id,
+      code: verifyCode,
+    });
+    if (error) throw error;
+
+    setEnabled(true);
+    setQrCode(null);
+    setFactorId(null);
+    setVerifyCode('');
+    setSuccess('Two-factor authentication enabled successfully.');
+  } catch (err: any) {
+    setError(err.message || 'Verification failed');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const disable2FA = async () => {
     if (!confirm('Are you sure you want to disable two‑factor authentication? Your account will be less secure.')) return;

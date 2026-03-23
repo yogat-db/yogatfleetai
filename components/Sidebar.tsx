@@ -11,17 +11,15 @@ import {
   Wrench,
   History,
   Settings,
-  Users,
-  Briefcase,
+  LayoutPanelLeft,
   Menu,
   X,
   LogOut,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
-// ---------- Custom Hook for User Role ----------
+// ---------- Custom Hook for User Role (hardcoded admin for teebaxy) ----------
 function useUserRole() {
-  const [isMechanic, setIsMechanic] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -33,43 +31,39 @@ function useUserRole() {
         return;
       }
 
-      // Check mechanic
-      const { data: mechanic } = await supabase
-        .from('mechanics')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      setIsMechanic(!!mechanic);
-
-      // Check admin – assumes an 'admins' table
-      const { data: admin } = await supabase
-        .from('admins')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      setIsAdmin(!!admin);
+      // Hardcoded admin for teebaxy@gmail.com
+      if (user.email === 'teebaxy@gmail.com') {
+        setIsAdmin(true);
+      } else {
+        // Fallback to admins table
+        const { data: admin } = await supabase
+          .from('admins')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        setIsAdmin(!!admin);
+      }
 
       setLoading(false);
     };
     fetchRoles();
   }, []);
 
-  return { isMechanic, isAdmin, loading };
+  return { isAdmin, loading };
 }
 // ---------- End Hook ----------
 
-// Constants
+// Theme constants
 const primaryColor = '#22c55e';
 const textSecondary = '#94a3b8';
 const bgCard = '#0f172a';
 const borderLight = '#1e293b';
 const borderMedium = '#334155';
-const errorColor = '#ef4444';
 const activeBg = '#1e293b';
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { isMechanic, isAdmin, loading } = useUserRole();
+  const { isAdmin, loading } = useUserRole();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
@@ -78,6 +72,7 @@ export default function Sidebar() {
     window.location.href = '/login';
   };
 
+  // Main menu items in desired order
   const menuItems = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Fleet', href: '/fleet', icon: Truck },
@@ -87,14 +82,8 @@ export default function Sidebar() {
     { name: 'Control Center', href: '/control-center', icon: Settings },
   ];
 
-  const mechanicItems = [
-    { name: 'Mechanic Dashboard', href: '/marketplace/mechanics/dashboard', icon: Briefcase },
-  ];
-
-  const adminItems = [
-    { name: 'Admin Jobs', href: '/admin/jobs', icon: Briefcase },
-    { name: 'Admin Mechanics', href: '/admin/mechanics', icon: Users },
-  ];
+  // Admin dashboard – only one link, all admin features inside
+  const adminDashboardItem = { name: 'Admin Dashboard', href: '/admin', icon: LayoutPanelLeft };
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -106,6 +95,7 @@ export default function Sidebar() {
           <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
             <motion.div
               whileHover={{ x: 4 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
               style={{
                 ...styles.navItem,
                 background: active ? activeBg : 'transparent',
@@ -124,16 +114,39 @@ export default function Sidebar() {
   const renderContent = () => (
     <>
       {renderNavItems(menuItems)}
-      {!loading && isMechanic && renderNavItems(mechanicItems)}
-      {!loading && isAdmin && renderNavItems(adminItems)}
-      <button onClick={handleLogout} style={styles.logoutButton}>
+
+      {/* Admin Dashboard – only appears for admin users */}
+      {!loading && isAdmin && (
+        <Link href={adminDashboardItem.href} style={{ textDecoration: 'none' }}>
+          <motion.div
+            whileHover={{ x: 4 }}
+            style={{
+              ...styles.navItem,
+              background: isActive(adminDashboardItem.href) ? activeBg : 'transparent',
+              borderLeft: isActive(adminDashboardItem.href) ? `3px solid ${primaryColor}` : '3px solid transparent',
+              marginTop: '4px',
+            }}
+          >
+            <adminDashboardItem.icon size={20} color={isActive(adminDashboardItem.href) ? primaryColor : textSecondary} />
+            {!isCollapsed && <span style={{ marginLeft: '12px' }}>{adminDashboardItem.name}</span>}
+          </motion.div>
+        </Link>
+      )}
+
+      {/* Logout button */}
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={handleLogout}
+        style={styles.logoutButton}
+      >
         <LogOut size={20} />
         {!isCollapsed && <span style={{ marginLeft: '12px' }}>Sign Out</span>}
-      </button>
+      </motion.button>
     </>
   );
 
-  // Mobile drawer
+  // Mobile drawer (unchanged)
   const MobileDrawer = () => (
     <AnimatePresence>
       {isMobileOpen && (
@@ -141,12 +154,18 @@ export default function Sidebar() {
           initial={{ x: -300 }}
           animate={{ x: 0 }}
           exit={{ x: -300 }}
+          transition={{ type: 'spring', damping: 25 }}
           style={styles.mobileDrawer}
         >
           <div style={styles.drawerHeader}>
-            <button onClick={() => setIsMobileOpen(false)} style={styles.closeButton}>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={() => setIsMobileOpen(false)}
+              style={styles.closeButton}
+            >
               <X size={24} />
-            </button>
+            </motion.button>
           </div>
           <div style={styles.drawerContent}>{renderContent()}</div>
         </motion.div>
@@ -156,36 +175,55 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile hamburger button */}
-      <button onClick={() => setIsMobileOpen(true)} style={styles.menuButton}>
+      <motion.button
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => setIsMobileOpen(true)}
+        style={styles.menuButton}
+      >
         <Menu size={24} />
-      </button>
+      </motion.button>
       <MobileDrawer />
 
-      {/* Desktop sidebar */}
-      <aside
+      <motion.aside
+        initial={{ x: -260 }}
+        animate={{ x: 0 }}
+        transition={{ type: 'spring', damping: 20, stiffness: 100 }}
         style={{
           ...styles.desktopSidebar,
           width: isCollapsed ? 80 : 260,
-          transition: 'all 0.2s ease',
         }}
       >
         <div style={styles.logoContainer}>
-          <h1 style={styles.logoText}>Yogat</h1>
-          <button onClick={() => setIsCollapsed(!isCollapsed)} style={styles.collapseButton}>
+          <motion.h1 whileHover={{ scale: 1.02 }} style={styles.logoText}>
+            {!isCollapsed ? 'Yogat' : 'Y'}
+          </motion.h1>
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            style={styles.collapseButton}
+          >
             {isCollapsed ? '→' : '←'}
-          </button>
+          </motion.button>
         </div>
         <nav style={styles.nav}>{renderContent()}</nav>
-      </aside>
+      </motion.aside>
 
-      {/* Overlay for mobile */}
-      {isMobileOpen && <div style={styles.overlay} onClick={() => setIsMobileOpen(false)} />}
+      {isMobileOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          style={styles.overlay}
+          onClick={() => setIsMobileOpen(false)}
+        />
+      )}
     </>
   );
 }
 
-// ---------- Styles ----------
+// Styles (unchanged)
 const styles: Record<string, React.CSSProperties> = {
   desktopSidebar: {
     position: 'fixed',
@@ -198,6 +236,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     zIndex: 30,
     overflowY: 'auto',
+    transition: 'width 0.2s ease',
   },
   logoContainer: {
     display: 'flex',
@@ -213,6 +252,7 @@ const styles: Record<string, React.CSSProperties> = {
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
     margin: 0,
+    cursor: 'pointer',
   },
   collapseButton: {
     background: 'transparent',
@@ -235,7 +275,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '8px 12px',
     borderRadius: '8px',
     cursor: 'pointer',
-    transition: 'all 0.2s',
+    transition: 'background 0.2s, border-left 0.2s',
     color: '#f1f5f9',
   },
   logoutButton: {
@@ -251,7 +291,6 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 'auto',
     width: '100%',
   },
-  // Mobile styles
   menuButton: {
     position: 'fixed',
     top: '16px',
@@ -262,7 +301,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '8px',
     cursor: 'pointer',
     zIndex: 40,
-    display: 'none', // hidden on desktop by default
+    display: 'none',
   },
   mobileDrawer: {
     position: 'fixed',
@@ -302,3 +341,14 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 45,
   },
 };
+
+// Mobile media query (runs client‑side)
+if (typeof window !== 'undefined') {
+  const mediaQuery = window.matchMedia('(max-width: 768px)');
+  const handleMediaChange = (e: MediaQueryListEvent | MediaQueryList) => {
+    const btn = document.querySelector('button[style*="position: fixed"]') as HTMLElement;
+    if (btn) btn.style.display = e.matches ? 'flex' : 'none';
+  };
+  handleMediaChange(mediaQuery);
+  mediaQuery.addEventListener('change', handleMediaChange);
+}

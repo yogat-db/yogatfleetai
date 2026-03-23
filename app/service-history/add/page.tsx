@@ -1,17 +1,17 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { motion } from 'framer-motion'
-import Image from 'next/image'
-import { supabase } from '@/lib/supabase/client'
+import { Suspense } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabase/client';
 
 type Vehicle = {
-  id: string
-  license_plate: string
-  make: string | null
-  model: string | null
-}
+  id: string;
+  license_plate: string;
+  make: string | null;
+  model: string | null;
+};
 
 const JOB_TITLES = [
   'Oil Change',
@@ -29,97 +29,101 @@ const JOB_TITLES = [
   'Suspension Repair',
   'Alternator Replacement',
   'Radiator Replacement',
-]
+];
 
-export default function AddServiceEventPage() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const preSelectedVehicleId = searchParams.get('vehicleId')
+// Export force dynamic to avoid static generation
+export const dynamic = 'force-dynamic';
 
-  const [vehicles, setVehicles] = useState<Vehicle[]>([])
-  const [selectedVehicleId, setSelectedVehicleId] = useState('')
-  const [title, setTitle] = useState('')
-  const [customTitle, setCustomTitle] = useState('')
-  const [useCustomTitle, setUseCustomTitle] = useState(false)
-  const [description, setDescription] = useState('')
-  const [mileage, setMileage] = useState('')
-  const [occurredAt, setOccurredAt] = useState(new Date().toISOString().split('T')[0])
-  const [imageFile, setImageFile] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+// Inner component that uses useSearchParams
+function AddServiceContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const preSelectedVehicleId = searchParams.get('vehicleId');
+
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState('');
+  const [title, setTitle] = useState('');
+  const [customTitle, setCustomTitle] = useState('');
+  const [useCustomTitle, setUseCustomTitle] = useState(false);
+  const [description, setDescription] = useState('');
+  const [mileage, setMileage] = useState('');
+  const [occurredAt, setOccurredAt] = useState(new Date().toISOString().split('T')[0]);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    fetchVehicles()
-  }, [])
+    fetchVehicles();
+  }, []);
 
   useEffect(() => {
     if (preSelectedVehicleId && vehicles.length > 0) {
-      setSelectedVehicleId(preSelectedVehicleId)
+      setSelectedVehicleId(preSelectedVehicleId);
     }
-  }, [vehicles, preSelectedVehicleId])
+  }, [vehicles, preSelectedVehicleId]);
 
   async function fetchVehicles() {
     try {
       const { data, error } = await supabase
         .from('vehicles')
         .select('id, license_plate, make, model')
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: false });
 
-      if (error) throw error
-      setVehicles(data || [])
+      if (error) throw error;
+      setVehicles(data || []);
     } catch (err) {
-      console.error('Failed to fetch vehicles')
+      console.error('Failed to fetch vehicles');
     }
   }
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setImageFile(file)
-    setImagePreview(URL.createObjectURL(file))
-  }
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  };
 
   const uploadImage = async (): Promise<string | null> => {
-    if (!imageFile) return null
-    const fileExt = imageFile.name.split('.').pop()
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
-    const filePath = `service-events/${fileName}`
+    if (!imageFile) return null;
+    const fileExt = imageFile.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const filePath = `service-events/${fileName}`;
     const { error: uploadError } = await supabase.storage
       .from('service-images')
-      .upload(filePath, imageFile)
+      .upload(filePath, imageFile);
     if (uploadError) {
-      console.error('Upload error:', uploadError)
-      throw new Error('Failed to upload receipt')
+      console.error('Upload error:', uploadError);
+      throw new Error('Failed to upload receipt');
     }
     const { data: urlData } = supabase.storage
       .from('service-images')
-      .getPublicUrl(filePath)
-    return urlData.publicUrl
-  }
+      .getPublicUrl(filePath);
+    return urlData.publicUrl;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
 
-    const finalTitle = useCustomTitle ? customTitle : title
+    const finalTitle = useCustomTitle ? customTitle : title;
     if (!selectedVehicleId) {
-      setError('Please select a vehicle')
-      setLoading(false)
-      return
+      setError('Please select a vehicle');
+      setLoading(false);
+      return;
     }
     if (!finalTitle.trim()) {
-      setError('Title is required')
-      setLoading(false)
-      return
+      setError('Title is required');
+      setLoading(false);
+      return;
     }
 
     try {
-      let imageUrl = null
+      let imageUrl: string | null = null;
       if (imageFile) {
-        imageUrl = await uploadImage()
+        imageUrl = await uploadImage();
       }
 
       const payload = {
@@ -129,29 +133,29 @@ export default function AddServiceEventPage() {
         mileage: mileage ? parseInt(mileage) : null,
         occurred_at: occurredAt,
         image_url: imageUrl,
-      }
+      };
 
       const res = await fetch(`/api/vehicles/${selectedVehicleId}/service-events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      })
+      });
 
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to add service event')
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add service event');
 
-      setSuccess(true)
+      setSuccess(true);
       setTimeout(() => {
-        router.push('/service-history')
-        router.refresh()
-      }, 1500)
+        router.push('/service-history');
+        router.refresh();
+      }, 1500);
     } catch (err: any) {
-      console.error('Submit error:', err)
-      setError(err.message)
+      console.error('Submit error:', err);
+      setError(err.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <motion.div
@@ -284,8 +288,8 @@ export default function AddServiceEventPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setImageFile(null)
-                    setImagePreview(null)
+                    setImageFile(null);
+                    setImagePreview(null);
                   }}
                   style={styles.clearPreview}
                 >
@@ -318,9 +322,18 @@ export default function AddServiceEventPage() {
         </div>
       </form>
     </motion.div>
-  )
+  );
 }
 
+export default function AddServiceEventPage() {
+  return (
+    <Suspense fallback={<div style={styles.centered}>Loading...</div>}>
+      <AddServiceContent />
+    </Suspense>
+  );
+}
+
+// Styles (unchanged, but we need to add centered style)
 const styles: Record<string, React.CSSProperties> = {
   page: {
     padding: '40px',
@@ -479,4 +492,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: 'pointer',
   },
-}
+  centered: {
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#94a3b8',
+  },
+};

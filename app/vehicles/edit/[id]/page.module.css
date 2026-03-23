@@ -1,0 +1,60 @@
+.page {
+  padding: 40px;
+  background: #020617;
+  min-height: 100vh;
+  color: #f1f5f9;
+  font-family: 'Inter', sans-serif;
+}
+.title {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, #94a3b8, #f1f5f9);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+.formGroup {
+  margin-bottom: 16px;
+}
+.label {
+  display: block;
+  font-size: 14px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+.input {
+  width: 100%;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 12px;
+  color: #f1f5f9;
+  font-size: 16px;
+}
+.button {
+  background: #22c55e;
+  border: none;
+  border-radius: 8px;
+  padding: 12px;
+  color: #020617;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+}
+.backButton {
+  background: transparent;
+  border: 1px solid #334155;
+  color: #f1f5f9;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 24px;
+}

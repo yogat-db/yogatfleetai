@@ -1,3 +1,4 @@
+// app/marketplace/mechanics/register/page.tsx
 'use client';
 
 import { useState } from 'react';
@@ -5,7 +6,11 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { MapPin, Phone, Building, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-// import { geocode } from '@/lib/mapbox'; // Only if you have this helper
+import theme from '@/app/theme';
+
+// Optional geocoding – if you don't have Mapbox set up, you can comment this out
+// import mbxGeocoding from '@mapbox/mapbox-sdk/services/geocoding';
+// const geocodingClient = mbxGeocoding({ accessToken: process.env.NEXT_PUBLIC_MAPBOX_TOKEN! });
 
 export default function MechanicRegisterPage() {
   const router = useRouter();
@@ -25,18 +30,19 @@ export default function MechanicRegisterPage() {
       if (!businessName.trim()) throw new Error('Business name is required');
       if (!address.trim()) throw new Error('Address is required');
 
-      // Optional geocoding – if the helper is not available, skip it
+      // Optional: geocode address to get lat/lng (if you have Mapbox)
       let lat: number | null = null;
       let lng: number | null = null;
-      // if (typeof geocode === 'function') {
+      // if (address.trim()) {
       //   try {
-      //     const results = await geocode(address);
-      //     if (results && results.length > 0) {
-      //       lat = results[0].center[1];
-      //       lng = results[0].center[0];
+      //     const response = await geocodingClient
+      //       .forwardGeocode({ query: address, limit: 1 })
+      //       .send();
+      //     if (response.body.features.length) {
+      //       [lng, lat] = response.body.features[0].center;
       //     }
-      //   } catch (geocodeErr) {
-      //     console.warn('Geocoding failed:', geocodeErr);
+      //   } catch (geoErr) {
+      //     console.warn('Geocoding failed, proceeding without coordinates', geoErr);
       //   }
       // }
 
@@ -66,46 +72,87 @@ export default function MechanicRegisterPage() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={styles.page}>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={styles.page}
+    >
       <button onClick={() => router.back()} style={styles.backButton}>
         ← Back
       </button>
       <div style={styles.card}>
         <h1 style={styles.title}>Become a Mechanic</h1>
-        <p style={styles.subtitle}>Register to receive local repair jobs and grow your business.</p>
+        <p style={styles.subtitle}>
+          Register to receive local repair jobs and grow your business.
+        </p>
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.field}>
             <label style={styles.label}>
-              <Building size={16} color="#64748b" />
+              <Building size={16} color={theme.colors.text.muted} />
               Business Name *
             </label>
-            <input type="text" value={businessName} onChange={(e) => setBusinessName(e.target.value)} style={styles.input} required disabled={loading} />
+            <input
+              type="text"
+              value={businessName}
+              onChange={(e) => setBusinessName(e.target.value)}
+              style={styles.input}
+              required
+              disabled={loading}
+            />
           </div>
           <div style={styles.field}>
             <label style={styles.label}>
-              <Phone size={16} color="#64748b" />
+              <Phone size={16} color={theme.colors.text.muted} />
               Phone Number
             </label>
-            <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} style={styles.input} disabled={loading} />
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              style={styles.input}
+              disabled={loading}
+            />
           </div>
           <div style={styles.field}>
             <label style={styles.label}>
-              <MapPin size={16} color="#64748b" />
+              <MapPin size={16} color={theme.colors.text.muted} />
               Business Address *
             </label>
-            <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="e.g., 123 High Street, Leicester, LE1 1AA" style={styles.input} required disabled={loading} />
-            <p style={styles.helpText}>We'll use this to show your location on the map and match you with local jobs.</p>
+            <input
+              type="text"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="e.g., 123 High Street, Leicester, LE1 1AA"
+              style={styles.input}
+              required
+              disabled={loading}
+            />
+            <p style={styles.helpText}>
+              We'll use this to show your location on the map and match you with local jobs.
+            </p>
           </div>
+
           {error && (
             <div style={styles.errorBox}>
               <AlertCircle size={16} />
               {error}
             </div>
           )}
-          {success && <div style={styles.successBox}>✓ Registration successful! Redirecting to your dashboard...</div>}
-          <button type="submit" disabled={loading || success} style={styles.submitButton}>
+
+          {success && (
+            <div style={styles.successBox}>
+              ✓ Registration successful! Redirecting to your dashboard...
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || success}
+            style={styles.submitButton}
+          >
             {loading ? 'Registering...' : 'Register as Mechanic'}
           </button>
+
           <p style={styles.legalNote}>
             By registering, you agree to our{' '}
             <a href="/terms" style={styles.link}>Terms of Service</a> and{' '}
@@ -118,19 +165,121 @@ export default function MechanicRegisterPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9', fontFamily: 'Inter, sans-serif', display: 'flex', justifyContent: 'center' },
-  backButton: { position: 'absolute', top: '20px', left: '20px', background: 'transparent', border: '1px solid #334155', color: '#f1f5f9', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' },
-  card: { maxWidth: '600px', width: '100%', background: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '32px', marginTop: '40px' },
-  title: { fontSize: '28px', fontWeight: 700, marginBottom: '8px', color: '#f1f5f9' },
-  subtitle: { color: '#94a3b8', marginBottom: '24px', fontSize: '14px' },
-  form: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  field: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  label: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', color: '#94a3b8' },
-  input: { width: '100%', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '12px', color: '#f1f5f9', fontSize: '16px', outline: 'none' },
-  helpText: { fontSize: '12px', color: '#64748b', marginTop: '4px' },
-  errorBox: { display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444', borderRadius: '8px', padding: '12px', color: '#ef4444', fontSize: '14px' },
-  successBox: { background: 'rgba(34,197,94,0.1)', border: '1px solid #22c55e', borderRadius: '8px', padding: '12px', color: '#22c55e', fontSize: '14px', textAlign: 'center' },
-  submitButton: { background: '#22c55e', color: '#020617', border: 'none', borderRadius: '8px', padding: '12px', fontSize: '16px', fontWeight: 600, cursor: 'pointer', marginTop: '8px' },
-  legalNote: { fontSize: '12px', color: '#64748b', textAlign: 'center', marginTop: '8px' },
-  link: { color: '#22c55e', textDecoration: 'none', cursor: 'pointer' },
+  page: {
+    padding: theme.spacing[10],
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+    color: theme.colors.text.primary,
+    fontFamily: theme.fontFamilies.sans,
+    display: 'flex',
+    justifyContent: 'center',
+  },
+  backButton: {
+    position: 'absolute',
+    top: theme.spacing[5],
+    left: theme.spacing[5],
+    background: 'transparent',
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
+    color: theme.colors.text.secondary,
+    cursor: 'pointer',
+    transition: 'background 0.2s ease',
+  },
+  card: {
+    maxWidth: '600px',
+    width: '100%',
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.light}`,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[8],
+    marginTop: theme.spacing[10],
+  },
+  title: {
+    fontSize: theme.fontSizes['3xl'],
+    fontWeight: theme.fontWeights.bold,
+    marginBottom: theme.spacing[2],
+    color: theme.colors.text.primary,
+  },
+  subtitle: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[6],
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[5],
+  },
+  field: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[2],
+  },
+  label: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.secondary,
+  },
+  input: {
+    width: '100%',
+    background: theme.colors.background.elevated,
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.text.primary,
+    fontSize: theme.fontSizes.base,
+    outline: 'none',
+    transition: 'border 0.2s ease',
+  },
+  helpText: {
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.text.muted,
+    marginTop: theme.spacing[1],
+  },
+  errorBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    background: `${theme.colors.error}20`,
+    border: `1px solid ${theme.colors.error}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.error,
+    fontSize: theme.fontSizes.sm,
+  },
+  successBox: {
+    background: `${theme.colors.primary}20`,
+    border: `1px solid ${theme.colors.primary}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.primary,
+    fontSize: theme.fontSizes.sm,
+    textAlign: 'center',
+  },
+  submitButton: {
+    background: theme.colors.primary,
+    border: 'none',
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    fontSize: theme.fontSizes.base,
+    fontWeight: theme.fontWeights.semibold,
+    color: theme.colors.background.main,
+    cursor: 'pointer',
+    transition: 'background 0.2s ease',
+    marginTop: theme.spacing[2],
+  },
+  legalNote: {
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.text.muted,
+    textAlign: 'center',
+    marginTop: theme.spacing[4],
+  },
+  link: {
+    color: theme.colors.primary,
+    textDecoration: 'none',
+    transition: 'color 0.2s ease',
+  },
 };

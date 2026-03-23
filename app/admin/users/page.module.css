@@ -1,0 +1,55 @@
+.page {
+  padding: 40px;
+  background: #020617;
+  min-height: 100vh;
+  color: #f1f5f9;
+  font-family: 'Inter', sans-serif;
+}
+
+.title {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, #94a3b8, #f1f5f9);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.tableWrapper {
+  background: #0f172a;
+  border-radius: 16px;
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #1e293b;
+}
+
+.table td {
+  padding: 12px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.makeAdminButton {
+  background: #22c55e;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 6px;
+  color: #020617;
+  cursor: pointer;
+}
+.makeAdminButton:hover {
+  background: #15803d;
+}
