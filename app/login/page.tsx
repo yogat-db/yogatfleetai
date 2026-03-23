@@ -4,158 +4,235 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase/client';
-import Link from 'next/link';
+import theme from '@/app/theme';
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [resetSent, setResetSent] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
-    try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
+    setError(null);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      setError(error.message);
+    } else {
       router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Please enter your email address first.');
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/update-password`,
+    });
+    if (error) {
+      setError(error.message);
+    } else {
+      setResetSent(true);
+    }
+    setLoading(false);
   };
 
   return (
-    <div style={styles.container}>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        style={styles.card}
-      >
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={styles.page}
+    >
+      <div style={styles.card}>
         <h1 style={styles.title}>Welcome Back</h1>
-        <p style={styles.subtitle}>Sign in to Yogat Fleet AI</p>
-        <form onSubmit={handleSubmit} style={styles.form}>
+        <p style={styles.subtitle}>Log in to your account</p>
+
+        <form onSubmit={handleLogin} style={styles.form}>
           <div style={styles.field}>
-            <label>Email</label>
+            <label style={styles.label}>Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              required
               style={styles.input}
+              required
+              disabled={loading}
             />
           </div>
+
           <div style={styles.field}>
-            <label>Password</label>
+            <label style={styles.label}>Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
               style={styles.input}
+              required
+              disabled={loading}
             />
           </div>
-          {error && <div style={styles.error}>{error}</div>}
-          <button type="submit" disabled={loading} style={styles.button}>
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
+
+          {error && <div style={styles.errorBox}>{error}</div>}
+          {resetSent && (
+            <div style={styles.successBox}>
+              Password reset email sent! Check your inbox.
+            </div>
+          )}
+
+          <div style={styles.buttons}>
+            <button
+              type="submit"
+              disabled={loading}
+              style={styles.submitButton}
+            >
+              {loading ? 'Logging in...' : 'Login'}
+            </button>
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={loading}
+              style={styles.forgotButton}
+            >
+              Forgot password?
+            </button>
+          </div>
         </form>
-        <p style={styles.footer}>
+
+        <p style={styles.registerLink}>
           Don't have an account?{' '}
-          <Link href="/register" style={styles.link}>
-            Create one
-          </Link>
+          <button
+            type="button"
+            onClick={() => router.push('/register')}
+            style={styles.linkButton}
+          >
+            Create account
+          </button>
         </p>
-      </motion.div>
-    </div>
+      </div>
+    </motion.div>
   );
 }
 
-const styles = {
-  container: {
+const styles: Record<string, React.CSSProperties> = {
+  page: {
     minHeight: '100vh',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#020617',
-    padding: '20px',
+    background: theme.colors.background.main,
+    padding: theme.spacing[4],
   },
   card: {
-    maxWidth: 400,
+    maxWidth: '400px',
     width: '100%',
-    background: '#0f172a',
-    borderRadius: 24,
-    border: '1px solid #1e293b',
-    padding: '32px',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+    background: theme.colors.background.card,
+    borderRadius: theme.borderRadius.xl,
+    border: `1px solid ${theme.colors.border.light}`,
+    padding: theme.spacing[8],
+    boxShadow: theme.shadows.lg,
   },
   title: {
-    fontSize: '28px',
-    fontWeight: 700,
-    textAlign: 'center' as const,
-    background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    marginBottom: '8px',
+    fontSize: theme.fontSizes['3xl'],
+    fontWeight: theme.fontWeights.bold,
+    marginBottom: theme.spacing[2],
+    color: theme.colors.text.primary,
+    textAlign: 'center',
   },
   subtitle: {
-    textAlign: 'center' as const,
-    color: '#94a3b8',
-    marginBottom: '32px',
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing[6],
   },
   form: {
     display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '20px',
+    flexDirection: 'column',
+    gap: theme.spacing[4],
   },
   field: {
     display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '8px',
+    flexDirection: 'column',
+    gap: theme.spacing[1],
+  },
+  label: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.secondary,
   },
   input: {
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '12px',
-    padding: '12px 16px',
-    color: '#f1f5f9',
-    fontSize: '16px',
+    background: theme.colors.background.elevated,
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.text.primary,
+    fontSize: theme.fontSizes.base,
     outline: 'none',
-    transition: 'all 0.2s',
+    transition: 'border 0.2s ease',
   },
-  button: {
-    background: '#22c55e',
-    color: '#020617',
+  errorBox: {
+    background: `${theme.colors.error}20`,
+    border: `1px solid ${theme.colors.error}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.error,
+    fontSize: theme.fontSizes.sm,
+  },
+  successBox: {
+    background: `${theme.colors.primary}20`,
+    border: `1px solid ${theme.colors.primary}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.primary,
+    fontSize: theme.fontSizes.sm,
+  },
+  buttons: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[2],
+    marginTop: theme.spacing[2],
+  },
+  submitButton: {
+    background: theme.colors.primary,
     border: 'none',
-    borderRadius: '12px',
-    padding: '12px',
-    fontSize: '16px',
-    fontWeight: 600,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    fontSize: theme.fontSizes.base,
+    fontWeight: theme.fontWeights.semibold,
+    color: theme.colors.background.main,
     cursor: 'pointer',
-    transition: 'all 0.2s',
+    transition: 'background 0.2s ease',
+    width: '100%',
   },
-  error: {
-    background: 'rgba(239,68,68,0.1)',
-    border: '1px solid #ef4444',
-    borderRadius: '8px',
-    padding: '12px',
-    color: '#ef4444',
-    fontSize: '14px',
-    textAlign: 'center' as const,
+  forgotButton: {
+    background: 'transparent',
+    border: 'none',
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[2],
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.secondary,
+    cursor: 'pointer',
+    transition: 'color 0.2s ease',
+    width: '100%',
   },
-  footer: {
-    textAlign: 'center' as const,
-    marginTop: '24px',
-    color: '#94a3b8',
-    fontSize: '14px',
+  registerLink: {
+    textAlign: 'center',
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing[6],
   },
-  link: {
-    color: '#22c55e',
-    textDecoration: 'none',
-    fontWeight: 500,
+  linkButton: {
+    background: 'none',
+    border: 'none',
+    color: theme.colors.primary,
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    padding: 0,
+    fontSize: 'inherit',
   },
 };
