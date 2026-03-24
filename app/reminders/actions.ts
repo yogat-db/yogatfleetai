@@ -4,26 +4,26 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
-export async function deleteVehicle(formData: FormData) {
+export async function deleteReminder(formData: FormData) {
   const id = formData.get('id') as string;
-  if (!id) throw new Error('Vehicle ID is required');
+  if (!id) throw new Error('Reminder ID is required');
 
-  const supabase = await createClient();
+  const supabase = await createClient(); // ✅ await
 
   const { data: { user }, error: userError } = await supabase.auth.getUser();
-  if (userError || !user) throw new Error('You must be logged in to delete a vehicle');
+  if (userError || !user) throw new Error('You must be logged in to delete a reminder');
 
   const { error } = await supabase
-    .from('vehicles')
+    .from('reminders')
     .delete()
     .eq('id', id)
     .eq('user_id', user.id);
 
   if (error) {
     console.error('Delete error:', error);
-    throw new Error('Failed to delete vehicle');
+    throw new Error('Failed to delete reminder');
   }
 
-  revalidatePath('/fleet');
-  redirect('/fleet');
+  revalidatePath('/service-reminders');
+  redirect('/service-reminders');
 }

@@ -3,8 +3,17 @@ import Link from 'next/link';
 import { Briefcase, Users, UserCog, ArrowRight, AlertCircle } from 'lucide-react';
 import theme from '@/app/theme';
 
+// ✅ New (correct)
 export const metadata = {
   title: 'Admin Dashboard | Yogat Fleet AI',
+  description: '...',
+  // no viewport fields here
+};
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#22c55e',
 };
 
 export default async function AdminDashboardPage() {

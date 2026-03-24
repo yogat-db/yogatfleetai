@@ -1,32 +1,16 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
-import { 
-  Activity, 
-  Wrench, 
-  Plus, 
-  Settings, 
-  Trash2,
-  ChevronRight,
-  Clock,
-  DollarSign,
-  Shield,
-  Zap,
-  BarChart3,
-  Car,
-  AlertTriangle,
-  Gauge,
-  TrendingUp,
-  Cpu
-} from 'lucide-react';
+import { Trash2, Loader2, ChevronRight, Clock, DollarSign, BarChart3, Car, AlertTriangle, Gauge, TrendingUp, Cpu } from 'lucide-react';
 import { computeFleetBrain } from '@/lib/ai';
 import { supabase } from '@/lib/supabase/client';
+import { deleteVehicle } from '@/app/vehicles/actions';
 import type { Vehicle } from '@/app/types/fleet';
 import theme from '@/app/theme';
 import styles from './page.module.css';
@@ -51,12 +35,56 @@ const computeFleetStats = (vehicles: Vehicle[], vehiclesWithAI: any[]) => {
   };
 };
 
+// Inline delete button component using the server action
+function DeleteVehicleButton({ vehicleId }: { vehicleId: string }) {
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    if (!confirm('Delete this vehicle? This action cannot be undone.')) return;
+    setError(null);
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.append('id', vehicleId);
+      try {
+        await deleteVehicle(formData);
+      } catch (err: any) {
+        setError(err.message);
+      }
+    });
+  };
+
+  return (
+    <div style={{ display: 'inline-block' }}>
+      <button
+        onClick={handleDelete}
+        disabled={isPending}
+        style={{
+          background: 'transparent',
+          border: `1px solid ${theme.colors.error}`,
+          color: theme.colors.error,
+          padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+          borderRadius: theme.borderRadius.lg,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          fontSize: '12px',
+        }}
+      >
+        {isPending ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={14} />}
+        {isPending ? 'Deleting' : 'Delete'}
+      </button>
+      {error && <div style={{ color: theme.colors.error, fontSize: '10px', marginTop: '4px' }}>{error}</div>}
+    </div>
+  );
+}
+
 export default function ControlCenterPage() {
   const router = useRouter();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
   const [chartView, setChartView] = useState<'pie' | 'bar'>('pie');
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
@@ -69,10 +97,18 @@ export default function ControlCenterPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch('/api/vehicles');
-      if (!res.ok) throw new Error('Failed to fetch vehicles');
-      const data = await res.json();
-      setVehicles(Array.isArray(data) ? data : []);
+
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error('Not logged in');
+
+      const { data, error } = await supabase
+        .from('vehicles')
+        .select('*')
+        .eq('user_id', user.id) // ✅ filter by current user
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setVehicles(data || []);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -111,22 +147,6 @@ export default function ControlCenterPage() {
   const predictedFailures = vehiclesWithAI
     .filter(v => v.risk !== 'low' && v.predictedFailureDate)
     .sort((a, b) => (a.daysToFailure ?? 999) - (b.daysToFailure ?? 999));
-
-  async function handleDeleteVehicle(id: string) {
-    if (!id) return;
-    if (!confirm('Are you sure you want to delete this vehicle? This action cannot be undone.')) return;
-    setDeleting(id);
-    try {
-      const res = await fetch(`/api/vehicles/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Delete failed');
-      setVehicles(prev => prev.filter(v => v.id !== id));
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setDeleting(null);
-    }
-  }
 
   // Optional: fetch AI insight from OpenAI (if you have an endpoint)
   const fetchAiInsight = async () => {
@@ -179,7 +199,7 @@ export default function ControlCenterPage() {
         </div>
       </div>
 
-      {/* KPI Cards with Icons */}
+      {/* KPI Cards */}
       <div className={styles.kpiGrid}>
         <motion.div whileHover={{ y: -5 }} className={styles.kpiCard}>
           <div className={styles.kpiIcon} style={{ background: `${theme.colors.info}20` }}>
@@ -305,14 +325,7 @@ export default function ControlCenterPage() {
                       <span className={styles.healthScore} style={{ color: theme.colors.status.critical }}>
                         Health: {vehicle.health_score}%
                       </span>
-                      <button
-                        onClick={() => handleDeleteVehicle(vehicle.id)}
-                        disabled={deleting === vehicle.id}
-                        className={styles.deleteButton}
-                        title="Delete vehicle"
-                      >
-                        {deleting === vehicle.id ? '...' : <Trash2 size={16} />}
-                      </button>
+                      <DeleteVehicleButton vehicleId={vehicle.id} />
                     </div>
                   </div>
                   <div className={styles.listItemFooter}>
@@ -363,14 +376,7 @@ export default function ControlCenterPage() {
                       }}>
                         {vehicle.risk}
                       </span>
-                      <button
-                        onClick={() => handleDeleteVehicle(vehicle.id)}
-                        disabled={deleting === vehicle.id}
-                        className={styles.deleteButton}
-                        title="Delete vehicle"
-                      >
-                        {deleting === vehicle.id ? '...' : <Trash2 size={16} />}
-                      </button>
+                      <DeleteVehicleButton vehicleId={vehicle.id} />
                     </div>
                   </div>
                   <div className={styles.predictionDetails}>
@@ -400,55 +406,31 @@ export default function ControlCenterPage() {
         )}
       </div>
 
-      {/* Quick Actions as Animated Tiles */}
+      {/* Quick Actions */}
       <div className={styles.section}>
         <h2 className={styles.sectionTitle}>Quick Actions</h2>
         <div className={styles.actionsGrid}>
-          <div
-            onClick={() => router.push('/vehicles/add')}
-            className={styles.actionTile}
-            style={{ color: theme.colors.primary }}
-          >
+          <div onClick={() => router.push('/vehicles/add')} className={styles.actionTile}>
             <div className={styles.actionIcon}>➕</div>
             <div className={styles.actionLabel}>Add Vehicle</div>
           </div>
-          <div
-            onClick={() => router.push('/diagnostics')}
-            className={styles.actionTile}
-            style={{ color: theme.colors.secondary }}
-          >
+          <div onClick={() => router.push('/diagnostics')} className={styles.actionTile}>
             <div className={styles.actionIcon}>🔧</div>
             <div className={styles.actionLabel}>Diagnostics</div>
           </div>
-          <div
-            onClick={() => router.push('/marketplace/jobs/post')}
-            className={styles.actionTile}
-            style={{ color: theme.colors.warning }}
-          >
+          <div onClick={() => router.push('/marketplace/jobs/post')} className={styles.actionTile}>
             <div className={styles.actionIcon}>📝</div>
             <div className={styles.actionLabel}>Post a Job</div>
           </div>
-          <div
-            onClick={() => router.push('/marketplace/mechanics')}
-            className={styles.actionTile}
-            style={{ color: '#a855f7' }}
-          >
+          <div onClick={() => router.push('/marketplace/mechanics')} className={styles.actionTile}>
             <div className={styles.actionIcon}>👨‍🔧</div>
             <div className={styles.actionLabel}>Find Mechanic</div>
           </div>
-          <div
-            onClick={() => router.push('/service-history/add')}
-            className={styles.actionTile}
-            style={{ color: '#ec489a' }}
-          >
+          <div onClick={() => router.push('/service-history/add')} className={styles.actionTile}>
             <div className={styles.actionIcon}>📋</div>
             <div className={styles.actionLabel}>Log Service</div>
           </div>
-          <div
-            onClick={() => router.push('/settings')}
-            className={styles.actionTile}
-            style={{ color: theme.colors.text.muted }}
-          >
+          <div onClick={() => router.push('/settings')} className={styles.actionTile}>
             <div className={styles.actionIcon}>⚙️</div>
             <div className={styles.actionLabel}>Settings</div>
           </div>

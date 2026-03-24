@@ -22,14 +22,17 @@ export default async function MechanicDetailPage({
   params: Promise<{ mechanicId: string }>;
 }) {
   const { mechanicId } = await params;
+
   let supabase;
   try {
-    supabase = createClient();
+    // ✅ Await the client if createClient is async
+    supabase = await createClient();
   } catch (err) {
     console.error('Failed to create Supabase client:', err);
     notFound();
   }
 
+  // Now supabase is a valid client
   const { data: mechanic, error } = await supabase
     .from('mechanics')
     .select('*')

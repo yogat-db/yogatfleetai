@@ -1,35 +1,72 @@
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-// GET all reminders for a vehicle
 export async function GET(
-  request: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-    const { data, error } = await supabaseAdmin
-      .from('reminders') // adjust table name if needed
+    const { id: vehicleId } = await params;
+    const supabase = await createClient();
+
+    // Authenticate
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Verify vehicle belongs to user
+    const { data: vehicle, error: vehicleError } = await supabase
+      .from('vehicles')
+      .select('user_id')
+      .eq('id', vehicleId)
+      .single();
+
+    if (vehicleError || !vehicle || vehicle.user_id !== user.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // Fetch reminders
+    const { data, error } = await supabase
+      .from('reminders')
       .select('*')
-      .eq('vehicle_id', id)
+      .eq('vehicle_id', vehicleId)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
     return NextResponse.json(data || []);
   } catch (err) {
     console.error('Fetch reminders error:', err);
-    return NextResponse.json({ error: 'Failed to load reminders' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-// POST a new reminder
 export async function POST(
-  request: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: vehicleId } = await params;
-    const body = await request.json();
+    const supabase = await createClient();
+
+    // Authenticate
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Verify ownership
+    const { data: vehicle, error: vehicleError } = await supabase
+      .from('vehicles')
+      .select('user_id')
+      .eq('id', vehicleId)
+      .single();
+
+    if (vehicleError || !vehicle || vehicle.user_id !== user.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const body = await req.json();
     const { task, interval_miles, interval_months } = body;
 
     if (!task) {
@@ -44,15 +81,15 @@ export async function POST(
       next_due_date = date.toISOString();
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from('reminders')
       .insert({
         vehicle_id: vehicleId,
+        user_id: user.id,
         task,
         interval_miles: interval_miles || null,
         interval_months: interval_months || null,
         next_due_date,
-        // next_due_mileage can be set later when vehicle mileage is known
       })
       .select()
       .single();
@@ -61,6 +98,6 @@ export async function POST(
     return NextResponse.json(data, { status: 201 });
   } catch (err) {
     console.error('Create reminder error:', err);
-    return NextResponse.json({ error: 'Failed to create reminder' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -34,9 +34,13 @@ export default function FleetPage() {
   const fetchVehicles = async () => {
     try {
       setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not logged in');
+
       const { data, error } = await supabase
         .from('vehicles')
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -86,8 +90,6 @@ export default function FleetPage() {
     formData.append('id', vehicleId);
     try {
       await deleteVehicle(formData);
-      // After successful deletion, the server action redirects to /fleet
-      // but we also need to update local state to avoid flicker
       setVehicles(prev => prev.filter(v => v.id !== vehicleId));
     } catch (err: any) {
       alert(err.message);
@@ -103,6 +105,19 @@ export default function FleetPage() {
       <div style={styles.centered}>
         <div className="spinner" />
         <p>Loading fleet...</p>
+        <style jsx>{`
+          .spinner {
+            border: 3px solid ${theme.colors.border.medium};
+            border-top: 3px solid ${theme.colors.primary};
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -188,20 +203,6 @@ export default function FleetPage() {
           ))}
         </div>
       )}
-
-      <style jsx>{`
-        .spinner {
-          border: 3px solid ${theme.colors.border.medium};
-          border-top: 3px solid ${theme.colors.primary};
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </motion.div>
   );
 }
@@ -236,10 +237,8 @@ function SwipeableCard({
   const handleDragEnd = () => {
     if (Math.abs(dragX) > 100) {
       if (dragX > 0) {
-        // Swipe right → edit
         onEdit();
       } else {
-        // Swipe left → delete
         onDelete();
       }
     }
@@ -293,7 +292,6 @@ function SwipeableCard({
         </div>
       </motion.div>
 
-      {/* Hidden action buttons (shown behind card) */}
       <div style={styles.actionButtons}>
         <button
           onClick={onEdit}
@@ -314,7 +312,7 @@ function SwipeableCard({
   );
 }
 
-// Styles (inline, no pseudo‑classes)
+// Styles
 const styles: Record<string, React.CSSProperties> = {
   page: {
     padding: theme.spacing[10],
