@@ -21,8 +21,8 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <ParticlesBackground />
-        <Toaster position="top-right" toastOptions={{ duration: 5000 }} />
         <AppShell>{children}</AppShell>
+        <Toaster position="top-right" toastOptions={{ duration: 5000 }} />
       </body>
     </html>
   );

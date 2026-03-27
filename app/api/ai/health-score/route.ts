@@ -1,99 +1,57 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import { computeFleetBrain } from '@/lib/ai'
 
-// Helper to compute a health score based on vehicle data
-function computeHealthScore(vehicle: any): number {
-  // Start with a baseline of 100
-  let score = 100;
-
-  // Mileage factor (higher mileage reduces score)
-  if (vehicle.mileage) {
-    const mileageDeduction = Math.min(30, Math.floor(vehicle.mileage / 5000));
-    score -= mileageDeduction;
-  }
-
-  // Age factor (older vehicles lose points)
-  if (vehicle.year) {
-    const age = new Date().getFullYear() - vehicle.year;
-    const ageDeduction = Math.min(20, age * 2);
-    score -= ageDeduction;
-  }
-
-  // Status adjustments
-  if (vehicle.status === 'warning') score -= 10;
-  if (vehicle.status === 'critical') score -= 20;
-
-  // Ensure score is between 0 and 100
-  return Math.max(0, Math.min(100, score));
-}
-
-export async function GET(req: NextRequest) {
+export async function GET(request: Request) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) { return cookieStore.get(name)?.value },
+        },
+      }
+    )
+
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
     if (userError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const url = new URL(req.url);
-    const vehicleId = url.searchParams.get('vehicleId');
+    const url = new URL(request.url)
+    const vehicleId = url.searchParams.get('vehicleId')
+    const plate = url.searchParams.get('plate')
 
-    if (!vehicleId) {
-      return NextResponse.json({ error: 'Vehicle ID is required' }, { status: 400 });
-    }
+    let query = supabase.from('vehicles').select('*').eq('user_id', user.id)
 
-    // Fetch vehicle data (ensure ownership)
-    const { data: vehicle, error: vehicleError } = await supabase
-      .from('vehicles')
-      .select('*')
-      .eq('id', vehicleId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (vehicleError || !vehicle) {
-      return NextResponse.json({ error: 'Vehicle not found' }, { status: 404 });
-    }
-
-    // Compute health score
-    const healthScore = computeHealthScore(vehicle);
-
-    // Generate a brief insight (can be replaced with AI)
-    let insight = '';
-    if (healthScore >= 80) {
-      insight = 'Your vehicle is in great condition. Continue with regular maintenance.';
-    } else if (healthScore >= 60) {
-      insight = 'Your vehicle is in good condition but some maintenance may be due soon.';
-    } else if (healthScore >= 40) {
-      insight = 'Your vehicle needs attention soon. Consider scheduling a check‑up.';
+    if (vehicleId) {
+      query = query.eq('id', vehicleId)
+    } else if (plate) {
+      query = query.ilike('license_plate', plate)
     } else {
-      insight = 'Your vehicle requires immediate service to avoid breakdown.';
+      return NextResponse.json({ error: 'vehicleId or plate required' }, { status: 400 })
     }
 
-    // Optional: include a list of recommended actions
-    const recommendations: string[] = [];
-    if (healthScore < 80) recommendations.push('Check engine and transmission fluids');
-    if (healthScore < 70) recommendations.push('Inspect brakes and tires');
-    if (healthScore < 60) recommendations.push('Schedule a full diagnostic');
-    if (healthScore < 40) recommendations.push('Immediate service recommended');
+    const { data: vehicles, error: dbError } = await query
+    if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 })
+    if (!vehicles || vehicles.length === 0) {
+      return NextResponse.json({ error: 'Vehicle not found' }, { status: 404 })
+    }
 
-    return NextResponse.json({
-      healthScore,
-      insight,
-      recommendations,
-      vehicle: {
-        id: vehicle.id,
-        make: vehicle.make,
-        model: vehicle.model,
-        year: vehicle.year,
-        mileage: vehicle.mileage,
-        status: vehicle.status,
-      },
-    });
+    const enriched = computeFleetBrain(vehicles)
+    const result = enriched.map(v => ({
+      vehicleId: v.id,
+      license_plate: v.license_plate,
+      health_score: v.health_score,
+      risk: v.risk,
+    }))
+
+    return NextResponse.json(vehicleId || plate ? result[0] : result)
   } catch (err: any) {
-    console.error('Health score API error:', err);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Health score error:', err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
