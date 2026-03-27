@@ -1,3 +1,4 @@
+// app/dashboard/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -80,28 +81,28 @@ export default function DashboardPage() {
       if (remindersError) throw remindersError;
 
       if (rawReminders && rawReminders.length > 0) {
-  const vehicleIds = rawReminders.map(r => r.vehicle_id).filter(Boolean);
-  const { data: vehiclesData } = await supabase
-    .from('vehicles')
-    .select('id, make, model, license_plate')
-    .in('id', vehicleIds);
-  const vehicleMap = new Map(
-    (vehiclesData || []).map(v => [
-      v.id,
-      { make: v.make, model: v.model, license_plate: v.license_plate }
-    ])
-  );
-  const remindersWithVehicle: Reminder[] = rawReminders.map(r => ({
-    id: r.id,
-    title: r.title,
-    due_date: r.due_date,
-    due_mileage: r.due_mileage,
-    vehicle: r.vehicle_id ? vehicleMap.get(r.vehicle_id) : undefined,
-  }));
-  setReminders(remindersWithVehicle);
-} else {
-  setReminders([]);
-}
+        const vehicleIds = rawReminders.map(r => r.vehicle_id).filter(Boolean);
+        const { data: vehiclesData } = await supabase
+          .from('vehicles')
+          .select('id, make, model, license_plate')
+          .in('id', vehicleIds);
+        const vehicleMap = new Map(
+          (vehiclesData || []).map(v => [
+            v.id,
+            { make: v.make, model: v.model, license_plate: v.license_plate }
+          ])
+        );
+        const remindersWithVehicle: Reminder[] = rawReminders.map(r => ({
+          id: r.id,
+          title: r.title,
+          due_date: r.due_date,
+          due_mileage: r.due_mileage,
+          vehicle: r.vehicle_id ? vehicleMap.get(r.vehicle_id) : undefined,
+        }));
+        setReminders(remindersWithVehicle);
+      } else {
+        setReminders([]);
+      }
 
       // Mock AI predictions – replace with real API later
       const mockPredictions: Prediction[] = (vehiclesData || []).slice(0, 3).map(v => ({
@@ -340,6 +341,7 @@ export default function DashboardPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  // ... (same as previous dashboard styles; ensure they are exactly the same)
   page: {
     padding: theme.spacing[8],
     background: theme.colors.background.main,

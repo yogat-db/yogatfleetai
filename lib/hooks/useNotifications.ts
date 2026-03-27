@@ -11,11 +11,10 @@ type Notification = {
   created_at: string;
 };
 
-export function useNotification() {
+export function useNotifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Fetch existing notifications
   const fetchNotifications = useCallback(async () => {
     const { data, error } = await supabase
       .from('notifications')
@@ -30,7 +29,6 @@ export function useNotification() {
     setUnreadCount(data?.filter(n => !n.read).length || 0);
   }, []);
 
-  // Mark notification as read
   const markAsRead = useCallback(async (id: string) => {
     const { error } = await supabase
       .from('notifications')
@@ -46,7 +44,6 @@ export function useNotification() {
     setUnreadCount(prev => Math.max(0, prev - 1));
   }, []);
 
-  // Mark all as read
   const markAllAsRead = useCallback(async () => {
     const { error } = await supabase
       .from('notifications')
@@ -56,13 +53,10 @@ export function useNotification() {
       console.error('Failed to mark all as read:', error);
       return;
     }
-    setNotifications(prev =>
-      prev.map(n => ({ ...n, read: true }))
-    );
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     setUnreadCount(0);
   }, []);
 
-  // Send a new notification (for internal use, e.g., after a job is assigned)
   const sendNotification = useCallback(async (title: string, message?: string, type: Notification['type'] = 'info') => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -75,15 +69,13 @@ export function useNotification() {
     if (error) console.error('Failed to send notification:', error);
   }, []);
 
-  // Subscribe to real‑time notifications for the current user
   useEffect(() => {
-    const fetchUser = async () => {
+    const fetchUserAndSubscribe = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
       fetchNotifications();
 
-      // Subscribe to new notifications for this user
       const channel = supabase
         .channel('notifications')
         .on(
@@ -98,16 +90,23 @@ export function useNotification() {
             const newNotification = payload.new as Notification;
             setNotifications(prev => [newNotification, ...prev]);
             setUnreadCount(prev => prev + 1);
-            // Show toast
-            const toastFn =
-              newNotification.type === 'success'
-                ? toast.success
-                : newNotification.type === 'error'
-                ? toast.error
-                : newNotification.type === 'warning'
-                ? (msg: string) => toast(msg, { icon: '⚠️' })
-                : toast;
-            toastFn(newNotification.title, { duration: 5000 });
+
+            // Unified toast call with options
+            const options: { duration: number; icon?: string } = { duration: 5000 };
+            switch (newNotification.type) {
+              case 'success':
+                options.icon = '✅';
+                break;
+              case 'error':
+                options.icon = '❌';
+                break;
+              case 'warning':
+                options.icon = '⚠️';
+                break;
+              default:
+                options.icon = 'ℹ️';
+            }
+            toast(newNotification.title, options);
           }
         )
         .subscribe();
@@ -116,7 +115,7 @@ export function useNotification() {
         supabase.removeChannel(channel);
       };
     };
-    fetchUser();
+    fetchUserAndSubscribe();
   }, [fetchNotifications]);
 
   return {

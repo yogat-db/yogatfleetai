@@ -7,11 +7,10 @@ import { Truck, CheckCircle, AlertTriangle, MapPin, Calendar, TrendingUp, Plus, 
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-// Mapbox (optional – if you have Mapbox token, you can show a real map)
+// Optional Mapbox (only if token is set)
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
-// Types
 interface Vehicle {
   id: string;
   license_plate: string;
@@ -68,8 +67,6 @@ export default function DashboardPage() {
 
       if (vehiclesError) throw vehiclesError;
       setVehicles(vehiclesData || []);
-
-      // Check if any vehicle has coordinates
       setHasLocationData(vehiclesData?.some(v => v.lat && v.lng) || false);
 
       // Fetch upcoming reminders – two‑step to avoid join issues
@@ -88,18 +85,25 @@ export default function DashboardPage() {
           .from('vehicles')
           .select('id, make, model, license_plate')
           .in('id', vehicleIds);
-        const vehicleMap = new Map(vehiclesData?.map(v => [v.id, v]) || []);
-        const remindersWithVehicle = rawReminders.map(r => ({
-          ...r,
-          vehicle: r.vehicle_id ? vehicleMap.get(r.vehicle_id) : null,
+        const vehicleMap = new Map(
+          (vehiclesData || []).map(v => [
+            v.id,
+            { make: v.make, model: v.model, license_plate: v.license_plate }
+          ])
+        );
+        const remindersWithVehicle: Reminder[] = rawReminders.map(r => ({
+          id: r.id,
+          title: r.title,
+          due_date: r.due_date,
+          due_mileage: r.due_mileage,
+          vehicle: r.vehicle_id ? vehicleMap.get(r.vehicle_id) : undefined,
         }));
         setReminders(remindersWithVehicle);
       } else {
         setReminders([]);
       }
 
-      // Fetch AI predictions – replace with real endpoint if available
-      // For demo, generate mock predictions based on vehicles
+      // Mock AI predictions – replace with real API later
       const mockPredictions: Prediction[] = (vehiclesData || []).slice(0, 3).map(v => ({
         vehicleId: v.id,
         vehicleName: `${v.make} ${v.model}`,
@@ -115,17 +119,14 @@ export default function DashboardPage() {
     }
   }
 
-  // Stats calculation
+  // Stats
   const total = vehicles.length;
   const healthy = vehicles.filter(v => (v.health_score || 0) >= 80).length;
   const warning = vehicles.filter(v => (v.health_score || 0) >= 50 && (v.health_score || 0) < 80).length;
   const critical = vehicles.filter(v => (v.health_score || 0) < 50).length;
-
-  // Critical alerts (health < 40)
   const criticalVehicles = vehicles.filter(v => (v.health_score || 0) < 40);
 
-  // Map component (if Mapbox token is available)
-  const [map, setMap] = useState<mapboxgl.Map | null>(null);
+  // Map
   useEffect(() => {
     if (!hasLocationData || !process.env.NEXT_PUBLIC_MAPBOX_TOKEN) return;
     const mapContainer = document.getElementById('fleet-map');
@@ -137,8 +138,6 @@ export default function DashboardPage() {
       zoom: 5,
       accessToken: process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
     });
-    setMap(mapInstance);
-    // Add markers for vehicles with coordinates
     vehicles.forEach(v => {
       if (v.lat && v.lng) {
         new mapboxgl.Marker()
@@ -147,7 +146,6 @@ export default function DashboardPage() {
           .addTo(mapInstance);
       }
     });
-    // Fit bounds
     const bounds = vehicles.filter(v => v.lat && v.lng).map(v => [v.lng!, v.lat!] as [number, number]);
     if (bounds.length) {
       const lngBounds = new mapboxgl.LngLatBounds(bounds[0], bounds[0]);
@@ -189,54 +187,34 @@ export default function DashboardPage() {
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      style={styles.page}
-    >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
       <h1 style={styles.title}>Dashboard</h1>
       <p style={styles.subtitle}>Welcome back to your fleet overview</p>
 
-      {/* Stats Grid */}
+      {/* Stats */}
       <div style={styles.statsGrid}>
-        <motion.div
-          whileHover={{ y: -5 }}
-          transition={{ type: 'spring', stiffness: 300 }}
-          style={styles.statCard}
-        >
+        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
           <Truck size={24} color={theme.colors.info} />
           <div>
             <span style={styles.statValue}>{total}</span>
             <span style={styles.statLabel}>Total Vehicles</span>
           </div>
         </motion.div>
-        <motion.div
-          whileHover={{ y: -5 }}
-          transition={{ type: 'spring', stiffness: 300 }}
-          style={styles.statCard}
-        >
+        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
           <CheckCircle size={24} color={theme.colors.status.healthy} />
           <div>
             <span style={styles.statValue}>{healthy}</span>
             <span style={styles.statLabel}>Healthy</span>
           </div>
         </motion.div>
-        <motion.div
-          whileHover={{ y: -5 }}
-          transition={{ type: 'spring', stiffness: 300 }}
-          style={styles.statCard}
-        >
+        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
           <AlertTriangle size={24} color={theme.colors.status.warning} />
           <div>
             <span style={styles.statValue}>{warning}</span>
             <span style={styles.statLabel}>Warning</span>
           </div>
         </motion.div>
-        <motion.div
-          whileHover={{ y: -5 }}
-          transition={{ type: 'spring', stiffness: 300 }}
-          style={styles.statCard}
-        >
+        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
           <AlertTriangle size={24} color={theme.colors.status.critical} />
           <div>
             <span style={styles.statValue}>{critical}</span>
@@ -245,7 +223,7 @@ export default function DashboardPage() {
         </motion.div>
       </div>
 
-      {/* Map Section */}
+      {/* Map */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>
           <MapPin size={20} color={theme.colors.primary} />
@@ -263,7 +241,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Two‑column layout */}
+      {/* Two‑column */}
       <div style={styles.twoColumn}>
         {/* Reminders */}
         <div style={styles.card}>
@@ -361,7 +339,7 @@ export default function DashboardPage() {
   );
 }
 
-// All styles are inline; no `:hover` pseudo‑class used
+// Styles (identical to the previous version – ensure they are included)
 const styles: Record<string, React.CSSProperties> = {
   page: {
     padding: theme.spacing[8],
