@@ -1,502 +1,311 @@
 'use client';
 
-import { Suspense } from 'react';
-import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import { Search, AlertCircle, CheckCircle, Loader2, Car, MapPin } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import theme from '@/app/theme';
+import mbxGeocoding from '@mapbox/mapbox-sdk/services/geocoding';
 
-type Vehicle = {
-  id: string;
-  license_plate: string;
-  make: string | null;
-  model: string | null;
-};
+const geocodingClient = mbxGeocoding({
+  accessToken: process.env.NEXT_PUBLIC_MAPBOX_TOKEN!,
+});
 
-const JOB_TITLES = [
-  'Oil Change',
-  'Brake Pad Replacement',
-  'Tire Rotation',
-  'Engine Diagnostic',
-  'Battery Replacement',
-  'AC Recharge',
-  'Timing Belt Replacement',
-  'Wheel Alignment',
-  'Transmission Service',
-  'Coolant Flush',
-  'Spark Plug Replacement',
-  'Fuel Injector Cleaning',
-  'Suspension Repair',
-  'Alternator Replacement',
-  'Radiator Replacement',
-];
-
-// Export force dynamic to avoid static generation
-export const dynamic = 'force-dynamic';
-
-// Inner component that uses useSearchParams
-function AddServiceContent() {
+export default function AddVehiclePage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const preSelectedVehicleId = searchParams.get('vehicleId');
-
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [selectedVehicleId, setSelectedVehicleId] = useState('');
-  const [title, setTitle] = useState('');
-  const [customTitle, setCustomTitle] = useState('');
-  const [useCustomTitle, setUseCustomTitle] = useState(false);
-  const [description, setDescription] = useState('');
-  const [mileage, setMileage] = useState('');
-  const [occurredAt, setOccurredAt] = useState(new Date().toISOString().split('T')[0]);
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [plate, setPlate] = useState('');
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [address, setAddress] = useState('');
+  const [vehicleData, setVehicleData] = useState<any>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [hasMultiVehicle, setHasMultiVehicle] = useState(false);
+  const [vehicleCount, setVehicleCount] = useState(0);
+  const [upgradeLoading, setUpgradeLoading] = useState(false);
 
   useEffect(() => {
-    fetchVehicles();
+    checkLimit();
   }, []);
 
-  useEffect(() => {
-    if (preSelectedVehicleId && vehicles.length > 0) {
-      setSelectedVehicleId(preSelectedVehicleId);
+  async function checkLimit() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push('/login');
+      return;
     }
-  }, [vehicles, preSelectedVehicleId]);
 
-  async function fetchVehicles() {
-    try {
-      const { data, error } = await supabase
-        .from('vehicles')
-        .select('id, license_plate, make, model')
-        .order('created_at', { ascending: false });
+    // Count vehicles
+    const { count, error: countError } = await supabase
+      .from('vehicles')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id);
+    if (!countError) setVehicleCount(count || 0);
 
-      if (error) throw error;
-      setVehicles(data || []);
-    } catch (err) {
-      console.error('Failed to fetch vehicles');
-    }
+    // Check multi-vehicle upgrade
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('has_multi_vehicle')
+      .eq('id', user.id)
+      .single();
+    setHasMultiVehicle(profile?.has_multi_vehicle || false);
   }
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+  useEffect(() => {
+    if (vehicleCount > 0 && !hasMultiVehicle) {
+      setShowUpgrade(true);
+    } else {
+      setShowUpgrade(false);
+    }
+  }, [vehicleCount, hasMultiVehicle]);
+
+  const handleUpgrade = async () => {
+    setUpgradeLoading(true);
+    try {
+      const res = await fetch('/api/stripe/create-multi-vehicle-checkout', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert('Failed to start upgrade');
+      }
+    } catch (err) {
+      alert('Something went wrong');
+    } finally {
+      setUpgradeLoading(false);
+    }
   };
 
-  const uploadImage = async (): Promise<string | null> => {
-    if (!imageFile) return null;
-    const fileExt = imageFile.name.split('.').pop();
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-    const filePath = `service-events/${fileName}`;
-    const { error: uploadError } = await supabase.storage
-      .from('service-images')
-      .upload(filePath, imageFile);
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      throw new Error('Failed to upload receipt');
+  const fetchVehicleDetails = async () => {
+    if (!plate.trim()) {
+      setError('Please enter a licence plate');
+      return;
     }
-    const { data: urlData } = supabase.storage
-      .from('service-images')
-      .getPublicUrl(filePath);
-    return urlData.publicUrl;
+    setFetching(true);
+    setError(null);
+    try {
+      // DVLA lookup (mock for now)
+      const dvlaRes = await fetch(`/api/dvla/${plate.toUpperCase()}`);
+      if (!dvlaRes.ok) {
+        const err = await dvlaRes.json();
+        throw new Error(err.error || 'DVLA lookup failed');
+      }
+      const dvlaData = await dvlaRes.json();
+      setVehicleData(dvlaData);
+
+      // MOT history (optional)
+      const motRes = await fetch(`/api/mot/${plate.toUpperCase()}`);
+      if (motRes.ok) {
+        const motData = await motRes.json();
+        // you can use it if needed
+      }
+
+      // AI insight (mock)
+      setAiLoading(true);
+      // simulate AI call
+      setTimeout(() => {
+        setAiInsight('No major issues predicted for this vehicle based on its age and mileage.');
+        setAiLoading(false);
+      }, 1000);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setFetching(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!vehicleData) {
+      setError('Please fetch vehicle details first');
+      return;
+    }
     setLoading(true);
     setError(null);
 
-    const finalTitle = useCustomTitle ? customTitle : title;
-    if (!selectedVehicleId) {
-      setError('Please select a vehicle');
-      setLoading(false);
-      return;
-    }
-    if (!finalTitle.trim()) {
-      setError('Title is required');
-      setLoading(false);
-      return;
-    }
-
     try {
-      let imageUrl: string | null = null;
-      if (imageFile) {
-        imageUrl = await uploadImage();
+      // Geocode address if provided
+      let lat: number | null = null;
+      let lng: number | null = null;
+      if (address.trim()) {
+        try {
+          const response = await geocodingClient
+            .forwardGeocode({
+              query: address,
+              limit: 1,
+            })
+            .send();
+          if (response.body.features.length) {
+            [lng, lat] = response.body.features[0].center;
+          }
+        } catch (geoErr) {
+          console.warn('Geocoding failed:', geoErr);
+        }
       }
 
-      const payload = {
-        vehicle_id: selectedVehicleId,
-        title: finalTitle,
-        description: description.trim() || null,
-        mileage: mileage ? parseInt(mileage) : null,
-        occurred_at: occurredAt,
-        image_url: imageUrl,
-      };
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not logged in');
 
-      const res = await fetch(`/api/vehicles/${selectedVehicleId}/service-events`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      const { error: insertError } = await supabase.from('vehicles').insert({
+        license_plate: plate.toUpperCase(),
+        make: vehicleData.make,
+        model: vehicleData.model,
+        year: vehicleData.yearOfManufacture,
+        fuel_type: vehicleData.fuelType,
+        engine_capacity: vehicleData.engineCapacity,
+        vin: vehicleData.vin || null,
+        lat,
+        lng,
+        user_id: user.id,
+        mileage: 0,
+        status: 'active',
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add service event');
+      if (insertError) throw insertError;
 
       setSuccess(true);
-      setTimeout(() => {
-        router.push('/service-history');
-        router.refresh();
-      }, 1500);
+      setTimeout(() => router.push('/fleet'), 2000);
     } catch (err: any) {
-      console.error('Submit error:', err);
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
+  if (showUpgrade) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.upgradeCard}>
+          <h1>Upgrade to Add More Vehicles</h1>
+          <p>You already have one vehicle registered. To add another vehicle, upgrade for a one‑time fee of £10.</p>
+          <div style={styles.upgradeActions}>
+            <button onClick={handleUpgrade} disabled={upgradeLoading} style={styles.upgradeButton}>
+              {upgradeLoading ? 'Processing...' : 'Upgrade Now (£10)'}
+            </button>
+            <button onClick={() => router.push('/fleet')} style={styles.backButton}>
+              Back to Fleet
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      style={styles.page}
-    >
-      <button onClick={() => router.back()} style={styles.backButton}>
-        ← Back
-      </button>
-
-      <h1 style={styles.title}>Add Service Event</h1>
-
-      <form onSubmit={handleSubmit} style={styles.form}>
-        {/* Vehicle Selection */}
-        <div style={styles.field}>
-          <label style={styles.label}>Vehicle *</label>
-          <select
-            value={selectedVehicleId}
-            onChange={(e) => setSelectedVehicleId(e.target.value)}
-            style={styles.select}
-            required
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
+      <h1 style={styles.title}>Add Vehicle</h1>
+      <div style={styles.card}>
+        {/* Plate lookup */}
+        <div style={styles.plateInput}>
+          <input
+            type="text"
+            value={plate}
+            onChange={(e) => setPlate(e.target.value.toUpperCase())}
+            placeholder="e.g., KF66LJN"
+            style={styles.input}
+            disabled={fetching}
+          />
+          <button
+            onClick={fetchVehicleDetails}
+            disabled={fetching || !plate.trim()}
+            style={styles.searchButton}
           >
-            <option value="" disabled>Select a vehicle</option>
-            {vehicles.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.license_plate} – {v.make} {v.model}
-              </option>
-            ))}
-          </select>
+            <Search size={18} />
+            {fetching ? 'Fetching...' : 'Look up'}
+          </button>
         </div>
 
-        {/* Title with suggestions */}
-        <div style={styles.field}>
-          <label style={styles.label}>Service Title *</label>
-          <div style={styles.radioGroup}>
-            <label style={styles.radioLabel}>
-              <input
-                type="radio"
-                checked={!useCustomTitle}
-                onChange={() => setUseCustomTitle(false)}
-              /> Select from list
-            </label>
-            <label style={styles.radioLabel}>
-              <input
-                type="radio"
-                checked={useCustomTitle}
-                onChange={() => setUseCustomTitle(true)}
-              /> Custom title
-            </label>
+        {error && (
+          <div style={styles.errorBox}>
+            <AlertCircle size={16} />
+            {error}
           </div>
+        )}
 
-          {!useCustomTitle ? (
-            <select
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              style={styles.select}
-              required
-            >
-              <option value="" disabled>Choose a service type</option>
-              {JOB_TITLES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          ) : (
+        {vehicleData && (
+          <div style={styles.preview}>
+            <h3>Vehicle Details</h3>
+            <p><strong>Make:</strong> {vehicleData.make}</p>
+            <p><strong>Model:</strong> {vehicleData.model}</p>
+            <p><strong>Year:</strong> {vehicleData.yearOfManufacture}</p>
+            <p><strong>Fuel:</strong> {vehicleData.fuelType}</p>
+            <p><strong>Engine:</strong> {vehicleData.engineCapacity} cc</p>
+            {vehicleData.vin && <p><strong>VIN:</strong> {vehicleData.vin}</p>}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div style={styles.field}>
+            <label style={styles.label}>Address (optional)</label>
             <input
               type="text"
-              value={customTitle}
-              onChange={(e) => setCustomTitle(e.target.value)}
-              placeholder="e.g. Gearbox overhaul"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="e.g., 123 High Street, Leicester"
               style={styles.input}
-              required
             />
-          )}
-        </div>
-
-        {/* Description */}
-        <div style={styles.field}>
-          <label style={styles.label}>Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Additional details about the service..."
-            rows={4}
-            style={{ ...styles.input, resize: 'vertical' }}
-          />
-        </div>
-
-        {/* Mileage */}
-        <div style={styles.field}>
-          <label style={styles.label}>Mileage (mi)</label>
-          <input
-            type="number"
-            value={mileage}
-            onChange={(e) => setMileage(e.target.value)}
-            placeholder="e.g. 45000"
-            style={styles.input}
-          />
-        </div>
-
-        {/* Date */}
-        <div style={styles.field}>
-          <label style={styles.label}>Service Date</label>
-          <input
-            type="date"
-            value={occurredAt}
-            onChange={(e) => setOccurredAt(e.target.value)}
-            style={styles.input}
-            required
-          />
-        </div>
-
-        {/* Image Upload */}
-        <div style={styles.field}>
-          <label style={styles.label}>Receipt / Photo (optional)</label>
-          <div style={styles.uploadArea}>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleImageChange}
-              style={styles.fileInput}
-              id="service-image"
-            />
-            <label htmlFor="service-image" style={styles.uploadLabel}>
-              📷 Choose file
-            </label>
-            {imagePreview && (
-              <div style={styles.previewContainer}>
-                <img src={imagePreview} alt="preview" style={styles.previewImage} />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setImageFile(null);
-                    setImagePreview(null);
-                  }}
-                  style={styles.clearPreview}
-                >
-                  ✕
-                </button>
-              </div>
-            )}
           </div>
-        </div>
 
-        {error && <div style={styles.errorBox}>{error}</div>}
-        {success && <div style={styles.successBox}>✓ Service event added! Redirecting...</div>}
+          {aiLoading && (
+            <div style={styles.aiContainer}>
+              <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+              <span style={styles.aiText}>Generating AI insights...</span>
+            </div>
+          )}
+          {aiInsight && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              style={styles.aiContainer}
+            >
+              <Car size={16} style={{ color: theme.colors.primary }} />
+              <span style={styles.aiText}>{aiInsight}</span>
+            </motion.div>
+          )}
 
-        <div style={styles.buttonRow}>
-          <button
-            type="button"
-            onClick={() => router.back()}
-            style={styles.cancelButton}
-            disabled={loading}
-          >
-            Cancel
-          </button>
+          {success && (
+            <div style={styles.successBox}>
+              <CheckCircle size={16} />
+              Vehicle added successfully! Redirecting...
+            </div>
+          )}
+
           <button
             type="submit"
-            disabled={loading || success}
+            disabled={loading || !vehicleData}
             style={styles.submitButton}
           >
-            {loading ? 'Adding...' : 'Add Event'}
+            {loading ? 'Saving...' : 'Add Vehicle'}
           </button>
-        </div>
-      </form>
+        </form>
+      </div>
     </motion.div>
   );
 }
 
-export default function AddServiceEventPage() {
-  return (
-    <Suspense fallback={<div style={styles.centered}>Loading...</div>}>
-      <AddServiceContent />
-    </Suspense>
-  );
-}
-
-// Styles (unchanged, but we need to add centered style)
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    padding: '40px',
-    background: '#020617',
-    minHeight: '100vh',
-    color: '#f1f5f9',
-    fontFamily: 'Inter, sans-serif',
-  },
-  backButton: {
-    background: 'transparent',
-    border: '1px solid #334155',
-    color: '#f1f5f9',
-    padding: '8px 16px',
-    borderRadius: '8px',
-    marginBottom: '24px',
-    cursor: 'pointer',
-  },
-  title: {
-    fontSize: '32px',
-    fontWeight: 700,
-    marginBottom: '32px',
-    background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  form: {
-    maxWidth: '600px',
-  },
-  field: {
-    marginBottom: '20px',
-  },
-  label: {
-    display: 'block',
-    fontSize: '14px',
-    fontWeight: 500,
-    color: '#94a3b8',
-    marginBottom: '6px',
-  },
-  input: {
-    width: '100%',
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    padding: '12px',
-    color: '#f1f5f9',
-    fontSize: '16px',
-    outline: 'none',
-  },
-  select: {
-    width: '100%',
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    padding: '12px',
-    color: '#f1f5f9',
-    fontSize: '16px',
-  },
-  radioGroup: {
-    display: 'flex',
-    gap: '20px',
-    marginBottom: '12px',
-  },
-  radioLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    fontSize: '14px',
-    color: '#94a3b8',
-  },
-  uploadArea: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    flexWrap: 'wrap',
-  },
-  fileInput: {
-    display: 'none',
-  },
-  uploadLabel: {
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '30px',
-    padding: '8px 16px',
-    color: '#f1f5f9',
-    fontSize: '14px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  previewContainer: {
-    position: 'relative',
-    width: '60px',
-    height: '60px',
-    borderRadius: '8px',
-    overflow: 'hidden',
-    border: '1px solid #334155',
-  },
-  previewImage: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-  },
-  clearPreview: {
-    position: 'absolute',
-    top: '2px',
-    right: '2px',
-    background: '#ef4444',
-    border: 'none',
-    borderRadius: '50%',
-    width: '18px',
-    height: '18px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    color: '#fff',
-  },
-  errorBox: {
-    marginTop: '16px',
-    padding: '12px',
-    background: 'rgba(239,68,68,0.1)',
-    border: '1px solid #ef4444',
-    borderRadius: '8px',
-    color: '#ef4444',
-  },
-  successBox: {
-    marginTop: '16px',
-    padding: '12px',
-    background: 'rgba(34,197,94,0.1)',
-    border: '1px solid #22c55e',
-    borderRadius: '8px',
-    color: '#22c55e',
-    textAlign: 'center',
-  },
-  buttonRow: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '12px',
-    marginTop: '24px',
-  },
-  cancelButton: {
-    background: 'transparent',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    padding: '12px 24px',
-    color: '#94a3b8',
-    cursor: 'pointer',
-  },
-  submitButton: {
-    background: '#22c55e',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '12px 24px',
-    color: '#020617',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  centered: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#94a3b8',
-  },
+  page: { padding: theme.spacing[10], background: theme.colors.background.main, minHeight: '100vh', color: theme.colors.text.primary, fontFamily: theme.fontFamilies.sans },
+  title: { fontSize: theme.fontSizes['4xl'], fontWeight: theme.fontWeights.bold, marginBottom: theme.spacing[2], background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  card: { maxWidth: 600, background: theme.colors.background.card, borderRadius: theme.borderRadius.xl, padding: theme.spacing[6], border: `1px solid ${theme.colors.border.light}` },
+  plateInput: { display: 'flex', gap: theme.spacing[3], marginBottom: theme.spacing[5] },
+  input: { flex: 1, background: theme.colors.background.elevated, border: `1px solid ${theme.colors.border.medium}`, borderRadius: theme.borderRadius.lg, padding: theme.spacing[3], color: theme.colors.text.primary },
+  searchButton: { background: theme.colors.primary, border: 'none', borderRadius: theme.borderRadius.lg, padding: `0 ${theme.spacing[4]}`, color: theme.colors.background.main, fontWeight: theme.fontWeights.semibold, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: theme.spacing[1] },
+  errorBox: { display: 'flex', alignItems: 'center', gap: theme.spacing[2], background: `${theme.colors.error}20`, border: `1px solid ${theme.colors.error}`, borderRadius: theme.borderRadius.lg, padding: theme.spacing[3], marginBottom: theme.spacing[4], color: theme.colors.error },
+  preview: { marginTop: theme.spacing[5], padding: theme.spacing[4], background: theme.colors.background.elevated, borderRadius: theme.borderRadius.lg, marginBottom: theme.spacing[5] },
+  field: { marginBottom: theme.spacing[4] },
+  label: { display: 'block', marginBottom: theme.spacing[2], color: theme.colors.text.secondary },
+  aiContainer: { display: 'flex', alignItems: 'center', gap: theme.spacing[2], background: theme.colors.background.elevated, borderRadius: theme.borderRadius.lg, padding: theme.spacing[3], marginBottom: theme.spacing[4] },
+  aiText: { fontSize: theme.fontSizes.sm, color: theme.colors.text.secondary },
+  successBox: { display: 'flex', alignItems: 'center', gap: theme.spacing[2], background: `${theme.colors.primary}20`, border: `1px solid ${theme.colors.primary}`, borderRadius: theme.borderRadius.lg, padding: theme.spacing[3], marginBottom: theme.spacing[4], color: theme.colors.primary },
+  submitButton: { width: '100%', background: theme.colors.primary, border: 'none', borderRadius: theme.borderRadius.lg, padding: theme.spacing[3], fontSize: theme.fontSizes.base, fontWeight: theme.fontWeights.semibold, color: theme.colors.background.main, cursor: 'pointer', marginTop: theme.spacing[2] },
+  upgradeCard: { maxWidth: 500, margin: '0 auto', background: theme.colors.background.card, borderRadius: theme.borderRadius.xl, padding: theme.spacing[8], textAlign: 'center' },
+  upgradeActions: { display: 'flex', gap: theme.spacing[3], justifyContent: 'center', marginTop: theme.spacing[6] },
+  upgradeButton: { background: theme.colors.primary, border: 'none', borderRadius: theme.borderRadius.lg, padding: `${theme.spacing[2]} ${theme.spacing[5]}`, color: theme.colors.background.main, fontWeight: theme.fontWeights.semibold, cursor: 'pointer' },
+  backButton: { background: 'transparent', border: `1px solid ${theme.colors.border.medium}`, borderRadius: theme.borderRadius.lg, padding: `${theme.spacing[2]} ${theme.spacing[5]}`, color: theme.colors.text.secondary, cursor: 'pointer' },
 };

@@ -5,7 +5,12 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { MapPin, AlertCircle, CheckCircle, Loader2, Crosshair } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import mbxGeocoding from '@mapbox/mapbox-sdk/services/geocoding';
 import theme from '@/app/theme';
+
+const geocodingClient = mbxGeocoding({
+  accessToken: process.env.NEXT_PUBLIC_MAPBOX_TOKEN!,
+});
 
 interface Vehicle {
   id: string;
@@ -53,7 +58,7 @@ export default function PostJobPage() {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
-          // Reverse geocode using Mapbox (if you have token)
+          // Reverse geocode using Mapbox
           const res = await fetch(
             `https://api.mapbox.com/geocoding/v5/mapbox.places/${position.coords.longitude},${position.coords.latitude}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_TOKEN}&types=address&limit=1`
           );
@@ -92,6 +97,23 @@ export default function PostJobPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('You must be logged in');
 
+      // Geocode location if provided
+      let lat: number | null = null;
+      let lng: number | null = null;
+      if (location.trim()) {
+        try {
+          const response = await geocodingClient.forwardGeocode({
+            query: location,
+            limit: 1,
+          }).send();
+          if (response.body.features.length) {
+            [lng, lat] = response.body.features[0].center;
+          }
+        } catch (geoErr) {
+          console.warn('Geocoding failed, proceeding without coordinates', geoErr);
+        }
+      }
+
       const { error: insertError } = await supabase.from('jobs').insert({
         title: title.trim(),
         description: description.trim(),
@@ -100,6 +122,8 @@ export default function PostJobPage() {
         user_id: user.id,
         vehicle_id: selectedVehicle,
         location: location.trim() || null,
+        lat,
+        lng,
       });
 
       if (insertError) throw insertError;

@@ -3,35 +3,47 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Briefcase, CreditCard, Users, CheckCircle, AlertCircle } from 'lucide-react';
+import { Truck, CheckCircle, AlertTriangle, MapPin, Calendar, TrendingUp, Plus, Wrench, Car } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-type Mechanic = {
-  id: string;
-  business_name: string;
-  phone: string | null;
-  verified: boolean;
-  subscription_status: string;
-  stripe_account_id: string | null;
-};
+// Optional Mapbox (only if token is set)
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 
-type Application = {
+interface Vehicle {
   id: string;
-  job_id: string;
-  bid_amount: number;
-  status: string;
-  created_at: string;
-  job?: { title: string };
-};
+  license_plate: string;
+  make: string;
+  model: string;
+  health_score: number | null;
+  lat: number | null;
+  lng: number | null;
+}
 
-export default function MechanicDashboardPage() {
+interface Reminder {
+  id: string;
+  title: string;
+  due_date: string | null;
+  due_mileage: number | null;
+  vehicle?: { make: string; model: string; license_plate: string };
+}
+
+interface Prediction {
+  vehicleId: string;
+  vehicleName: string;
+  predictedCost: number;
+  days: number;
+}
+
+export default function DashboardPage() {
   const router = useRouter();
-  const [mechanic, setMechanic] = useState<Mechanic | null>(null);
-  const [applications, setApplications] = useState<Application[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [hasLocationData, setHasLocationData] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -40,50 +52,122 @@ export default function MechanicDashboardPage() {
   async function fetchData() {
     try {
       setLoading(true);
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
         router.push('/login');
         return;
       }
 
-      // Check admin
-      if (user.email === 'teebaxy@gmail.com') setIsAdmin(true);
-
-      const { data: mech, error: mechError } = await supabase
-        .from('mechanics')
-        .select('*')
+      // Fetch vehicles
+      const { data: vehiclesData, error: vehiclesError } = await supabase
+        .from('vehicles')
+        .select('id, license_plate, make, model, health_score, lat, lng')
         .eq('user_id', user.id)
-        .single();
-
-      if (mechError || !mech) {
-        router.push('/marketplace/mechanics/register');
-        return;
-      }
- 
-      setMechanic(mech);
-
-      // If subscription is not active, redirect to subscribe
-      if (mech.subscription_status !== 'active') {
-        router.push('/marketplace/mechanics/subscribe');
-        return;
-      }
-
-      const { data: apps, error: appsError } = await supabase
-        .from('applications')
-        .select(`
-          *,
-          job:jobs(title)
-        `)
-        .eq('mechanic_id', mech.id)
         .order('created_at', { ascending: false });
 
-      if (!appsError && apps) setApplications(apps);
+      if (vehiclesError) throw vehiclesError;
+      setVehicles(vehiclesData || []);
+      setHasLocationData(vehiclesData?.some(v => v.lat && v.lng) || false);
+
+      // Fetch upcoming reminders – two‑step to avoid join issues
+      const { data: rawReminders, error: remindersError } = await supabase
+        .from('reminders')
+        .select('id, title, due_date, due_mileage, vehicle_id')
+        .eq('completed', false)
+        .order('due_date', { ascending: true })
+        .limit(5);
+
+      if (remindersError) throw remindersError;
+
+      if (rawReminders && rawReminders.length > 0) {
+  const vehicleIds = rawReminders
+    .map((r) => r.vehicle_id)
+    .filter((id): id is string => Boolean(id));
+
+  const { data: vehiclesData } = await supabase
+    .from('vehicles')
+    .select('id, make, model, license_plate')
+    .in('id', vehicleIds);
+
+  const vehicleMap = new Map<string, { make: string; model: string; license_plate: string }>(
+    (vehiclesData || []).map((v) => [
+      v.id,
+      {
+        make: v.make,
+        model: v.model,
+        license_plate: v.license_plate,
+      },
+    ])
+  );
+
+  const remindersWithVehicle: Reminder[] = rawReminders.map((r) => {
+    const vehicle = r.vehicle_id ? vehicleMap.get(r.vehicle_id) : undefined;
+
+    return {
+      id: r.id,
+      title: r.title,
+      due_date: r.due_date,
+      due_mileage: r.due_mileage,
+      ...(vehicle ? { vehicle } : {}),
+    };
+  });
+
+  setReminders(remindersWithVehicle);
+} else {
+  setReminders([]);
+}
+
+      // Mock AI predictions – replace with real API later
+      const mockPredictions: Prediction[] = (vehiclesData || []).slice(0, 3).map(v => ({
+        vehicleId: v.id,
+        vehicleName: `${v.make} ${v.model}`,
+        predictedCost: Math.floor(Math.random() * 500) + 200,
+        days: Math.floor(Math.random() * 90) + 30,
+      }));
+      setPredictions(mockPredictions);
     } catch (err: any) {
-      setError(err.message || 'Something went wrong');
+      console.error('Dashboard fetch error:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   }
+
+  // Stats
+  const total = vehicles.length;
+  const healthy = vehicles.filter(v => (v.health_score || 0) >= 80).length;
+  const warning = vehicles.filter(v => (v.health_score || 0) >= 50 && (v.health_score || 0) < 80).length;
+  const critical = vehicles.filter(v => (v.health_score || 0) < 50).length;
+  const criticalVehicles = vehicles.filter(v => (v.health_score || 0) < 40);
+
+  // Map
+  useEffect(() => {
+    if (!hasLocationData || !process.env.NEXT_PUBLIC_MAPBOX_TOKEN) return;
+    const mapContainer = document.getElementById('fleet-map');
+    if (!mapContainer) return;
+    const mapInstance = new mapboxgl.Map({
+      container: 'fleet-map',
+      style: 'mapbox://styles/mapbox/dark-v11',
+      center: [0, 0],
+      zoom: 5,
+      accessToken: process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
+    });
+    vehicles.forEach(v => {
+      if (v.lat && v.lng) {
+        new mapboxgl.Marker()
+          .setLngLat([v.lng, v.lat])
+          .setPopup(new mapboxgl.Popup().setHTML(`<strong>${v.make} ${v.model}</strong><br/>${v.license_plate}`))
+          .addTo(mapInstance);
+      }
+    });
+    const bounds = vehicles.filter(v => v.lat && v.lng).map(v => [v.lng!, v.lat!] as [number, number]);
+    if (bounds.length) {
+      const lngBounds = new mapboxgl.LngLatBounds(bounds[0], bounds[0]);
+      bounds.forEach(b => lngBounds.extend(b));
+      mapInstance.fitBounds(lngBounds, { padding: 50 });
+    }
+    return () => mapInstance.remove();
+  }, [hasLocationData, vehicles]);
 
   if (loading) {
     return (
@@ -110,283 +194,307 @@ export default function MechanicDashboardPage() {
   if (error) {
     return (
       <div style={styles.centered}>
-        <p style={{ color: theme.colors.error }}>Error: {error}</p>
+        <p style={{ color: theme.colors.error }}>Error loading dashboard: {error}</p>
         <button onClick={fetchData} style={styles.retryButton}>Retry</button>
       </div>
     );
   }
 
-  if (!mechanic) return null;
-
-  const pending = applications.filter(a => a.status === 'pending').length;
-  const accepted = applications.filter(a => a.status === 'accepted').length;
-  const completed = applications.filter(a => a.status === 'completed').length;
-  const totalEarned = applications
-    .filter(a => a.status === 'completed')
-    .reduce((sum, a) => sum + a.bid_amount, 0);
-
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
-      <h1 style={styles.title}>Mechanic Dashboard</h1>
+      <h1 style={styles.title}>Dashboard</h1>
+      <p style={styles.subtitle}>Welcome back to your fleet overview</p>
 
-      {/* Subscription & verification status */}
-      <div style={styles.subscriptionCard}>
-        <div>
-          <h2 style={styles.businessName}>{mechanic.business_name}</h2>
-          <p style={styles.status}>
-            Subscription:{' '}
-            <span style={{ color: mechanic.subscription_status === 'active' ? theme.colors.primary : theme.colors.error }}>
-              {mechanic.subscription_status === 'active' ? 'Active' : 'Inactive'}
-            </span>
-          </p>
-          {mechanic.verified ? (
-            <span style={styles.verifiedBadge}>✓ Verified</span>
+      {/* Stats */}
+      <div style={styles.statsGrid}>
+        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
+          <Truck size={24} color={theme.colors.info} />
+          <div>
+            <span style={styles.statValue}>{total}</span>
+            <span style={styles.statLabel}>Total Vehicles</span>
+          </div>
+        </motion.div>
+        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
+          <CheckCircle size={24} color={theme.colors.status.healthy} />
+          <div>
+            <span style={styles.statValue}>{healthy}</span>
+            <span style={styles.statLabel}>Healthy</span>
+          </div>
+        </motion.div>
+        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
+          <AlertTriangle size={24} color={theme.colors.status.warning} />
+          <div>
+            <span style={styles.statValue}>{warning}</span>
+            <span style={styles.statLabel}>Warning</span>
+          </div>
+        </motion.div>
+        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
+          <AlertTriangle size={24} color={theme.colors.status.critical} />
+          <div>
+            <span style={styles.statValue}>{critical}</span>
+            <span style={styles.statLabel}>Critical</span>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* Map */}
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <MapPin size={20} color={theme.colors.primary} />
+          <h2 style={styles.cardTitle}>Fleet Geospatial View</h2>
+        </div>
+        {hasLocationData ? (
+          <div id="fleet-map" style={{ height: '300px', borderRadius: theme.borderRadius.lg, overflow: 'hidden' }} />
+        ) : (
+          <div style={styles.emptyState}>
+            <p>No location data available. Add an address when adding a vehicle to see it on the map.</p>
+            <button onClick={() => router.push('/vehicles/add')} style={styles.smallButton}>
+              <Plus size={16} /> Add vehicle with location
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Two‑column */}
+      <div style={styles.twoColumn}>
+        {/* Reminders */}
+        <div style={styles.card}>
+          <div style={styles.cardHeader}>
+            <Calendar size={20} color={theme.colors.primary} />
+            <h2 style={styles.cardTitle}>Upcoming Service Reminders</h2>
+          </div>
+          {reminders.length === 0 ? (
+            <div style={styles.emptyState}>
+              <p>No upcoming reminders.</p>
+              <button onClick={() => router.push('/service-history/add')} style={styles.smallButton}>
+                <Plus size={16} /> Add a reminder
+              </button>
+            </div>
           ) : (
-            <span style={{ ...styles.verifiedBadge, background: `${theme.colors.error}20`, color: theme.colors.error }}>
-              ⚠️ Not Verified – Complete your profile
-            </span>
+            <div>
+              {reminders.map(rem => (
+                <div key={rem.id} style={styles.reminderItem}>
+                  <strong>{rem.title}</strong>
+                  {rem.vehicle && (
+                    <span style={styles.vehicleTag}>
+                      {rem.vehicle.make} {rem.vehicle.model}
+                    </span>
+                  )}
+                  <div style={styles.reminderMeta}>
+                    {rem.due_date && <span>Due: {new Date(rem.due_date).toLocaleDateString()}</span>}
+                    {rem.due_mileage && <span> at {rem.due_mileage.toLocaleString()} mi</span>}
+                  </div>
+                </div>
+              ))}
+              <button onClick={() => router.push('/service-reminders')} style={styles.linkButton}>
+                View all reminders
+              </button>
+            </div>
           )}
         </div>
-        {mechanic.subscription_status !== 'active' && (
-          <button onClick={() => router.push('/marketplace/mechanics/subscribe')} style={styles.subscribeButton}>
-            Subscribe Now
-          </button>
-        )}
-      </div>
 
-      {/* Quick actions */}
-      <div style={styles.quickActions}>
-        <div style={styles.actionCard} onClick={() => router.push('/marketplace/jobs')}>
-          <Briefcase size={24} color={theme.colors.primary} />
-          <div>
-            <h3>Browse Jobs</h3>
-            <p>Find new repair jobs to apply for</p>
+        {/* AI Predictions */}
+        <div style={styles.card}>
+          <div style={styles.cardHeader}>
+            <TrendingUp size={20} color={theme.colors.primary} />
+            <h2 style={styles.cardTitle}>AI Predictions</h2>
           </div>
-        </div>
-        <div style={styles.actionCard} onClick={() => router.push('/marketplace/mechanics/subscribe')}>
-          <CreditCard size={24} color={theme.colors.primary} />
-          <div>
-            <h3>Manage Subscription</h3>
-            <p>Upgrade or change your plan</p>
-          </div>
-        </div>
-        {isAdmin && (
-          <div style={styles.actionCard} onClick={() => router.push('/admin')}>
-            <Users size={24} color={theme.colors.primary} />
-            <div>
-              <h3>Admin Dashboard</h3>
-              <p>Manage jobs, mechanics, users</p>
+          {predictions.length === 0 ? (
+            <div style={styles.emptyState}>
+              <p>No predictions available. Predictions will appear as vehicles gather data.</p>
+              <button onClick={() => router.push('/diagnostics')} style={styles.smallButton}>
+                <Wrench size={16} /> View Diagnostics
+              </button>
             </div>
+          ) : (
+            <div>
+              {predictions.map(pred => (
+                <div key={pred.vehicleId} style={styles.predictionItem}>
+                  <div style={styles.predictionHeader}>
+                    <strong>{pred.vehicleName}</strong>
+                    <span style={styles.predictionCost}>£{pred.predictedCost}</span>
+                  </div>
+                  <div style={styles.predictionMeta}>
+                    Estimated cost in {pred.days} days
+                  </div>
+                </div>
+              ))}
+              <button onClick={() => router.push('/diagnostics')} style={styles.linkButton}>
+                View Details
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Critical Alerts */}
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <AlertTriangle size={20} color={theme.colors.status.critical} />
+          <h2 style={styles.cardTitle}>Critical Alerts</h2>
+        </div>
+        {criticalVehicles.length === 0 ? (
+          <p>No critical alerts – all vehicles are stable.</p>
+        ) : (
+          <div style={styles.alertsList}>
+            {criticalVehicles.map(v => (
+              <div key={v.id} style={styles.alertItem}>
+                <Car size={16} color={theme.colors.status.critical} />
+                <span>{v.make} {v.model} ({v.license_plate}) – Health: {v.health_score}%</span>
+                <button onClick={() => router.push(`/vehicles/${v.license_plate}`)} style={styles.linkButton}>
+                  View Details
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>
-
-      {/* Statistics */}
-      <div style={styles.statsGrid}>
-        <div style={styles.statCard}>
-          <span style={styles.statLabel}>Total Applications</span>
-          <span style={styles.statValue}>{applications.length}</span>
-        </div>
-        <div style={styles.statCard}>
-          <span style={styles.statLabel}>Pending</span>
-          <span style={styles.statValue}>{pending}</span>
-        </div>
-        <div style={styles.statCard}>
-          <span style={styles.statLabel}>Accepted</span>
-          <span style={styles.statValue}>{accepted}</span>
-        </div>
-        <div style={styles.statCard}>
-          <span style={styles.statLabel}>Completed</span>
-          <span style={styles.statValue}>{completed}</span>
-        </div>
-        <div style={styles.statCard}>
-          <span style={styles.statLabel}>Total Earned</span>
-          <span style={styles.statValue}>£{totalEarned}</span>
-        </div>
-      </div>
-
-      {/* Recent Applications */}
-      <h2 style={styles.sectionTitle}>Recent Applications</h2>
-      {applications.length === 0 ? (
-        <p style={styles.empty}>You haven’t applied to any jobs yet. Browse the marketplace to start.</p>
-      ) : (
-        <div style={styles.tableWrapper}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th>Job Title</th>
-                <th>Bid</th>
-                <th>Status</th>
-                <th>Applied</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {applications.slice(0, 5).map(app => (
-                <tr key={app.id} style={styles.tableRow}>
-                  <td style={styles.tableCell}>{app.job?.title || 'Unknown'}</td>
-                  <td style={styles.tableCell}>£{app.bid_amount}</td>
-                  <td style={styles.tableCell}>
-                    <span
-                      style={{
-                        ...styles.statusBadge,
-                        background: app.status === 'accepted' ? `${theme.colors.primary}20` : app.status === 'pending' ? `${theme.colors.warning}20` : `${theme.colors.text.muted}20`,
-                        color: app.status === 'accepted' ? theme.colors.primary : app.status === 'pending' ? theme.colors.warning : theme.colors.text.muted,
-                      }}
-                    >
-                      {app.status}
-                    </span>
-                  </td>
-                  <td style={styles.tableCell}>{new Date(app.created_at).toLocaleDateString()}</td>
-                  <td style={styles.tableCell}>
-                    <button onClick={() => router.push(`/marketplace/jobs/${app.job_id}`)} style={styles.viewButton}>
-                      View Job
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </motion.div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    padding: theme.spacing[10],
+    padding: theme.spacing[8],
     background: theme.colors.background.main,
     minHeight: '100vh',
     color: theme.colors.text.primary,
     fontFamily: theme.fontFamilies.sans,
   },
   title: {
-    fontSize: theme.fontSizes['4xl'],
+    fontSize: theme.fontSizes['3xl'],
     fontWeight: theme.fontWeights.bold,
-    marginBottom: theme.spacing[6],
+    marginBottom: theme.spacing[1],
     background: theme.gradients.title,
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
   },
-  subscriptionCard: {
+  subtitle: {
+    fontSize: theme.fontSizes.base,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[6],
+  },
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: theme.spacing[4],
+    marginBottom: theme.spacing[6],
+  },
+  statCard: {
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.light}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+  },
+  statValue: {
+    fontSize: theme.fontSizes['2xl'],
+    fontWeight: theme.fontWeights.bold,
+    display: 'block',
+    color: theme.colors.text.primary,
+  },
+  statLabel: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.muted,
+  },
+  card: {
     background: theme.colors.background.card,
     border: `1px solid ${theme.colors.border.light}`,
     borderRadius: theme.borderRadius.xl,
     padding: theme.spacing[5],
     marginBottom: theme.spacing[6],
+  },
+  cardHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[4],
+  },
+  cardTitle: {
+    fontSize: theme.fontSizes.lg,
+    fontWeight: theme.fontWeights.semibold,
+    color: theme.colors.text.primary,
+  },
+  emptyState: {
+    textAlign: 'center',
+    padding: theme.spacing[4],
+    color: theme.colors.text.muted,
+  },
+  smallButton: {
+    marginTop: theme.spacing[2],
+    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
+    background: theme.colors.primary,
+    border: 'none',
+    borderRadius: theme.borderRadius.lg,
+    color: theme.colors.background.main,
+    fontSize: theme.fontSizes.sm,
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: theme.spacing[1],
+  },
+  linkButton: {
+    marginTop: theme.spacing[2],
+    background: 'transparent',
+    border: 'none',
+    color: theme.colors.primary,
+    cursor: 'pointer',
+    fontSize: theme.fontSizes.sm,
+    textDecoration: 'underline',
+  },
+  twoColumn: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: theme.spacing[6],
+    marginBottom: theme.spacing[6],
+  },
+  reminderItem: {
+    marginBottom: theme.spacing[3],
+    paddingBottom: theme.spacing[2],
+    borderBottom: `1px solid ${theme.colors.border.light}`,
+  },
+  vehicleTag: {
+    display: 'inline-block',
+    marginLeft: theme.spacing[2],
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.text.muted,
+  },
+  reminderMeta: {
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.text.muted,
+    marginTop: theme.spacing[1],
+  },
+  predictionItem: {
+    marginBottom: theme.spacing[3],
+    paddingBottom: theme.spacing[2],
+    borderBottom: `1px solid ${theme.colors.border.light}`,
+  },
+  predictionHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  businessName: {
-    fontSize: theme.fontSizes.xl,
-    fontWeight: theme.fontWeights.semibold,
-    marginBottom: theme.spacing[1],
-  },
-  status: {
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[1],
-  },
-  verifiedBadge: {
-    background: `${theme.colors.primary}20`,
+  predictionCost: {
+    fontWeight: theme.fontWeights.bold,
     color: theme.colors.primary,
-    padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-    borderRadius: theme.borderRadius.full,
+  },
+  predictionMeta: {
     fontSize: theme.fontSizes.xs,
-    display: 'inline-block',
+    color: theme.colors.text.muted,
   },
-  subscribeButton: {
-    background: theme.colors.primary,
-    border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    color: theme.colors.background.main,
-    fontWeight: theme.fontWeights.semibold,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
+  alertsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[2],
   },
-  quickActions: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-    gap: theme.spacing[5],
-    marginBottom: theme.spacing[8],
-  },
-  actionCard: {
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[5],
+  alertItem: {
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[4],
-    cursor: 'pointer',
-    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-  },
-  statsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(5, 1fr)',
-    gap: theme.spacing[4],
-    marginBottom: theme.spacing[8],
-  },
-  statCard: {
-    background: theme.colors.background.card,
-    padding: theme.spacing[4],
-    borderRadius: theme.borderRadius.lg,
-    border: `1px solid ${theme.colors.border.light}`,
-    textAlign: 'center',
-  },
-  statLabel: {
+    gap: theme.spacing[2],
     fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.muted,
-    display: 'block',
-    marginBottom: theme.spacing[1],
-  },
-  statValue: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.text.primary,
-  },
-  sectionTitle: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.semibold,
-    marginBottom: theme.spacing[4],
-    color: theme.colors.text.primary,
-  },
-  tableWrapper: {
-    background: theme.colors.background.card,
-    borderRadius: theme.borderRadius.xl,
-    overflow: 'auto',
-    border: `1px solid ${theme.colors.border.light}`,
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: theme.fontSizes.sm,
-  },
-  tableRow: {
-    borderBottom: `1px solid ${theme.colors.border.light}`,
-  },
-  tableCell: {
-    padding: theme.spacing[3],
-    color: theme.colors.text.primary,
-  },
-  statusBadge: {
-    display: 'inline-block',
-    padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-    borderRadius: theme.borderRadius.full,
-    fontSize: theme.fontSizes.xs,
-    fontWeight: theme.fontWeights.medium,
-    textTransform: 'capitalize',
-  },
-  viewButton: {
-    background: 'transparent',
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
     color: theme.colors.text.secondary,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
   },
   centered: {
     minHeight: '100vh',
@@ -404,10 +512,5 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: theme.borderRadius.lg,
     color: theme.colors.background.main,
     cursor: 'pointer',
-  },
-  empty: {
-    textAlign: 'center',
-    padding: theme.spacing[12],
-    color: theme.colors.text.muted,
   },
 };

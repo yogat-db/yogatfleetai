@@ -57,6 +57,37 @@ export async function POST(req: NextRequest) {
 
       // Optional: handle subscription cancellation or updates
       // case 'customer.subscription.deleted': { ... }
+      // Inside the event handling, after the mechanic subscription part:
+case 'checkout.session.completed': {
+  const session = event.data.object as Stripe.Checkout.Session;
+  const type = session.metadata?.type;
+  if (type === 'multi_vehicle_upgrade') {
+    const userId = session.metadata?.userId;
+    if (userId) {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ has_multi_vehicle: true })
+        .eq('id', userId);
+      console.log(`Multi‑vehicle upgrade granted to user ${userId}`);
+    }
+  } else if (type === 'subscription') {
+    // existing mechanic subscription logic
+    const mechanicId = session.metadata?.mechanicId;
+    if (mechanicId) {
+      await supabaseAdmin
+        .from('mechanics')
+        .update({ subscription_status: 'active', plan: 'pro' })
+        .eq('id', mechanicId);
+      if (session.customer) {
+        await supabaseAdmin
+          .from('mechanics')
+          .update({ stripe_customer_id: session.customer as string })
+          .eq('id', mechanicId);
+      }
+    }
+  }
+  break;
+}
 
       default:
         console.log(`Unhandled event type: ${event.type}`);

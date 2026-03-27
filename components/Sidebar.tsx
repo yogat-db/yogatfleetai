@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -11,15 +10,19 @@ import {
   Wrench,
   History,
   Settings,
-  LayoutPanelLeft,
+  Users,
+  Briefcase,
+  UserCog,
   Menu,
   X,
   LogOut,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import theme from '@/app/theme';
 
-// ---------- Custom Hook for User Role (hardcoded admin for teebaxy) ----------
+// ---------- Custom Hook for User Role ----------
 function useUserRole() {
+  const [isMechanic, setIsMechanic] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -31,11 +34,19 @@ function useUserRole() {
         return;
       }
 
-      // Hardcoded admin for teebaxy@gmail.com
+      // Check mechanic
+      const { data: mechanic } = await supabase
+        .from('mechanics')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      setIsMechanic(!!mechanic);
+
+      // Admin check – hardcoded for teebaxy@gmail.com
       if (user.email === 'teebaxy@gmail.com') {
         setIsAdmin(true);
       } else {
-        // Fallback to admins table
+        // Fallback to admins table if needed
         const { data: admin } = await supabase
           .from('admins')
           .select('id')
@@ -49,7 +60,7 @@ function useUserRole() {
     fetchRoles();
   }, []);
 
-  return { isAdmin, loading };
+  return { isMechanic, isAdmin, loading };
 }
 // ---------- End Hook ----------
 
@@ -63,16 +74,22 @@ const activeBg = '#1e293b';
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { isAdmin, loading } = useUserRole();
+  const router = useRouter();
+  const { isMechanic, isAdmin, loading } = useUserRole();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  // Public pages where sidebar should be hidden
+  const publicPaths = ['/login', '/register', '/forgot-password', '/update-password'];
+  if (publicPaths.includes(pathname)) {
+    return null;
+  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = '/login';
   };
 
-  // Main menu items in desired order
   const menuItems = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Fleet', href: '/fleet', icon: Truck },
@@ -82,8 +99,16 @@ export default function Sidebar() {
     { name: 'Control Center', href: '/control-center', icon: Settings },
   ];
 
-  // Admin dashboard – only one link, all admin features inside
-  const adminDashboardItem = { name: 'Admin Dashboard', href: '/admin', icon: LayoutPanelLeft };
+  const mechanicItems = [
+    { name: 'Mechanic Dashboard', href: '/marketplace/mechanics/dashboard', icon: Briefcase },
+  ];
+
+  const adminItems = [
+    { name: 'Admin Dashboard', href: '/admin', icon: LayoutDashboard },
+    { name: 'Admin Jobs', href: '/admin/jobs', icon: Briefcase },
+    { name: 'Admin Mechanics', href: '/admin/mechanics', icon: Users },
+    { name: 'Admin Users', href: '/admin/users', icon: UserCog },
+  ];
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -92,7 +117,7 @@ export default function Sidebar() {
       {items.map((item) => {
         const active = isActive(item.href);
         return (
-          <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
+          <a key={item.href} onClick={() => router.push(item.href)} style={{ textDecoration: 'none', cursor: 'pointer' }}>
             <motion.div
               whileHover={{ x: 4 }}
               transition={{ type: 'spring', stiffness: 300, damping: 20 }}
@@ -105,7 +130,7 @@ export default function Sidebar() {
               <item.icon size={20} color={active ? primaryColor : textSecondary} />
               {!isCollapsed && <span style={{ marginLeft: '12px' }}>{item.name}</span>}
             </motion.div>
-          </Link>
+          </a>
         );
       })}
     </>
@@ -114,26 +139,8 @@ export default function Sidebar() {
   const renderContent = () => (
     <>
       {renderNavItems(menuItems)}
-
-      {/* Admin Dashboard – only appears for admin users */}
-      {!loading && isAdmin && (
-        <Link href={adminDashboardItem.href} style={{ textDecoration: 'none' }}>
-          <motion.div
-            whileHover={{ x: 4 }}
-            style={{
-              ...styles.navItem,
-              background: isActive(adminDashboardItem.href) ? activeBg : 'transparent',
-              borderLeft: isActive(adminDashboardItem.href) ? `3px solid ${primaryColor}` : '3px solid transparent',
-              marginTop: '4px',
-            }}
-          >
-            <adminDashboardItem.icon size={20} color={isActive(adminDashboardItem.href) ? primaryColor : textSecondary} />
-            {!isCollapsed && <span style={{ marginLeft: '12px' }}>{adminDashboardItem.name}</span>}
-          </motion.div>
-        </Link>
-      )}
-
-      {/* Logout button */}
+      {!loading && isMechanic && renderNavItems(mechanicItems)}
+      {!loading && isAdmin && renderNavItems(adminItems)}
       <motion.button
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
@@ -146,7 +153,7 @@ export default function Sidebar() {
     </>
   );
 
-  // Mobile drawer (unchanged)
+  // Mobile drawer
   const MobileDrawer = () => (
     <AnimatePresence>
       {isMobileOpen && (

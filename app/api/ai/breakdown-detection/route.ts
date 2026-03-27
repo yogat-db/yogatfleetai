@@ -1,210 +1,83 @@
-import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-import { computeFleetBrain } from '@/lib/ai'
-import { getDTCInfo } from '@/lib/ai/diagnostics'
-import type { Vehicle } from '@/app/types/fleet'
-import type { VehicleAI } from '@/lib/ai'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { getDTCInfo } from '@/lib/ai/diagnostics';
+import type { Vehicle } from '@/app/types/fleet';
 
 interface BreakdownResult {
-  vehicle: {
-    id: string
-    license_plate: string
-    make: string | null
-    model: string | null
-    health_score: number
-  }
-  breakdownProbability: number
-  reasons: string[]
-  imminent: boolean
+  vehicle: Vehicle;
+  riskLevel: 'low' | 'medium' | 'high';
+  symptoms: string[];
+  recommendedActions: string[];
+  dtcCodes?: string[];
 }
 
-function calculateBreakdownProbability(
-  vehicle: VehicleAI,
-  recentDTCs: string[] = []
-): { probability: number; reasons: string[] } {
-  let probability = 0
-  const reasons: string[] = []
-
-  const health = vehicle.health_score ?? 100
-
-  if (health < 40) {
-    probability += 0.6
-    reasons.push('Health score critically low')
-  } else if (health < 70) {
-    probability += 0.3
-    reasons.push('Health score below optimal')
-  }
-
-  if (recentDTCs.length > 0) {
-    const criticalDTCs = recentDTCs.filter((code) => {
-      const info = getDTCInfo(code)
-      return info?.mechanicNeeded && info?.estimatedCost && info.estimatedCost > 500
-    })
-    if (criticalDTCs.length > 0) {
-      probability += 0.3 * criticalDTCs.length
-      reasons.push(`Critical DTC codes: ${criticalDTCs.join(', ')}`)
-    }
-  }
-
-  probability = Math.min(probability, 0.95)
-  return { probability, reasons }
-}
-
-export async function GET(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-        },
-      }
-    )
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    const supabase = await createClient();
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const url = new URL(request.url)
-    const vehicleId = url.searchParams.get('vehicleId')
-    const plate = url.searchParams.get('plate')
-    const all = url.searchParams.get('all') === 'true'
+    const { vehicleId, dtcCodes } = await req.json();
 
-    let query = supabase.from('vehicles').select('*').eq('user_id', user.id)
-
-    if (vehicleId) {
-      query = query.eq('id', vehicleId)
-    } else if (plate) {
-      query = query.ilike('license_plate', plate)
-    } else if (!all) {
-      return NextResponse.json({ error: 'Specify vehicleId, plate, or all=true' }, { status: 400 })
+    if (!vehicleId) {
+      return NextResponse.json({ error: 'Vehicle ID is required' }, { status: 400 });
     }
 
-    const { data: vehicles, error: dbError } = await query
-    if (dbError) {
-      return NextResponse.json({ error: dbError.message }, { status: 500 })
-    }
-    if (!vehicles || vehicles.length === 0) {
-      return NextResponse.json({ error: 'No vehicles found' }, { status: 404 })
-    }
-
-    const results: BreakdownResult[] = await Promise.all(
-      vehicles.map(async (v: Vehicle) => {
-        // Fetch recent DTC codes (if diagnostic_scans table exists)
-        let recentDTCs: string[] = []
-        try {
-          const { data: scans } = await supabase
-            .from('diagnostic_scans')
-            .select('codes')
-            .eq('vehicle_id', v.id)
-            .order('created_at', { ascending: false })
-            .limit(5)
-          if (scans) {
-            recentDTCs = scans.flatMap((s: any) => s.codes || [])
-          }
-        } catch {
-          // Table doesn't exist – ignore
-        }
-
-        const enriched = computeFleetBrain([v])[0] as VehicleAI
-        if (!enriched) {
-          throw new Error(`Failed to enrich vehicle ${v.id}`)
-        }
-
-        const { probability, reasons } = calculateBreakdownProbability(enriched, recentDTCs)
-
-        return {
-          vehicle: {
-            id: v.id,
-            license_plate: v.license_plate,
-            make: v.make,
-            model: v.model,
-            health_score: enriched.health_score,
-          },
-          breakdownProbability: probability,
-          reasons,
-          imminent: probability > 0.5,
-        }
-      })
-    )
-
-    if (vehicleId || plate) {
-      return NextResponse.json(results[0])
-    }
-    return NextResponse.json(results)
-  } catch (err: any) {
-    console.error('Breakdown detection error:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) { return cookieStore.get(name)?.value },
-        },
-      }
-    )
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const body = await request.json()
-    const { vehicleIds, threshold = 0.5 } = body
-
-    if (!vehicleIds || !Array.isArray(vehicleIds) || vehicleIds.length === 0) {
-      return NextResponse.json({ error: 'vehicleIds array required' }, { status: 400 })
-    }
-
-    const { data: vehicles, error: dbError } = await supabase
+    // Fetch vehicle details
+    const { data: vehicle, error: vehicleError } = await supabase
       .from('vehicles')
       .select('*')
+      .eq('id', vehicleId)
       .eq('user_id', user.id)
-      .in('id', vehicleIds)
+      .single();
 
-    if (dbError) {
-      return NextResponse.json({ error: dbError.message }, { status: 500 })
+    if (vehicleError || !vehicle) {
+      return NextResponse.json({ error: 'Vehicle not found' }, { status: 404 });
     }
 
-    const results = await Promise.all(
-      vehicles.map(async (v: Vehicle) => {
-        let recentDTCs: string[] = []
-        try {
-          const { data: scans } = await supabase
-            .from('diagnostic_scans')
-            .select('codes')
-            .eq('vehicle_id', v.id)
-            .order('created_at', { ascending: false })
-            .limit(5)
-          if (scans) recentDTCs = scans.flatMap((s: any) => s.codes || [])
-        } catch {}
+    // Simulate AI analysis – replace with real AI call if needed
+    // For now, return a mock breakdown analysis based on health score and DTCs
+    const healthScore = vehicle.health_score ?? 100;
+    const riskLevel = healthScore < 40 ? 'high' : healthScore < 70 ? 'medium' : 'low';
 
-        const enriched = computeFleetBrain([v])[0] as VehicleAI
-        const { probability, reasons } = calculateBreakdownProbability(enriched, recentDTCs)
+    let symptoms: string[] = [];
+    let recommendedActions: string[] = [];
 
-        return {
-          vehicleId: v.id,
-          license_plate: v.license_plate,
-          probability,
-          reasons,
-          imminent: probability > threshold,
-        }
-      })
-    )
+    if (riskLevel === 'high') {
+      symptoms = ['Unusual engine noise', 'Check engine light on', 'Reduced fuel efficiency'];
+      recommendedActions = ['Schedule immediate service', 'Do not drive long distances'];
+    } else if (riskLevel === 'medium') {
+      symptoms = ['Minor engine vibration', 'Slight decrease in performance'];
+      recommendedActions = ['Schedule maintenance soon', 'Monitor for warning signs'];
+    } else {
+      symptoms = ['No immediate issues detected'];
+      recommendedActions = ['Routine maintenance as per schedule'];
+    }
 
-    return NextResponse.json(results)
+    // If DTC codes are provided, enhance analysis
+    let dtcInfo: string[] = [];
+    if (dtcCodes && dtcCodes.length) {
+      dtcInfo = dtcCodes.map((code: string) => getDTCInfo(code));
+      symptoms.push(`Diagnostic trouble codes: ${dtcCodes.join(', ')}`);
+      recommendedActions.push('Use OBD‑II scanner for detailed diagnostics');
+    }
+
+    const result: BreakdownResult = {
+      vehicle,
+      riskLevel,
+      symptoms,
+      recommendedActions,
+      dtcCodes: dtcCodes || [],
+    };
+
+    return NextResponse.json(result);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    console.error('Breakdown detection error:', err);
+    return NextResponse.json(
+      { error: err.message || 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

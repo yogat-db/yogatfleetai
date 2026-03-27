@@ -1,15 +1,57 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-interface AppShellProps {
-  children: ReactNode;
-}
+export default function AppShell({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [loading, setLoading] = useState(true);
+  const [authenticated, setAuthenticated] = useState(false);
 
-export default function AppShell({ children }: AppShellProps) {
+  // Public routes that don't require authentication
+  const publicRoutes = ['/login', '/register', '/forgot-password', '/update-password'];
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const isAuthed = !!session;
+      setAuthenticated(isAuthed);
+      setLoading(false);
+
+      // If not authenticated and trying to access a protected route, redirect to login
+      if (!isAuthed && !publicRoutes.includes(pathname)) {
+        router.push('/login');
+      }
+    };
+    checkAuth();
+
+    // Listen for auth changes
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      setAuthenticated(!!session);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, [router, pathname]);
+
+  // For public routes, render only children (no sidebar/topbar)
+  if (loading) {
+    return <div style={styles.loading}>Loading...</div>;
+  }
+
+  if (publicRoutes.includes(pathname)) {
+    return <>{children}</>;
+  }
+
+  // Protected routes – show full layout
+  if (!authenticated) {
+    // This will redirect, but just in case, return a fallback
+    return null;
+  }
+
   return (
     <div style={styles.layout}>
       <Sidebar />
@@ -29,11 +71,19 @@ const styles: Record<string, React.CSSProperties> = {
   },
   main: {
     flex: 1,
-    marginLeft: '260px', // match your sidebar expanded width (as in Sidebar.tsx)
+    marginLeft: 260,
     transition: 'margin-left 0.2s ease',
     minHeight: '100vh',
   },
   content: {
     padding: theme.spacing[6],
+  },
+  loading: {
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: theme.colors.background.main,
+    color: theme.colors.text.secondary,
   },
 };

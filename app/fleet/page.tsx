@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, PanInfo } from 'framer-motion';
-import { Plus, Search, AlertTriangle, CheckCircle, Trash2, Edit } from 'lucide-react';
+import { Plus, Search, AlertTriangle, CheckCircle, Trash2, Edit, Crown } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { deleteVehicle } from '@/app/vehicles/actions';
 import theme from '@/app/theme';
@@ -26,9 +26,12 @@ export default function FleetPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'healthy' | 'warning' | 'critical'>('all');
+  const [hasMultiVehicle, setHasMultiVehicle] = useState(false);
+  const [upgradeLoading, setUpgradeLoading] = useState(false);
 
   useEffect(() => {
     fetchVehicles();
+    fetchProfile();
   }, []);
 
   const fetchVehicles = async () => {
@@ -49,6 +52,38 @@ export default function FleetPage() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchProfile = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('has_multi_vehicle')
+        .eq('id', user.id)
+        .single();
+      setHasMultiVehicle(profile?.has_multi_vehicle || false);
+    } catch (err) {
+      console.warn('Failed to fetch profile:', err);
+    }
+  };
+
+  const handleUpgrade = async () => {
+    setUpgradeLoading(true);
+    try {
+      const res = await fetch('/api/stripe/create-multi-vehicle-checkout', { method: 'POST' });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert('Failed to create checkout session');
+      }
+    } catch (err) {
+      alert('Something went wrong. Please try again.');
+    } finally {
+      setUpgradeLoading(false);
     }
   };
 
@@ -131,6 +166,8 @@ export default function FleetPage() {
     );
   }
 
+  const showUpgradeBanner = vehicles.length === 1 && !hasMultiVehicle;
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
       <div style={styles.header}>
@@ -159,6 +196,25 @@ export default function FleetPage() {
           <span style={styles.statValue}>{stats.critical}</span>
         </div>
       </div>
+
+      {showUpgradeBanner && (
+        <div style={styles.upgradeBanner}>
+          <div style={styles.upgradeContent}>
+            <Crown size={24} color={theme.colors.warning} />
+            <div>
+              <strong>Unlock Multi‑Vehicle Management</strong>
+              <p>You currently have one vehicle. Add more vehicles for a one‑time fee of £10.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleUpgrade}
+            disabled={upgradeLoading}
+            style={styles.upgradeButton}
+          >
+            {upgradeLoading ? 'Processing...' : 'Upgrade Now (£10)'}
+          </button>
+        </div>
+      )}
 
       <div style={styles.searchBar}>
         <Search size={18} color="#64748b" />
@@ -370,6 +426,31 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: theme.fontSizes['3xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.text.primary,
+  },
+  upgradeBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    background: `${theme.colors.warning}20`,
+    border: `1px solid ${theme.colors.warning}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: `${theme.spacing[3]} ${theme.spacing[5]}`,
+    marginBottom: theme.spacing[6],
+  },
+  upgradeContent: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+  },
+  upgradeButton: {
+    background: theme.colors.warning,
+    border: 'none',
+    borderRadius: theme.borderRadius.lg,
+    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
+    color: theme.colors.background.main,
+    fontWeight: theme.fontWeights.semibold,
+    cursor: 'pointer',
+    transition: 'background 0.2s ease',
   },
   searchBar: {
     display: 'flex',

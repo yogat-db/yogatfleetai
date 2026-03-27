@@ -13,14 +13,23 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [resendConfirmSent, setResendConfirmSent] = useState(false);
+
+  // Determine the base URL for redirects (use environment variable, fallback to current origin)
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      setError(error.message);
+      if (error.message === 'Email not confirmed') {
+        setError('Email not confirmed. Please check your inbox and click the confirmation link, or request a new one below.');
+      } else {
+        setError(error.message);
+      }
     } else {
       router.push('/dashboard');
     }
@@ -33,13 +42,33 @@ export default function LoginPage() {
       return;
     }
     setLoading(true);
+    setError(null);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/update-password`,
+      redirectTo: `${baseUrl}/update-password`,
     });
     if (error) {
       setError(error.message);
     } else {
       setResetSent(true);
+    }
+    setLoading(false);
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!email) {
+      setError('Please enter your email address first.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+    });
+    if (error) {
+      setError(error.message);
+    } else {
+      setResendConfirmSent(true);
     }
     setLoading(false);
   };
@@ -79,10 +108,26 @@ export default function LoginPage() {
             />
           </div>
 
-          {error && <div style={styles.errorBox}>{error}</div>}
+          {error && (
+            <div style={styles.errorBox}>
+              {error}
+              {error.includes('Email not confirmed') && (
+                <button onClick={handleResendConfirmation} style={styles.resendButton}>
+                  Resend confirmation
+                </button>
+              )}
+            </div>
+          )}
+
           {resetSent && (
             <div style={styles.successBox}>
               Password reset email sent! Check your inbox.
+            </div>
+          )}
+
+          {resendConfirmSent && (
+            <div style={styles.successBox}>
+              Confirmation email resent! Check your inbox.
             </div>
           )}
 
@@ -234,5 +279,15 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: 'underline',
     padding: 0,
     fontSize: 'inherit',
+  },
+  resendButton: {
+    background: 'none',
+    border: 'none',
+    color: theme.colors.primary,
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    padding: 0,
+    marginTop: theme.spacing[2],
+    fontSize: theme.fontSizes.xs,
   },
 };
