@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { motion, PanInfo } from 'framer-motion';
 import { Plus, Search, AlertTriangle, CheckCircle, Trash2, Edit, Crown } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { deleteVehicle } from '@/app/vehicles/actions';
 import theme from '@/app/theme';
 
 type Vehicle = {
@@ -39,7 +38,17 @@ export default function FleetPage() {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not logged in');
-
+const handleDelete = async () => {
+  if (!confirm('Are you sure you want to delete this vehicle?')) return;
+  try {
+    const res = await fetch(`/api/vehicles/{plate}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    router.push('/vehicles');
+  } catch (err) {
+    console.error('Delete error:', err);
+    alert('Failed to delete vehicle');
+  }
+};
       const { data, error } = await supabase
         .from('vehicles')
         .select('*')
@@ -119,17 +128,18 @@ export default function FleetPage() {
     critical: vehicles.filter(v => (v.health_score || 0) < 50).length,
   };
 
-  const handleDelete = async (vehicleId: string) => {
-    if (!confirm('Delete this vehicle? This action cannot be undone.')) return;
-    const formData = new FormData();
-    formData.append('id', vehicleId);
-    try {
-      await deleteVehicle(formData);
-      setVehicles(prev => prev.filter(v => v.id !== vehicleId));
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
+  const handleDelete = async (id: string) => {
+  try {
+    const res = await fetch(`/api/vehicles/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    // Re‑fetch the vehicles list (assuming you have a fetchVehicles function)
+    await fetchVehicles();  // or refetch your data
+    // Optionally show a success toast/alert
+  } catch (error) {
+    console.error('Delete failed:', error);
+    alert('Failed to delete vehicle');
+  }
+};
 
   const handleEdit = (vehicleId: string) => {
     router.push(`/vehicles/edit/${vehicleId}`);

@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
-import { deleteVehicle } from '@/app/vehicles/actions';
 import { Edit, ArrowLeft, Calendar, Wrench, Trash2 } from 'lucide-react';
 import theme from '@/app/theme';
 
@@ -30,7 +29,18 @@ export default function VehicleDetailPage() {
         .select('*')
         .eq('license_plate', plate.toUpperCase())
         .single();
+const handleDelete = async () => {
+  if (!confirm('Are you sure you want to delete this vehicle?')) return;
 
+  try {
+    const res = await fetch(`/api/vehicles/${plate}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    router.push('/vehicles'); // redirect after successful delete
+  } catch (err) {
+    console.error('Delete error:', err);
+    alert('Failed to delete vehicle');
+  }
+};
       if (error) {
         if (error.code === 'PGRST116') {
           setError('Vehicle not found');
@@ -48,17 +58,16 @@ export default function VehicleDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (!vehicle) return;
-    if (!confirm('Delete this vehicle? This action cannot be undone.')) return;
-    const formData = new FormData();
-    formData.append('id', vehicle.id);
-    try {
-      await deleteVehicle(formData);
-      router.push('/fleet');
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
+  if (!confirm('Are you sure you want to delete this vehicle?')) return;
+  try {
+    const res = await fetch(`/api/vehicles/${plate}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    router.push('/vehicles');
+  } catch (err) {
+    console.error('Delete error:', err);
+    alert('Failed to delete vehicle');
+  }
+};
 
   if (loading) {
     return (
@@ -87,9 +96,9 @@ export default function VehicleDetailPage() {
       <div style={styles.container}>
         <h2>Vehicle not found</h2>
         <p>{error}</p>
-        <button onClick={() => router.back()} style={styles.backButton}>
-          ← Back
-        </button>
+        <button onClick={handleDelete} className="...">
+  <Trash2 size={20} /> Delete
+</button>
       </div>
     );
   }

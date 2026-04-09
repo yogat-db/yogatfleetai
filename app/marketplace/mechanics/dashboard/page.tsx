@@ -1,170 +1,260 @@
-// app/dashboard/page.tsx
+// app/marketplace/mechanics/dashboard/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Truck, CheckCircle, AlertTriangle, MapPin, Calendar, TrendingUp, Plus, Wrench, Car } from 'lucide-react';
+import {
+  Briefcase, DollarSign, CheckCircle, AlertCircle,
+  TrendingUp, Users, Calendar, CreditCard, Car,
+  PlusCircle, Eye, RefreshCw, Star, MapPin
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-// Optional Mapbox (only if token is set)
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
-
-interface Vehicle {
+// ==================== TYPES ====================
+interface MechanicProfile {
   id: string;
-  license_plate: string;
-  make: string;
-  model: string;
-  health_score: number | null;
-  lat: number | null;
-  lng: number | null;
+  business_name: string;
+  phone: string | null;
+  address: string | null;
+  verified: boolean;
+  subscription_status: 'active' | 'inactive' | 'trialing' | 'past_due' | 'cancelled';
+  plan?: 'basic' | 'pro' | null;
+  created_at: string;
 }
 
-interface Reminder {
+interface Job {
   id: string;
   title: string;
-  due_date: string | null;
-  due_mileage: number | null;
+  description: string;
+  budget: number;
+  status: string;
+  location?: string;
+  created_at: string;
   vehicle?: { make: string; model: string; license_plate: string };
 }
 
-interface Prediction {
-  vehicleId: string;
-  vehicleName: string;
-  predictedCost: number;
-  days: number;
+interface Application {
+  id: string;
+  job_id: string;
+  bid_amount: number | null;
+  message: string | null;
+  status: 'pending' | 'accepted' | 'rejected' | 'completed';
+  created_at: string;
+  job?: Job;
 }
 
-export default function DashboardPage() {
+interface Earning {
+  id: string;
+  amount: number;
+  status: 'pending' | 'paid';
+  description: string;
+  created_at: string;
+}
+
+interface Vehicle {
+  id: string;
+  make: string;
+  model: string;
+  license_plate: string;
+  health_score: number | null;
+  year?: number | null;
+  mileage?: number | null;
+}
+
+// ==================== HELPER ====================
+const getThemeValue = (path: string, fallback: any): any => {
+  const parts = path.split('.');
+  let current: any = theme;
+  for (const part of parts) {
+    if (current && typeof current === 'object' && part in current) {
+      current = current[part];
+    } else {
+      return fallback;
+    }
+  }
+  return current;
+};
+
+const getHealthBadgeStyle = (score: number | null) => ({
+  display: 'inline-block',
+  padding: '2px 8px',
+  borderRadius: '20px',
+  fontSize: '11px',
+  fontWeight: 500,
+  backgroundColor: (score ?? 0) >= 80 ? '#22c55e20' : (score ?? 0) >= 50 ? '#f59e0b20' : '#ef444420',
+  color: (score ?? 0) >= 80 ? '#22c55e' : (score ?? 0) >= 50 ? '#f59e0b' : '#ef4444',
+});
+
+// ==================== MAIN COMPONENT ====================
+export default function MechanicMarketplaceDashboard() {
   const router = useRouter();
+  const [profile, setProfile] = useState<MechanicProfile | null>(null);
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [earnings, setEarnings] = useState<Earning[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [availableJobs, setAvailableJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasLocationData, setHasLocationData] = useState(false);
+  const [updatingScores, setUpdatingScores] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  async function fetchData() {
+  const fetchData = useCallback(async () => {
     try {
-      setLoading(true);
+      setError(null);
+      setRefreshing(true);
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push('/login');
         return;
       }
 
-      // Fetch vehicles
-      const { data: vehiclesData, error: vehiclesError } = await supabase
-        .from('vehicles')
-        .select('id, license_plate, make, model, health_score, lat, lng')
+      // 1. Mechanic profile
+      const { data: mechanicProfile, error: profileError } = await supabase
+        .from('mechanics')
+        .select('*')
         .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (profileError) throw profileError;
+
+      if (!mechanicProfile) {
+        router.push('/marketplace/mechanics/register');
+        return;
+      }
+      setProfile(mechanicProfile);
+
+      // 2. Applications (bids) with job details
+      const { data: appsData, error: appsError } = await supabase
+        .from('applications')
+        .select(`
+          *,
+          job:jobs (
+            id, title, description, budget, status, location, created_at,
+            vehicle:vehicles (make, model, license_plate)
+          )
+        `)
+        .eq('mechanic_id', mechanicProfile.id)
         .order('created_at', { ascending: false });
 
-      if (vehiclesError) throw vehiclesError;
-      setVehicles(vehiclesData || []);
-      setHasLocationData(vehiclesData?.some(v => v.lat && v.lng) || false);
+      if (!appsError && appsData) {
+        setApplications(appsData as Application[]);
+      } else {
+        setApplications([]);
+      }
 
-      // Fetch upcoming reminders – two‑step to avoid join issues
-      const { data: rawReminders, error: remindersError } = await supabase
-        .from('reminders')
-        .select('id, title, due_date, due_mileage, vehicle_id')
-        .eq('completed', false)
-        .order('due_date', { ascending: true })
+      // 3. Earnings
+      const { data: earningsData, error: earningsError } = await supabase
+        .from('earnings')
+        .select('*')
+        .eq('mechanic_id', mechanicProfile.id)
+        .order('created_at', { ascending: false })
         .limit(5);
 
-      if (remindersError) throw remindersError;
-
-      if (rawReminders && rawReminders.length > 0) {
-        const vehicleIds = rawReminders.map(r => r.vehicle_id).filter(Boolean);
-        const { data: vehiclesData } = await supabase
-          .from('vehicles')
-          .select('id, make, model, license_plate')
-          .in('id', vehicleIds);
-        const vehicleMap = new Map(
-          (vehiclesData || []).map(v => [
-            v.id,
-            { make: v.make, model: v.model, license_plate: v.license_plate }
-          ])
-        );
-        const remindersWithVehicle: Reminder[] = rawReminders.map(r => ({
-          id: r.id,
-          title: r.title,
-          due_date: r.due_date,
-          due_mileage: r.due_mileage,
-          vehicle: r.vehicle_id ? vehicleMap.get(r.vehicle_id) : undefined,
-        }));
-        setReminders(remindersWithVehicle);
+      if (!earningsError && earningsData) {
+        setEarnings(earningsData);
       } else {
-        setReminders([]);
+        setEarnings([]);
       }
 
-      // Mock AI predictions – replace with real API later
-      const mockPredictions: Prediction[] = (vehiclesData || []).slice(0, 3).map(v => ({
-        vehicleId: v.id,
-        vehicleName: `${v.make} ${v.model}`,
-        predictedCost: Math.floor(Math.random() * 500) + 200,
-        days: Math.floor(Math.random() * 90) + 30,
-      }));
-      setPredictions(mockPredictions);
+      // 4. Vehicles (fleet) – include year and mileage for table display
+      const { data: vehiclesData, error: vehiclesError } = await supabase
+        .from('vehicles')
+        .select('id, make, model, license_plate, health_score, year, mileage')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (!vehiclesError && vehiclesData) {
+        setVehicles(vehiclesData);
+      } else {
+        setVehicles([]);
+      }
+
+      // 5. Available open jobs
+      const { data: jobsData, error: jobsError } = await supabase
+        .from('jobs')
+        .select(`
+          id, title, description, budget, status, location, created_at,
+          vehicle:vehicles (make, model, license_plate)
+        `)
+        .eq('status', 'open')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (!jobsError && jobsData) {
+        const mappedJobs: Job[] = jobsData.map((job: any) => ({
+          id: job.id,
+          title: job.title,
+          description: job.description,
+          budget: job.budget,
+          status: job.status,
+          location: job.location,
+          created_at: job.created_at,
+          vehicle: job.vehicle ? {
+            make: job.vehicle.make,
+            model: job.vehicle.model,
+            license_plate: job.vehicle.license_plate,
+          } : undefined,
+        }));
+        setAvailableJobs(mappedJobs);
+      } else {
+        setAvailableJobs([]);
+      }
     } catch (err: any) {
       console.error('Dashboard fetch error:', err);
-      setError(err.message);
+      setError(err.message || 'Failed to load dashboard');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }
+  }, [router]);
 
-  // Stats
-  const total = vehicles.length;
-  const healthy = vehicles.filter(v => (v.health_score || 0) >= 80).length;
-  const warning = vehicles.filter(v => (v.health_score || 0) >= 50 && (v.health_score || 0) < 80).length;
-  const critical = vehicles.filter(v => (v.health_score || 0) < 50).length;
-  const criticalVehicles = vehicles.filter(v => (v.health_score || 0) < 40);
-
-  // Map
   useEffect(() => {
-    if (!hasLocationData || !process.env.NEXT_PUBLIC_MAPBOX_TOKEN) return;
-    const mapContainer = document.getElementById('fleet-map');
-    if (!mapContainer) return;
-    const mapInstance = new mapboxgl.Map({
-      container: 'fleet-map',
-      style: 'mapbox://styles/mapbox/dark-v11',
-      center: [0, 0],
-      zoom: 5,
-      accessToken: process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
-    });
-    vehicles.forEach(v => {
-      if (v.lat && v.lng) {
-        new mapboxgl.Marker()
-          .setLngLat([v.lng, v.lat])
-          .setPopup(new mapboxgl.Popup().setHTML(`<strong>${v.make} ${v.model}</strong><br/>${v.license_plate}`))
-          .addTo(mapInstance);
-      }
-    });
-    const bounds = vehicles.filter(v => v.lat && v.lng).map(v => [v.lng!, v.lat!] as [number, number]);
-    if (bounds.length) {
-      const lngBounds = new mapboxgl.LngLatBounds(bounds[0], bounds[0]);
-      bounds.forEach(b => lngBounds.extend(b));
-      mapInstance.fitBounds(lngBounds, { padding: 50 });
-    }
-    return () => mapInstance.remove();
-  }, [hasLocationData, vehicles]);
+    fetchData();
+  }, [fetchData]);
 
-  if (loading) {
+  // Health score updater
+  const refreshHealthScores = async () => {
+    setUpdatingScores(true);
+    try {
+      const res = await fetch('/api/vehicles/update-health-scores', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Updated health scores for ${data.updated} vehicles`);
+        fetchData(); // refresh dashboard
+      } else {
+        alert(data.error || 'Failed to update scores');
+      }
+    } catch (err) {
+      alert('Error updating scores');
+    } finally {
+      setUpdatingScores(false);
+    }
+  };
+
+  // Derived stats
+  const totalApplications = applications.length;
+  const acceptedApplications = applications.filter(a => a.status === 'accepted').length;
+  const totalEarnings = earnings.reduce((sum, e) => sum + (e.status === 'paid' ? e.amount : 0), 0);
+  const isSubscribed = profile?.subscription_status === 'active' || profile?.subscription_status === 'trialing';
+
+  const handleRefresh = () => {
+    setLoading(true);
+    fetchData();
+  };
+
+  if (loading && !refreshing) {
     return (
       <div style={styles.centered}>
         <div className="spinner" />
         <p>Loading dashboard...</p>
         <style jsx>{`
           .spinner {
-            border: 3px solid ${theme.colors.border.medium};
-            border-top: 3px solid ${theme.colors.primary};
+            border: 3px solid ${getThemeValue('colors.border.medium', '#334155')};
+            border-top: 3px solid ${getThemeValue('colors.primary', '#22c55e')};
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -178,311 +268,530 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) {
+  if (error && !refreshing) {
     return (
       <div style={styles.centered}>
-        <p style={{ color: theme.colors.error }}>Error loading dashboard: {error}</p>
-        <button onClick={fetchData} style={styles.retryButton}>Retry</button>
+        <p style={{ color: getThemeValue('colors.error', '#ef4444') }}>Error: {error}</p>
+        <button onClick={handleRefresh} style={styles.retryButton}>Retry</button>
       </div>
     );
   }
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
-      <h1 style={styles.title}>Dashboard</h1>
-      <p style={styles.subtitle}>Welcome back to your fleet overview</p>
-
-      {/* Stats */}
-      <div style={styles.statsGrid}>
-        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
-          <Truck size={24} color={theme.colors.info} />
-          <div>
-            <span style={styles.statValue}>{total}</span>
-            <span style={styles.statLabel}>Total Vehicles</span>
-          </div>
-        </motion.div>
-        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
-          <CheckCircle size={24} color={theme.colors.status.healthy} />
-          <div>
-            <span style={styles.statValue}>{healthy}</span>
-            <span style={styles.statLabel}>Healthy</span>
-          </div>
-        </motion.div>
-        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
-          <AlertTriangle size={24} color={theme.colors.status.warning} />
-          <div>
-            <span style={styles.statValue}>{warning}</span>
-            <span style={styles.statLabel}>Warning</span>
-          </div>
-        </motion.div>
-        <motion.div whileHover={{ y: -5 }} transition={{ type: 'spring', stiffness: 300 }} style={styles.statCard}>
-          <AlertTriangle size={24} color={theme.colors.status.critical} />
-          <div>
-            <span style={styles.statValue}>{critical}</span>
-            <span style={styles.statLabel}>Critical</span>
-          </div>
-        </motion.div>
+      {/* Header */}
+      <div style={styles.headerRow}>
+        <div>
+          <h1 style={styles.title}>Mechanic Marketplace</h1>
+          <p style={styles.subtitle}>
+            {profile?.business_name}
+            {profile?.verified ? (
+              <span style={styles.verifiedBadge}> ✓ Verified</span>
+            ) : (
+              <span style={styles.pendingBadge}> ⏳ Pending verification</span>
+            )}
+            {!isSubscribed && (
+              <button onClick={() => router.push('/marketplace/mechanics/subscribe')} style={styles.subscribeBadge}>
+                <CreditCard size={14} /> Subscribe
+              </button>
+            )}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button onClick={handleRefresh} style={styles.refreshButton} disabled={refreshing}>
+            {refreshing ? <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+            {refreshing ? ' Refreshing...' : ' Refresh'}
+          </button>
+          <button onClick={refreshHealthScores} disabled={updatingScores} style={styles.refreshButton}>
+            {updatingScores ? 'Updating...' : 'Update Health Scores'}
+          </button>
+        </div>
       </div>
 
-      {/* Map */}
-      <div style={styles.card}>
-        <div style={styles.cardHeader}>
-          <MapPin size={20} color={theme.colors.primary} />
-          <h2 style={styles.cardTitle}>Fleet Geospatial View</h2>
+      {/* Stats Grid */}
+      <div style={styles.statsGrid}>
+        <div style={styles.statCard}>
+          <Briefcase size={24} color={getThemeValue('colors.info', '#3b82f6')} />
+          <div><span style={styles.statValue}>{totalApplications}</span><span style={styles.statLabel}>Applications</span></div>
         </div>
-        {hasLocationData ? (
-          <div id="fleet-map" style={{ height: '300px', borderRadius: theme.borderRadius.lg, overflow: 'hidden' }} />
-        ) : (
-          <div style={styles.emptyState}>
-            <p>No location data available. Add an address when adding a vehicle to see it on the map.</p>
-            <button onClick={() => router.push('/vehicles/add')} style={styles.smallButton}>
-              <Plus size={16} /> Add vehicle with location
+        <div style={styles.statCard}>
+          <CheckCircle size={24} color={getThemeValue('colors.status.healthy', '#22c55e')} />
+          <div><span style={styles.statValue}>{acceptedApplications}</span><span style={styles.statLabel}>Accepted</span></div>
+        </div>
+        <div style={styles.statCard}>
+          <DollarSign size={24} color={getThemeValue('colors.primary', '#22c55e')} />
+          <div><span style={styles.statValue}>£{totalEarnings}</span><span style={styles.statLabel}>Total Earnings</span></div>
+        </div>
+        <div style={styles.statCard}>
+          <Car size={24} color={getThemeValue('colors.warning', '#f59e0b')} />
+          <div><span style={styles.statValue}>{vehicles.length}</span><span style={styles.statLabel}>Fleet Vehicles</span></div>
+        </div>
+      </div>
+
+      {/* Two‑column layout */}
+      <div style={styles.twoColumn}>
+        {/* Left column: Recent Applications */}
+        <div style={styles.card}>
+          <div style={styles.cardHeader}>
+            <Briefcase size={20} color={getThemeValue('colors.primary', '#22c55e')} />
+            <h2 style={styles.cardTitle}>Recent Applications</h2>
+            <button onClick={() => router.push('/marketplace/jobs')} style={styles.linkButton}>
+              Browse more jobs →
             </button>
           </div>
-        )}
-      </div>
-
-      {/* Two‑column */}
-      <div style={styles.twoColumn}>
-        {/* Reminders */}
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <Calendar size={20} color={theme.colors.primary} />
-            <h2 style={styles.cardTitle}>Upcoming Service Reminders</h2>
-          </div>
-          {reminders.length === 0 ? (
+          {applications.length === 0 ? (
             <div style={styles.emptyState}>
-              <p>No upcoming reminders.</p>
-              <button onClick={() => router.push('/service-history/add')} style={styles.smallButton}>
-                <Plus size={16} /> Add a reminder
+              <p>You haven't applied to any jobs yet.</p>
+              <button onClick={() => router.push('/marketplace/jobs')} style={styles.smallButton}>
+                <PlusCircle size={16} /> Browse Jobs
               </button>
             </div>
           ) : (
             <div>
-              {reminders.map(rem => (
-                <div key={rem.id} style={styles.reminderItem}>
-                  <strong>{rem.title}</strong>
-                  {rem.vehicle && (
-                    <span style={styles.vehicleTag}>
-                      {rem.vehicle.make} {rem.vehicle.model}
+              {applications.slice(0, 5).map(app => (
+                <div key={app.id} style={styles.applicationItem}>
+                  <div style={styles.applicationHeader}>
+                    <strong>{app.job?.title || 'Job'}</strong>
+                    <span style={{
+                      ...styles.statusBadge,
+                      backgroundColor: app.status === 'pending' ? '#f59e0b20' : app.status === 'accepted' ? '#22c55e20' : '#64748b20',
+                      color: app.status === 'pending' ? '#f59e0b' : app.status === 'accepted' ? '#22c55e' : '#64748b',
+                    }}>
+                      {app.status}
                     </span>
-                  )}
-                  <div style={styles.reminderMeta}>
-                    {rem.due_date && <span>Due: {new Date(rem.due_date).toLocaleDateString()}</span>}
-                    {rem.due_mileage && <span> at {rem.due_mileage.toLocaleString()} mi</span>}
                   </div>
+                  <div style={styles.applicationDetails}>
+                    {app.bid_amount && <span>Bid: £{app.bid_amount}</span>}
+                    <span>Applied: {new Date(app.created_at).toLocaleDateString()}</span>
+                  </div>
+                  {app.status === 'accepted' && (
+                    <button onClick={() => router.push(`/marketplace/jobs/${app.job_id}`)} style={styles.viewButton}>
+                      View Job
+                    </button>
+                  )}
                 </div>
               ))}
-              <button onClick={() => router.push('/service-reminders')} style={styles.linkButton}>
-                View all reminders
-              </button>
+              {totalApplications > 5 && (
+                <button onClick={() => router.push('/mechanics/applications')} style={styles.linkButton}>
+                  View all {totalApplications} applications
+                </button>
+              )}
             </div>
           )}
         </div>
 
-        {/* AI Predictions */}
+        {/* Right column: Recent Earnings & Subscription */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <TrendingUp size={20} color={theme.colors.primary} />
-            <h2 style={styles.cardTitle}>AI Predictions</h2>
+            <DollarSign size={20} color={getThemeValue('colors.primary', '#22c55e')} />
+            <h2 style={styles.cardTitle}>Recent Earnings</h2>
           </div>
-          {predictions.length === 0 ? (
+          {earnings.length === 0 ? (
             <div style={styles.emptyState}>
-              <p>No predictions available. Predictions will appear as vehicles gather data.</p>
-              <button onClick={() => router.push('/diagnostics')} style={styles.smallButton}>
-                <Wrench size={16} /> View Diagnostics
-              </button>
+              <p>No earnings yet. Complete jobs to get paid.</p>
             </div>
           ) : (
             <div>
-              {predictions.map(pred => (
-                <div key={pred.vehicleId} style={styles.predictionItem}>
-                  <div style={styles.predictionHeader}>
-                    <strong>{pred.vehicleName}</strong>
-                    <span style={styles.predictionCost}>£{pred.predictedCost}</span>
+              {earnings.map(earning => (
+                <div key={earning.id} style={styles.earningItem}>
+                  <div style={styles.earningHeader}>
+                    <span>£{earning.amount.toFixed(2)}</span>
+                    <span style={{
+                      ...styles.statusBadge,
+                      backgroundColor: earning.status === 'paid' ? '#22c55e20' : '#f59e0b20',
+                      color: earning.status === 'paid' ? '#22c55e' : '#f59e0b',
+                    }}>
+                      {earning.status}
+                    </span>
                   </div>
-                  <div style={styles.predictionMeta}>
-                    Estimated cost in {pred.days} days
+                  <div style={styles.earningDetails}>
+                    {earning.description} – {new Date(earning.created_at).toLocaleDateString()}
                   </div>
                 </div>
               ))}
-              <button onClick={() => router.push('/diagnostics')} style={styles.linkButton}>
-                View Details
+              <button onClick={() => router.push('/mechanics/earnings')} style={styles.linkButton}>
+                View all earnings
               </button>
             </div>
           )}
+
+          <div style={styles.divider} />
+
+          <div style={styles.cardHeader}>
+            <CreditCard size={20} color={getThemeValue('colors.primary', '#22c55e')} />
+            <h2 style={styles.cardTitle}>Subscription</h2>
+          </div>
+          <div style={styles.subscriptionInfo}>
+            <p>Current plan: <strong>{profile?.plan || 'None'}</strong></p>
+            <p>Status: <span style={{ color: isSubscribed ? '#22c55e' : '#f59e0b' }}>{isSubscribed ? 'Active' : 'Inactive'}</span></p>
+            {!isSubscribed && (
+              <button onClick={() => router.push('/marketplace/mechanics/subscribe')} style={styles.primaryButton}>
+                Upgrade to Professional
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Critical Alerts */}
+      {/* Available Jobs Section */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>
-          <AlertTriangle size={20} color={theme.colors.status.critical} />
-          <h2 style={styles.cardTitle}>Critical Alerts</h2>
+          <TrendingUp size={20} color={getThemeValue('colors.primary', '#22c55e')} />
+          <h2 style={styles.cardTitle}>Available Jobs Near You</h2>
+          <button onClick={() => router.push('/marketplace/jobs')} style={styles.linkButton}>
+            View all →
+          </button>
         </div>
-        {criticalVehicles.length === 0 ? (
-          <p>No critical alerts – all vehicles are stable.</p>
+        {availableJobs.length === 0 ? (
+          <div style={styles.emptyState}>
+            <p>No open jobs at the moment. Check back later.</p>
+          </div>
         ) : (
-          <div style={styles.alertsList}>
-            {criticalVehicles.map(v => (
-              <div key={v.id} style={styles.alertItem}>
-                <Car size={16} color={theme.colors.status.critical} />
-                <span>{v.make} {v.model} ({v.license_plate}) – Health: {v.health_score}%</span>
-                <button onClick={() => router.push(`/vehicles/${v.license_plate}`)} style={styles.linkButton}>
-                  View Details
+          <div style={styles.jobsGrid}>
+            {availableJobs.map(job => (
+              <div key={job.id} style={styles.jobCard}>
+                <h3 style={styles.jobTitle}>{job.title}</h3>
+                <p style={styles.jobDescription}>{job.description?.slice(0, 80)}...</p>
+                <div style={styles.jobMeta}>
+                  <span><DollarSign size={14} /> £{job.budget}</span>
+                  {job.location && <span><MapPin size={14} /> {job.location}</span>}
+                </div>
+                <button onClick={() => router.push(`/marketplace/jobs/${job.id}/apply`)} style={styles.applyButton}>
+                  Apply Now
                 </button>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Fleet Overview – Table format */}
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <Car size={20} color={getThemeValue('colors.primary', '#22c55e')} />
+          <h2 style={styles.cardTitle}>Your Fleet Overview</h2>
+          <button onClick={() => router.push('/vehicles/add')} style={styles.linkButton}>
+            <PlusCircle size={16} /> Add Vehicle
+          </button>
+        </div>
+        {vehicles.length === 0 ? (
+          <div style={styles.emptyState}>
+            <p>No vehicles registered yet.</p>
+          </div>
+        ) : (
+          <div style={styles.tableWrapper}>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th>Make & Model</th>
+                  <th>License Plate</th>
+                  <th>Health</th>
+                  <th>Year</th>
+                  <th>Mileage</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vehicles.map(vehicle => (
+                  <tr key={vehicle.id}>
+                    <td>{vehicle.make} {vehicle.model}</td>
+                    <td>{vehicle.license_plate}</td>
+                    <td>
+                      <span style={getHealthBadgeStyle(vehicle.health_score)}>
+                        {vehicle.health_score ?? '—'}%
+                      </span>
+                    </td>
+                    <td>{vehicle.year ?? '—'}</td>
+                    <td>{vehicle.mileage?.toLocaleString() ?? '—'} mi</td>
+                    <td>
+                      <button onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)} style={styles.iconButton}>
+                        <Eye size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Profile Completion Reminder */}
+      {(!profile?.address || !profile?.phone) && (
+        <div style={styles.warningCard}>
+          <AlertCircle size={20} color={getThemeValue('colors.warning', '#f59e0b')} />
+          <span>Your profile is incomplete. <button onClick={() => router.push('/marketplace/mechanics/register')} style={styles.linkButton}>Update now</button></span>
+        </div>
+      )}
     </motion.div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  // ... (same as previous dashboard styles; ensure they are exactly the same)
+// ==================== STYLES ====================
+const styles: Record<string, any> = {
   page: {
-    padding: theme.spacing[8],
-    background: theme.colors.background.main,
+    padding: getThemeValue('spacing.8', '32px'),
+    background: getThemeValue('colors.background.main', '#020617'),
     minHeight: '100vh',
-    color: theme.colors.text.primary,
-    fontFamily: theme.fontFamilies.sans,
+    color: getThemeValue('colors.text.primary', '#f1f5f9'),
+    fontFamily: getThemeValue('fontFamilies.sans', 'Inter, sans-serif'),
+  },
+  headerRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: getThemeValue('spacing.6', '24px'),
+    flexWrap: 'wrap',
+    gap: getThemeValue('spacing.4', '16px'),
   },
   title: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    marginBottom: theme.spacing[1],
-    background: theme.gradients.title,
+    fontSize: getThemeValue('fontSizes.3xl', '32px'),
+    fontWeight: getThemeValue('fontWeights.bold', '700'),
+    marginBottom: getThemeValue('spacing.1', '4px'),
+    background: getThemeValue('gradients.title', 'linear-gradient(135deg, #94a3b8, #f1f5f9)'),
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
   },
   subtitle: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[6],
+    fontSize: getThemeValue('fontSizes.base', '16px'),
+    color: getThemeValue('colors.text.secondary', '#94a3b8'),
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+  },
+  verifiedBadge: { color: '#22c55e' },
+  pendingBadge: { color: '#f59e0b' },
+  subscribeBadge: {
+    background: getThemeValue('colors.primary', '#22c55e'),
+    border: 'none',
+    borderRadius: '20px',
+    padding: '4px 12px',
+    color: '#020617',
+    fontSize: '12px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  refreshButton: {
+    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
+    background: getThemeValue('colors.background.card', '#0f172a'),
+    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    color: getThemeValue('colors.text.primary', '#f1f5f9'),
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: getThemeValue('spacing.2', '8px'),
   },
   statsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: theme.spacing[4],
-    marginBottom: theme.spacing[6],
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: getThemeValue('spacing.4', '16px'),
+    marginBottom: getThemeValue('spacing.6', '24px'),
   },
   statCard: {
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
+    background: getThemeValue('colors.background.card', '#0f172a'),
+    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    padding: getThemeValue('spacing.4', '16px'),
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[3],
+    gap: getThemeValue('spacing.3', '12px'),
   },
   statValue: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.bold,
+    fontSize: getThemeValue('fontSizes.2xl', '24px'),
+    fontWeight: getThemeValue('fontWeights.bold', '700'),
     display: 'block',
-    color: theme.colors.text.primary,
+    color: getThemeValue('colors.text.primary', '#f1f5f9'),
   },
   statLabel: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.muted,
+    fontSize: getThemeValue('fontSizes.sm', '14px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
+  },
+  twoColumn: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+    gap: getThemeValue('spacing.6', '24px'),
+    marginBottom: getThemeValue('spacing.6', '24px'),
   },
   card: {
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[5],
-    marginBottom: theme.spacing[6],
+    background: getThemeValue('colors.background.card', '#0f172a'),
+    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+    borderRadius: getThemeValue('borderRadius.xl', '16px'),
+    padding: getThemeValue('spacing.5', '20px'),
+    marginBottom: getThemeValue('spacing.6', '24px'),
   },
   cardHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[2],
-    marginBottom: theme.spacing[4],
+    gap: getThemeValue('spacing.2', '8px'),
+    marginBottom: getThemeValue('spacing.4', '16px'),
+    flexWrap: 'wrap',
   },
   cardTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.text.primary,
+    fontSize: getThemeValue('fontSizes.lg', '18px'),
+    fontWeight: getThemeValue('fontWeights.semibold', '600'),
+    color: getThemeValue('colors.text.primary', '#f1f5f9'),
+    flex: 1,
   },
-  emptyState: {
-    textAlign: 'center',
-    padding: theme.spacing[4],
-    color: theme.colors.text.muted,
+  linkButton: {
+    background: 'transparent',
+    border: 'none',
+    color: getThemeValue('colors.primary', '#22c55e'),
+    cursor: 'pointer',
+    fontSize: getThemeValue('fontSizes.sm', '14px'),
+    textDecoration: 'underline',
   },
   smallButton: {
-    marginTop: theme.spacing[2],
-    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
-    background: theme.colors.primary,
+    padding: `${getThemeValue('spacing.1', '4px')} ${getThemeValue('spacing.3', '12px')}`,
+    background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    color: theme.colors.background.main,
-    fontSize: theme.fontSizes.sm,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    color: getThemeValue('colors.background.main', '#020617'),
+    fontSize: getThemeValue('fontSizes.sm', '14px'),
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: theme.spacing[1],
+    gap: getThemeValue('spacing.1', '4px'),
   },
-  linkButton: {
-    marginTop: theme.spacing[2],
-    background: 'transparent',
+  primaryButton: {
+    marginTop: getThemeValue('spacing.3', '12px'),
+    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
+    background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
-    color: theme.colors.primary,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    color: getThemeValue('colors.background.main', '#020617'),
+    fontWeight: getThemeValue('fontWeights.medium', '500'),
     cursor: 'pointer',
-    fontSize: theme.fontSizes.sm,
-    textDecoration: 'underline',
   },
-  twoColumn: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: theme.spacing[6],
-    marginBottom: theme.spacing[6],
+  emptyState: {
+    textAlign: 'center',
+    padding: getThemeValue('spacing.6', '24px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
   },
-  reminderItem: {
-    marginBottom: theme.spacing[3],
-    paddingBottom: theme.spacing[2],
-    borderBottom: `1px solid ${theme.colors.border.light}`,
+  applicationItem: {
+    marginBottom: getThemeValue('spacing.3', '12px'),
+    paddingBottom: getThemeValue('spacing.2', '8px'),
+    borderBottom: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
   },
-  vehicleTag: {
-    display: 'inline-block',
-    marginLeft: theme.spacing[2],
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.text.muted,
-  },
-  reminderMeta: {
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.text.muted,
-    marginTop: theme.spacing[1],
-  },
-  predictionItem: {
-    marginBottom: theme.spacing[3],
-    paddingBottom: theme.spacing[2],
-    borderBottom: `1px solid ${theme.colors.border.light}`,
-  },
-  predictionHeader: {
+  applicationHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: getThemeValue('spacing.1', '4px'),
   },
-  predictionCost: {
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.primary,
-  },
-  predictionMeta: {
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.text.muted,
-  },
-  alertsList: {
+  applicationDetails: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: theme.spacing[2],
+    gap: getThemeValue('spacing.3', '12px'),
+    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
+    marginBottom: getThemeValue('spacing.1', '4px'),
   },
-  alertItem: {
+  statusBadge: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    borderRadius: '20px',
+    fontSize: '11px',
+    fontWeight: 500,
+    textTransform: 'capitalize',
+  },
+  viewButton: {
+    background: 'transparent',
+    border: `1px solid ${getThemeValue('colors.primary', '#22c55e')}`,
+    borderRadius: getThemeValue('borderRadius.md', '8px'),
+    padding: '4px 12px',
+    color: getThemeValue('colors.primary', '#22c55e'),
+    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    cursor: 'pointer',
+    marginTop: getThemeValue('spacing.1', '4px'),
+  },
+  earningItem: {
+    marginBottom: getThemeValue('spacing.3', '12px'),
+    paddingBottom: getThemeValue('spacing.2', '8px'),
+    borderBottom: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+  },
+  earningHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: getThemeValue('spacing.1', '4px'),
+  },
+  earningDetails: {
+    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
+  },
+  divider: {
+    margin: `${getThemeValue('spacing.4', '16px')} 0`,
+    borderTop: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+  },
+  subscriptionInfo: {
+    padding: getThemeValue('spacing.2', '8px'),
+  },
+  jobsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+    gap: getThemeValue('spacing.4', '16px'),
+  },
+  jobCard: {
+    background: getThemeValue('colors.background.elevated', '#1e293b'),
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    padding: getThemeValue('spacing.4', '16px'),
+    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+  },
+  jobTitle: {
+    fontSize: getThemeValue('fontSizes.base', '16px'),
+    fontWeight: getThemeValue('fontWeights.semibold', '600'),
+    marginBottom: getThemeValue('spacing.2', '8px'),
+  },
+  jobDescription: {
+    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    color: getThemeValue('colors.text.secondary', '#94a3b8'),
+    marginBottom: getThemeValue('spacing.2', '8px'),
+  },
+  jobMeta: {
+    display: 'flex',
+    gap: getThemeValue('spacing.2', '8px'),
+    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
+    marginBottom: getThemeValue('spacing.3', '12px'),
+  },
+  applyButton: {
+    width: '100%',
+    background: getThemeValue('colors.primary', '#22c55e'),
+    border: 'none',
+    borderRadius: getThemeValue('borderRadius.md', '8px'),
+    padding: getThemeValue('spacing.2', '8px'),
+    color: getThemeValue('colors.background.main', '#020617'),
+    fontWeight: getThemeValue('fontWeights.semibold', '600'),
+    cursor: 'pointer',
+  },
+  tableWrapper: {
+    overflowX: 'auto',
+  },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: getThemeValue('fontSizes.sm', '14px'),
+  },
+  iconButton: {
+    background: 'transparent',
+    border: 'none',
+    color: getThemeValue('colors.primary', '#22c55e'),
+    cursor: 'pointer',
+    padding: getThemeValue('spacing.1', '4px'),
+  },
+  warningCard: {
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[2],
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.secondary,
+    gap: getThemeValue('spacing.3', '12px'),
+    background: `${getThemeValue('colors.warning', '#f59e0b')}20`,
+    border: `1px solid ${getThemeValue('colors.warning', '#f59e0b')}`,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    padding: getThemeValue('spacing.4', '16px'),
+    marginTop: getThemeValue('spacing.4', '16px'),
   },
   centered: {
     minHeight: '100vh',
@@ -490,15 +799,15 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    color: theme.colors.text.secondary,
+    color: getThemeValue('colors.text.secondary', '#94a3b8'),
   },
   retryButton: {
-    marginTop: theme.spacing[4],
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    background: theme.colors.primary,
+    marginTop: getThemeValue('spacing.4', '16px'),
+    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
+    background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    color: theme.colors.background.main,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    color: getThemeValue('colors.background.main', '#020617'),
     cursor: 'pointer',
   },
 };
