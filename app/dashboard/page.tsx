@@ -1,15 +1,22 @@
+// app/dashboard/page.tsx
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
-import { Truck, CheckCircle, AlertTriangle, MapPin, Calendar, TrendingUp, Plus, Wrench, Car, Eye } from 'lucide-react';
+import {
+  Truck, CheckCircle, AlertTriangle, MapPin, Calendar,
+  TrendingUp, Plus, Wrench, Car, Eye, RefreshCw, Loader2
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-// Mapbox (only if token exists)
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+// Dynamically import the map component (no SSR)
+const FleetMap = dynamic(
+  () => import('@/components/FleetMap'),
+  { ssr: false, loading: () => <div style={{ height: '300px', background: '#1e293b', borderRadius: '12px' }} /> }
+);
 
 // ==================== TYPES ====================
 interface Vehicle {
@@ -41,30 +48,54 @@ interface Prediction {
   predicted_days: number;
 }
 
-// ==================== COMPONENT ====================
+// ==================== HELPER ====================
+const getThemeValue = (path: string, fallback: any): any => {
+  const parts = path.split('.');
+  let current: any = theme;
+  for (const part of parts) {
+    if (current && typeof current === 'object' && part in current) {
+      current = current[part];
+    } else {
+      return fallback;
+    }
+  }
+  return current;
+};
+
+// Badge style helper
+const getHealthBadgeStyle = (score: number | null) => ({
+  display: 'inline-block',
+  padding: '2px 8px',
+  borderRadius: '20px',
+  fontSize: '12px',
+  fontWeight: 500,
+  backgroundColor: (score ?? 0) >= 80 ? '#22c55e20' : (score ?? 0) >= 50 ? '#f59e0b20' : '#ef444420',
+  color: (score ?? 0) >= 80 ? '#22c55e' : (score ?? 0) >= 50 ? '#f59e0b' : '#ef4444',
+});
+
+// ==================== MAIN COMPONENT ====================
 export default function DashboardPage() {
   const router = useRouter();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<mapboxgl.Map | null>(null);
+  const [updatingScores, setUpdatingScores] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
       setError(null);
       setRefreshing(true);
-      
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push('/login');
         return;
       }
 
-      // 1. Fetch vehicles
+      // 1. Vehicles
       const { data: vehiclesData, error: vehiclesError } = await supabase
         .from('vehicles')
         .select('id, license_plate, make, model, health_score, lat, lng, year, mileage')
@@ -74,7 +105,7 @@ export default function DashboardPage() {
       if (vehiclesError) throw vehiclesError;
       setVehicles(vehiclesData || []);
 
-      // 2. Fetch reminders (two-step to avoid join issues)
+      // 2. Reminders
       const { data: rawReminders, error: remindersError } = await supabase
         .from('reminders')
         .select('id, title, due_date, due_mileage, vehicle_id')
@@ -84,7 +115,7 @@ export default function DashboardPage() {
 
       if (remindersError) throw remindersError;
 
-      if (rawReminders && rawReminders.length > 0) {
+      if (rawReminders?.length) {
         const vehicleIds = rawReminders.map(r => r.vehicle_id).filter(Boolean);
         let vehicleMap = new Map();
         if (vehicleIds.length) {
@@ -96,33 +127,30 @@ export default function DashboardPage() {
             vehicleMap = new Map(vehiclesLookup.map(v => [v.id, { make: v.make, model: v.model, license_plate: v.license_plate }]));
           }
         }
-        const remindersWithVehicle: Reminder[] = rawReminders.map(r => ({
+        setReminders(rawReminders.map(r => ({
           id: r.id,
           title: r.title,
           due_date: r.due_date,
           due_mileage: r.due_mileage,
           vehicle: r.vehicle_id ? vehicleMap.get(r.vehicle_id) : undefined,
-        }));
-        setReminders(remindersWithVehicle);
+        })));
       } else {
         setReminders([]);
       }
 
-      // 3. Fetch real AI predictions if vehicles exist
-      if (vehiclesData && vehiclesData.length > 0) {
+      // 3. AI predictions
+      if (vehiclesData?.length) {
         try {
           const predRes = await fetch('/api/ai/predictive-maintenance');
           if (predRes.ok) {
             const predData = await predRes.json();
-            // The API returns either an array or single object
             const predArray = Array.isArray(predData) ? predData : [predData];
             setPredictions(predArray);
           } else {
-            console.warn('Predictions API returned error, using fallback');
             setPredictions([]);
           }
         } catch (predErr) {
-          console.error('Failed to fetch predictions:', predErr);
+          console.error('Predictions error:', predErr);
           setPredictions([]);
         }
       } else {
@@ -141,65 +169,40 @@ export default function DashboardPage() {
     fetchData();
   }, [fetchData]);
 
-  // Stats calculations
+  // Update health scores (persist to DB)
+  const refreshHealthScores = async () => {
+    setUpdatingScores(true);
+    try {
+      const res = await fetch('/api/vehicles/update-health-scores', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Updated health scores for ${data.updated} vehicles`);
+        await fetchData(); // refresh dashboard
+      } else {
+        alert(data.error || 'Failed to update scores');
+      }
+    } catch (err) {
+      alert('Error updating scores');
+    } finally {
+      setUpdatingScores(false);
+    }
+  };
+
+  // Stats
   const total = vehicles.length;
   const healthy = vehicles.filter(v => (v.health_score ?? 0) >= 80).length;
   const warning = vehicles.filter(v => (v.health_score ?? 0) >= 50 && (v.health_score ?? 0) < 80).length;
   const critical = vehicles.filter(v => (v.health_score ?? 0) < 50).length;
   const criticalVehicles = vehicles.filter(v => (v.health_score ?? 0) < 40);
-
-  // Map initialization (only if vehicles have location)
   const hasLocationData = vehicles.some(v => v.lat && v.lng);
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
-  useEffect(() => {
-    if (!hasLocationData || !mapboxToken || !mapContainerRef.current) return;
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.remove();
-      mapInstanceRef.current = null;
-    }
-
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
-      center: [0, 0],
-      zoom: 5,
-      accessToken: mapboxToken,
-    });
-
-    map.on('load', () => {
-      vehicles.forEach(v => {
-        if (v.lat && v.lng) {
-          new mapboxgl.Marker()
-            .setLngLat([v.lng, v.lat])
-            .setPopup(new mapboxgl.Popup().setHTML(`<strong>${v.make} ${v.model}</strong><br/>${v.license_plate}<br/>Health: ${v.health_score ?? 'N/A'}%`))
-            .addTo(map);
-        }
-      });
-
-      const bounds = vehicles.filter(v => v.lat && v.lng).map(v => [v.lng!, v.lat!] as [number, number]);
-      if (bounds.length) {
-        const lngBounds = new mapboxgl.LngLatBounds(bounds[0], bounds[0]);
-        bounds.forEach(b => lngBounds.extend(b));
-        map.fitBounds(lngBounds, { padding: 50 });
-      }
-    });
-
-    mapInstanceRef.current = map;
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-      }
-    };
-  }, [hasLocationData, vehicles, mapboxToken]);
-
-  // Refresh handler
   const handleRefresh = () => {
     setLoading(true);
     fetchData();
   };
 
+  // Loading state
   if (loading && !refreshing) {
     return (
       <div style={styles.centered}>
@@ -207,8 +210,8 @@ export default function DashboardPage() {
         <p>Loading dashboard...</p>
         <style jsx>{`
           .spinner {
-            border: 3px solid ${theme.colors.border.medium};
-            border-top: 3px solid ${theme.colors.primary};
+            border: 3px solid ${getThemeValue('colors.border.medium', '#334155')};
+            border-top: 3px solid ${getThemeValue('colors.primary', '#22c55e')};
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -222,10 +225,11 @@ export default function DashboardPage() {
     );
   }
 
+  // Error state
   if (error && !refreshing) {
     return (
       <div style={styles.centered}>
-        <p style={{ color: theme.colors.error }}>Error: {error}</p>
+        <p style={{ color: getThemeValue('colors.error', '#ef4444') }}>Error: {error}</p>
         <button onClick={handleRefresh} style={styles.retryButton}>Retry</button>
       </div>
     );
@@ -233,52 +237,48 @@ export default function DashboardPage() {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
+      {/* Header with two buttons */}
       <div style={styles.headerRow}>
         <div>
           <h1 style={styles.title}>Dashboard</h1>
           <p style={styles.subtitle}>Welcome back to your fleet overview</p>
         </div>
-        <button onClick={handleRefresh} style={styles.refreshButton} disabled={refreshing}>
-          {refreshing ? 'Refreshing...' : 'Refresh'}
-        </button>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button onClick={refreshHealthScores} disabled={updatingScores} style={styles.refreshButton}>
+            {updatingScores ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+            {updatingScores ? ' Updating...' : ' Update Health Scores'}
+          </button>
+          <button onClick={handleRefresh} disabled={refreshing} style={styles.refreshButton}>
+            {refreshing ? <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+            {refreshing ? ' Refreshing...' : ' Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
       <div style={styles.statsGrid}>
         <motion.div whileHover={{ y: -5 }} style={styles.statCard}>
-          <Truck size={24} color={theme.colors.info} />
-          <div>
-            <span style={styles.statValue}>{total}</span>
-            <span style={styles.statLabel}>Total Vehicles</span>
-          </div>
+          <Truck size={24} color={getThemeValue('colors.info', '#3b82f6')} />
+          <div><span style={styles.statValue}>{total}</span><span style={styles.statLabel}>Total Vehicles</span></div>
         </motion.div>
         <motion.div whileHover={{ y: -5 }} style={styles.statCard}>
-          <CheckCircle size={24} color={theme.colors.status.healthy} />
-          <div>
-            <span style={styles.statValue}>{healthy}</span>
-            <span style={styles.statLabel}>Healthy</span>
-          </div>
+          <CheckCircle size={24} color={getThemeValue('colors.status.healthy', '#22c55e')} />
+          <div><span style={styles.statValue}>{healthy}</span><span style={styles.statLabel}>Healthy</span></div>
         </motion.div>
         <motion.div whileHover={{ y: -5 }} style={styles.statCard}>
-          <AlertTriangle size={24} color={theme.colors.status.warning} />
-          <div>
-            <span style={styles.statValue}>{warning}</span>
-            <span style={styles.statLabel}>Warning</span>
-          </div>
+          <AlertTriangle size={24} color={getThemeValue('colors.status.warning', '#f59e0b')} />
+          <div><span style={styles.statValue}>{warning}</span><span style={styles.statLabel}>Warning</span></div>
         </motion.div>
         <motion.div whileHover={{ y: -5 }} style={styles.statCard}>
-          <AlertTriangle size={24} color={theme.colors.status.critical} />
-          <div>
-            <span style={styles.statValue}>{critical}</span>
-            <span style={styles.statLabel}>Critical</span>
-          </div>
+          <AlertTriangle size={24} color={getThemeValue('colors.status.critical', '#ef4444')} />
+          <div><span style={styles.statValue}>{critical}</span><span style={styles.statLabel}>Critical</span></div>
         </motion.div>
       </div>
 
-      {/* Fleet List (New Section) */}
+      {/* Your Fleet Table */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>
-          <Truck size={20} color={theme.colors.primary} />
+          <Truck size={20} color={getThemeValue('colors.primary', '#22c55e')} />
           <h2 style={styles.cardTitle}>Your Fleet</h2>
           <button onClick={() => router.push('/vehicles/add')} style={styles.smallButton}>
             <Plus size={16} /> Add Vehicle
@@ -287,9 +287,7 @@ export default function DashboardPage() {
         {vehicles.length === 0 ? (
           <div style={styles.emptyState}>
             <p>No vehicles added yet.</p>
-            <button onClick={() => router.push('/vehicles/add')} style={styles.primaryButton}>
-              Add your first vehicle
-            </button>
+            <button onClick={() => router.push('/vehicles/add')} style={styles.primaryButton}>Add your first vehicle</button>
           </div>
         ) : (
           <div style={styles.tableWrapper}>
@@ -309,19 +307,11 @@ export default function DashboardPage() {
                   <tr key={vehicle.id}>
                     <td>{vehicle.make} {vehicle.model}</td>
                     <td>{vehicle.license_plate}</td>
-                    <td>
-                      <span style={{
-                        ...styles.healthBadge,
-                        backgroundColor: (vehicle.health_score ?? 0) >= 80 ? '#22c55e20' : (vehicle.health_score ?? 0) >= 50 ? '#f59e0b20' : '#ef444420',
-                        color: (vehicle.health_score ?? 0) >= 80 ? '#22c55e' : (vehicle.health_score ?? 0) >= 50 ? '#f59e0b' : '#ef4444',
-                      }}>
-                        {vehicle.health_score ?? '—'}%
-                      </span>
-                    </td>
+                    <td><span style={getHealthBadgeStyle(vehicle.health_score)}>{vehicle.health_score ?? '—'}%</span></td>
                     <td>{vehicle.year ?? '—'}</td>
                     <td>{vehicle.mileage?.toLocaleString() ?? '—'} mi</td>
                     <td>
-                      <button onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)} style={styles.iconButton} title="View Details">
+                      <button onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)} style={styles.iconButton}>
                         <Eye size={16} />
                       </button>
                     </td>
@@ -336,11 +326,11 @@ export default function DashboardPage() {
       {/* Map Card */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>
-          <MapPin size={20} color={theme.colors.primary} />
+          <MapPin size={20} color={getThemeValue('colors.primary', '#22c55e')} />
           <h2 style={styles.cardTitle}>Fleet Geospatial View</h2>
         </div>
         {hasLocationData && mapboxToken ? (
-          <div ref={mapContainerRef} style={{ height: '300px', borderRadius: theme.borderRadius.lg, overflow: 'hidden' }} />
+          <FleetMap vehicles={vehicles} />
         ) : (
           <div style={styles.emptyState}>
             <p>No location data available or Mapbox token missing. Add addresses to your vehicles to see them on the map.</p>
@@ -351,11 +341,11 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Two-column: Reminders & Predictions */}
+      {/* Two‑column: Reminders & Predictions */}
       <div style={styles.twoColumn}>
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <Calendar size={20} color={theme.colors.primary} />
+            <Calendar size={20} color={getThemeValue('colors.primary', '#22c55e')} />
             <h2 style={styles.cardTitle}>Upcoming Service Reminders</h2>
           </div>
           {reminders.length === 0 ? (
@@ -370,27 +360,21 @@ export default function DashboardPage() {
               {reminders.map(rem => (
                 <div key={rem.id} style={styles.reminderItem}>
                   <strong>{rem.title}</strong>
-                  {rem.vehicle && (
-                    <span style={styles.vehicleTag}>
-                      {rem.vehicle.make} {rem.vehicle.model}
-                    </span>
-                  )}
+                  {rem.vehicle && <span style={styles.vehicleTag}>{rem.vehicle.make} {rem.vehicle.model}</span>}
                   <div style={styles.reminderMeta}>
                     {rem.due_date && <span>Due: {new Date(rem.due_date).toLocaleDateString()}</span>}
                     {rem.due_mileage && <span> at {rem.due_mileage.toLocaleString()} mi</span>}
                   </div>
                 </div>
               ))}
-              <button onClick={() => router.push('/service-reminders')} style={styles.linkButton}>
-                View all reminders
-              </button>
+              <button onClick={() => router.push('/service-reminders')} style={styles.linkButton}>View all reminders</button>
             </div>
           )}
         </div>
 
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <TrendingUp size={20} color={theme.colors.primary} />
+            <TrendingUp size={20} color={getThemeValue('colors.primary', '#22c55e')} />
             <h2 style={styles.cardTitle}>AI Predictive Maintenance</h2>
           </div>
           {predictions.length === 0 ? (
@@ -408,14 +392,10 @@ export default function DashboardPage() {
                     <strong>{pred.make} {pred.model} ({pred.license_plate})</strong>
                     <span style={styles.predictionCost}>£{pred.predicted_cost}</span>
                   </div>
-                  <div style={styles.predictionMeta}>
-                    Estimated maintenance in {pred.predicted_days} days
-                  </div>
+                  <div style={styles.predictionMeta}>Estimated maintenance in {pred.predicted_days} days</div>
                 </div>
               ))}
-              <button onClick={() => router.push('/diagnostics')} style={styles.linkButton}>
-                View detailed predictions
-              </button>
+              <button onClick={() => router.push('/diagnostics')} style={styles.linkButton}>View detailed predictions</button>
             </div>
           )}
         </div>
@@ -425,17 +405,15 @@ export default function DashboardPage() {
       {criticalVehicles.length > 0 && (
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <AlertTriangle size={20} color={theme.colors.status.critical} />
+            <AlertTriangle size={20} color={getThemeValue('colors.status.critical', '#ef4444')} />
             <h2 style={styles.cardTitle}>Critical Alerts</h2>
           </div>
           <div style={styles.alertsList}>
             {criticalVehicles.map(v => (
               <div key={v.id} style={styles.alertItem}>
-                <Car size={16} color={theme.colors.status.critical} />
+                <Car size={16} color={getThemeValue('colors.status.critical', '#ef4444')} />
                 <span>{v.make} {v.model} ({v.license_plate}) – Health: {v.health_score}%</span>
-                <button onClick={() => router.push(`/vehicles/${v.license_plate}`)} style={styles.linkButton}>
-                  View Details
-                </button>
+                <button onClick={() => router.push(`/vehicles/${v.license_plate}`)} style={styles.linkButton}>View Details</button>
               </div>
             ))}
           </div>
@@ -448,85 +426,88 @@ export default function DashboardPage() {
 // ==================== STYLES ====================
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    padding: theme.spacing[8],
-    background: theme.colors.background.main,
+    padding: getThemeValue('spacing.8', '32px'),
+    background: getThemeValue('colors.background.main', '#020617'),
     minHeight: '100vh',
-    color: theme.colors.text.primary,
-    fontFamily: theme.fontFamilies.sans,
+    color: getThemeValue('colors.text.primary', '#f1f5f9'),
+    fontFamily: getThemeValue('fontFamilies.sans', 'Inter, sans-serif'),
   },
   headerRow: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing[6],
+    marginBottom: getThemeValue('spacing.6', '24px'),
     flexWrap: 'wrap',
-    gap: theme.spacing[4],
+    gap: getThemeValue('spacing.4', '16px'),
   },
   title: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    marginBottom: theme.spacing[1],
-    background: theme.gradients.title,
+    fontSize: getThemeValue('fontSizes.3xl', '32px'),
+    fontWeight: getThemeValue('fontWeights.bold', '700'),
+    marginBottom: getThemeValue('spacing.1', '4px'),
+    background: getThemeValue('gradients.title', 'linear-gradient(135deg, #94a3b8, #f1f5f9)'),
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
   },
   subtitle: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.text.secondary,
+    fontSize: getThemeValue('fontSizes.base', '16px'),
+    color: getThemeValue('colors.text.secondary', '#94a3b8'),
   },
   refreshButton: {
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.lg,
-    color: theme.colors.text.primary,
+    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
+    background: getThemeValue('colors.background.card', '#0f172a'),
+    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    color: getThemeValue('colors.text.primary', '#f1f5f9'),
     cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: getThemeValue('spacing.2', '8px'),
     transition: 'all 0.2s',
   },
   statsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: theme.spacing[4],
-    marginBottom: theme.spacing[6],
+    gap: getThemeValue('spacing.4', '16px'),
+    marginBottom: getThemeValue('spacing.6', '24px'),
   },
   statCard: {
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[4],
+    background: getThemeValue('colors.background.card', '#0f172a'),
+    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    padding: getThemeValue('spacing.4', '16px'),
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[3],
+    gap: getThemeValue('spacing.3', '12px'),
     cursor: 'default',
   },
   statValue: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.bold,
+    fontSize: getThemeValue('fontSizes.2xl', '24px'),
+    fontWeight: getThemeValue('fontWeights.bold', '700'),
     display: 'block',
-    color: theme.colors.text.primary,
+    color: getThemeValue('colors.text.primary', '#f1f5f9'),
   },
   statLabel: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.muted,
+    fontSize: getThemeValue('fontSizes.sm', '14px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
   },
   card: {
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[5],
-    marginBottom: theme.spacing[6],
+    background: getThemeValue('colors.background.card', '#0f172a'),
+    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+    borderRadius: getThemeValue('borderRadius.xl', '16px'),
+    padding: getThemeValue('spacing.5', '20px'),
+    marginBottom: getThemeValue('spacing.6', '24px'),
   },
   cardHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[2],
-    marginBottom: theme.spacing[4],
+    gap: getThemeValue('spacing.2', '8px'),
+    marginBottom: getThemeValue('spacing.4', '16px'),
     flexWrap: 'wrap',
   },
   cardTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.text.primary,
+    fontSize: getThemeValue('fontSizes.lg', '18px'),
+    fontWeight: getThemeValue('fontWeights.semibold', '600'),
+    color: getThemeValue('colors.text.primary', '#f1f5f9'),
     flex: 1,
   },
   tableWrapper: {
@@ -535,115 +516,108 @@ const styles: Record<string, React.CSSProperties> = {
   table: {
     width: '100%',
     borderCollapse: 'collapse',
-    fontSize: theme.fontSizes.sm,
-  },
-  healthBadge: {
-    display: 'inline-block',
-    padding: '2px 8px',
-    borderRadius: '20px',
-    fontSize: '12px',
-    fontWeight: 500,
+    fontSize: getThemeValue('fontSizes.sm', '14px'),
   },
   iconButton: {
     background: 'transparent',
     border: 'none',
-    color: theme.colors.primary,
+    color: getThemeValue('colors.primary', '#22c55e'),
     cursor: 'pointer',
-    padding: theme.spacing[1],
-    borderRadius: theme.borderRadius.md,
+    padding: getThemeValue('spacing.1', '4px'),
+    borderRadius: getThemeValue('borderRadius.md', '8px'),
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
   },
   emptyState: {
     textAlign: 'center',
-    padding: theme.spacing[6],
-    color: theme.colors.text.muted,
+    padding: getThemeValue('spacing.6', '24px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
   },
   primaryButton: {
-    marginTop: theme.spacing[3],
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    background: theme.colors.primary,
+    marginTop: getThemeValue('spacing.3', '12px'),
+    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
+    background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    color: theme.colors.background.main,
-    fontWeight: theme.fontWeights.medium,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    color: getThemeValue('colors.background.main', '#020617'),
+    fontWeight: getThemeValue('fontWeights.medium', '500'),
     cursor: 'pointer',
   },
   smallButton: {
-    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
-    background: theme.colors.primary,
+    padding: `${getThemeValue('spacing.1', '4px')} ${getThemeValue('spacing.3', '12px')}`,
+    background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    color: theme.colors.background.main,
-    fontSize: theme.fontSizes.sm,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    color: getThemeValue('colors.background.main', '#020617'),
+    fontSize: getThemeValue('fontSizes.sm', '14px'),
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: theme.spacing[1],
+    gap: getThemeValue('spacing.1', '4px'),
   },
   linkButton: {
-    marginTop: theme.spacing[2],
+    marginTop: getThemeValue('spacing.2', '8px'),
     background: 'transparent',
     border: 'none',
-    color: theme.colors.primary,
+    color: getThemeValue('colors.primary', '#22c55e'),
     cursor: 'pointer',
-    fontSize: theme.fontSizes.sm,
+    fontSize: getThemeValue('fontSizes.sm', '14px'),
     textDecoration: 'underline',
   },
   twoColumn: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-    gap: theme.spacing[6],
-    marginBottom: theme.spacing[6],
+    gap: getThemeValue('spacing.6', '24px'),
+    marginBottom: getThemeValue('spacing.6', '24px'),
   },
   reminderItem: {
-    marginBottom: theme.spacing[3],
-    paddingBottom: theme.spacing[2],
-    borderBottom: `1px solid ${theme.colors.border.light}`,
+    marginBottom: getThemeValue('spacing.3', '12px'),
+    paddingBottom: getThemeValue('spacing.2', '8px'),
+    borderBottom: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
   },
   vehicleTag: {
     display: 'inline-block',
-    marginLeft: theme.spacing[2],
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.text.muted,
+    marginLeft: getThemeValue('spacing.2', '8px'),
+    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
   },
   reminderMeta: {
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.text.muted,
-    marginTop: theme.spacing[1],
+    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
+    marginTop: getThemeValue('spacing.1', '4px'),
   },
   predictionItem: {
-    marginBottom: theme.spacing[3],
-    paddingBottom: theme.spacing[2],
-    borderBottom: `1px solid ${theme.colors.border.light}`,
+    marginBottom: getThemeValue('spacing.3', '12px'),
+    paddingBottom: getThemeValue('spacing.2', '8px'),
+    borderBottom: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
   },
   predictionHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: theme.spacing[1],
+    gap: getThemeValue('spacing.1', '4px'),
   },
   predictionCost: {
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.primary,
+    fontWeight: getThemeValue('fontWeights.bold', '700'),
+    color: getThemeValue('colors.primary', '#22c55e'),
   },
   predictionMeta: {
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.text.muted,
+    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    color: getThemeValue('colors.text.muted', '#64748b'),
   },
   alertsList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: theme.spacing[2],
+    gap: getThemeValue('spacing.2', '8px'),
   },
   alertItem: {
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[2],
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.secondary,
+    gap: getThemeValue('spacing.2', '8px'),
+    fontSize: getThemeValue('fontSizes.sm', '14px'),
+    color: getThemeValue('colors.text.secondary', '#94a3b8'),
     flexWrap: 'wrap',
   },
   centered: {
@@ -652,15 +626,15 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    color: theme.colors.text.secondary,
+    color: getThemeValue('colors.text.secondary', '#94a3b8'),
   },
   retryButton: {
-    marginTop: theme.spacing[4],
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    background: theme.colors.primary,
+    marginTop: getThemeValue('spacing.4', '16px'),
+    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
+    background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    color: theme.colors.background.main,
+    borderRadius: getThemeValue('borderRadius.lg', '12px'),
+    color: getThemeValue('colors.background.main', '#020617'),
     cursor: 'pointer',
   },
 };

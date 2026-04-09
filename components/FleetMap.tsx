@@ -1,80 +1,118 @@
-'use client'
+// components/FleetMap.tsx
+'use client';
 
-import { useEffect } from 'react'
-import L from 'leaflet'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
-import MarkerClusterGroup from 'react-leaflet-cluster'
-import 'leaflet/dist/leaflet.css'
-import theme from '@/app/theme'
+import { useEffect, useRef, useState } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 
-const MyComponent = () => (
-  <div style={{ background: theme.colors.background.main, color: theme.colors.text.primary }}>
-    <h1 style={{ background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-      Hello
-    </h1>
-  </div>
-)
-const fixLeafletIcon = () => {
-  delete (L.Icon.Default.prototype as any)._getIconUrl
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  })
+interface Vehicle {
+  id: string;
+  license_plate: string;
+  make: string;
+  model: string;
+  health_score: number | null;
+  lat: number | null;
+  lng: number | null;
 }
 
-const getMarkerColor = (health?: number) => {
-  if (health == null) return '#94a3b8'
-  if (health >= 70) return '#22c55e'
-  if (health >= 40) return '#f59e0b'
-  return '#ef4444'
+interface FleetMapProps {
+  vehicles: Vehicle[];
 }
 
-const createMarkerIcon = (color: string) => L.divIcon({
-  className: 'custom-marker',
-  html: `<div style="background:${color}; width:24px; height:24px; border-radius:50%; border:3px solid white; box-shadow:0 2px 5px rgba(0,0,0,0.3);"></div>`,
-  iconSize: [24, 24],
-  popupAnchor: [0, -12],
-})
+export default function FleetMap({ vehicles }: FleetMapProps) {
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<mapboxgl.Map | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
 
-function MapBounds({ vehicles }: { vehicles: any[] }) {
-  const map = useMap()
   useEffect(() => {
-    if (vehicles.length) {
-      const bounds = L.latLngBounds(vehicles.map(v => v.position))
-      map.fitBounds(bounds, { padding: [50, 50] })
+    // Check for Mapbox token
+    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    if (!token) {
+      setMapError('Mapbox token missing. Please add NEXT_PUBLIC_MAPBOX_TOKEN to your environment variables.');
+      return;
     }
-  }, [vehicles])
-  return null
-}
 
-export default function FleetMap({ vehicles }: { vehicles: any[] }) {
-  useEffect(() => { fixLeafletIcon() }, [])
-  const validVehicles = vehicles.filter(v => v.position?.length === 2 && !isNaN(v.position[0]))
+    if (!mapContainer.current) return;
 
-  return (
-    <MapContainer center={[51.505, -0.09]} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false}>
-      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-      {validVehicles.length > 0 && (
-        <>
-          <MapBounds vehicles={validVehicles} />
-          <MarkerClusterGroup>
-            {validVehicles.map(v => (
-              <Marker
-                key={v.id}
-                position={v.position}
-                icon={createMarkerIcon(getMarkerColor(v.health_score))}
-              >
-                <Popup>
-                  <strong>{v.license_plate}</strong><br />
-                  {v.make} {v.model}<br />
-                  Health: {v.health_score ?? 'N/A'}%
-                </Popup>
-              </Marker>
-            ))}
-          </MarkerClusterGroup>
-        </>
-      )}
-    </MapContainer>
-  )
+    // Clean up existing map instance
+    if (map.current) {
+      map.current.remove();
+      map.current = null;
+    }
+
+    try {
+      // Initialize map
+      map.current = new mapboxgl.Map({
+        container: mapContainer.current,
+        style: 'mapbox://styles/mapbox/dark-v11',
+        center: [-1.5, 52.5], // Default: UK centre (longitude, latitude)
+        zoom: 5,
+        accessToken: token,
+      });
+
+      // Add navigation controls (optional)
+      map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+      // Wait for map to load before adding markers
+      map.current.on('load', () => {
+        if (!map.current) return;
+
+        // Filter vehicles that have coordinates
+        const vehiclesWithCoords = vehicles.filter(v => v.lat && v.lng);
+
+        if (vehiclesWithCoords.length === 0) {
+          // No coordinates: keep default view
+          return;
+        }
+
+        // Add markers
+        vehiclesWithCoords.forEach(vehicle => {
+          if (!vehicle.lat || !vehicle.lng) return;
+          const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(
+            `<strong>${vehicle.make} ${vehicle.model}</strong><br/>` +
+            `${vehicle.license_plate}<br/>` +
+            `Health: ${vehicle.health_score ?? 'N/A'}%`
+          );
+          new mapboxgl.Marker()
+            .setLngLat([vehicle.lng, vehicle.lat])
+            .setPopup(popup)
+            .addTo(map.current!);
+        });
+
+        // Fit bounds to show all markers
+        const bounds = new mapboxgl.LngLatBounds();
+        vehiclesWithCoords.forEach(v => {
+          bounds.extend([v.lng!, v.lat!]);
+        });
+        map.current.fitBounds(bounds, { padding: 50 });
+      });
+
+      // Handle map load errors
+      map.current.on('error', (e) => {
+        console.error('Mapbox error:', e);
+        setMapError('Failed to load map. Please check your Mapbox token and network.');
+      });
+    } catch (err: any) {
+      console.error('Map initialization error:', err);
+      setMapError(err.message || 'Failed to initialize map.');
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (map.current) {
+        map.current.remove();
+        map.current = null;
+      }
+    };
+  }, [vehicles]); // Re-run when vehicles change
+
+  if (mapError) {
+    return (
+      <div style={{ height: '300px', background: '#1e293b', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', padding: '20px', textAlign: 'center' }}>
+        <p>{mapError}</p>
+      </div>
+    );
+  }
+
+  return <div ref={mapContainer} style={{ height: '300px', borderRadius: '12px', overflow: 'hidden' }} />;
 }

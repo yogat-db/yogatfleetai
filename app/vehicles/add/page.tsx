@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { motion } from 'framer-motion';
-import { Search, AlertCircle, CheckCircle, Loader2, Car, MapPin } from 'lucide-react';
+import { Search, AlertCircle, CheckCircle, Loader2, Car, MapPin, Crosshair } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 import mbxGeocoding from '@mapbox/mapbox-sdk/services/geocoding';
@@ -25,6 +25,7 @@ export default function AddVehiclePage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [address, setAddress] = useState('');
+  const [detectingLocation, setDetectingLocation] = useState(false);
 
   // Fetch DVLA + MOT + AI insights
   const fetchVehicleDetails = async () => {
@@ -78,6 +79,43 @@ export default function AddVehiclePage() {
       setFetching(false);
       setAiLoading(false);
     }
+  };
+
+  // Auto‑detect current address using browser geolocation + Mapbox reverse geocoding
+  const detectCurrentAddress = () => {
+    if (!navigator.geolocation) {
+      setError('Geolocation is not supported by your browser');
+      return;
+    }
+    setDetectingLocation(true);
+    setError(null);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          // Reverse geocode using Mapbox
+          const response = await fetch(
+            `https://api.mapbox.com/geocoding/v5/mapbox.places/${position.coords.longitude},${position.coords.latitude}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_TOKEN}&types=address&limit=1`
+          );
+          const data = await response.json();
+          if (data.features && data.features.length) {
+            const fullAddress = data.features[0].place_name;
+            setAddress(fullAddress);
+          } else {
+            // Fallback: show coordinates
+            setAddress(`${position.coords.latitude}, ${position.coords.longitude}`);
+          }
+        } catch (err) {
+          console.error('Reverse geocoding failed', err);
+          setAddress(`${position.coords.latitude}, ${position.coords.longitude}`);
+        } finally {
+          setDetectingLocation(false);
+        }
+      },
+      (err) => {
+        setError('Unable to detect location: ' + err.message);
+        setDetectingLocation(false);
+      }
+    );
   };
 
   const onSubmit = async (data: any) => {
@@ -193,19 +231,30 @@ export default function AddVehiclePage() {
             <input {...register('vin')} style={styles.input} placeholder="Optional" />
           </div>
 
-          {/* Address field for geocoding */}
+          {/* Address field with auto‑detect button */}
           <div style={styles.field}>
             <label style={styles.label}>
               <MapPin size={14} style={{ marginRight: '4px' }} />
               Address (optional)
             </label>
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="e.g., 123 High Street, Leicester"
-              style={styles.input}
-            />
+            <div style={styles.addressRow}>
+              <input
+                type="text"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="e.g., 123 High Street, Leicester"
+                style={styles.addressInput}
+              />
+              <button
+                type="button"
+                onClick={detectCurrentAddress}
+                disabled={detectingLocation}
+                style={styles.detectButton}
+              >
+                {detectingLocation ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Crosshair size={16} />}
+                {detectingLocation ? 'Detecting...' : 'Auto‑detect'}
+              </button>
+            </div>
           </div>
 
           {/* AI insight */}
@@ -261,6 +310,9 @@ const styles: Record<string, React.CSSProperties> = {
   searchButton: { background: '#22c55e', border: 'none', borderRadius: 8, padding: '0 16px', color: '#020617', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 },
   field: { marginBottom: 16 },
   label: { display: 'block', marginBottom: 8, color: '#94a3b8', fontSize: 14 },
+  addressRow: { display: 'flex', gap: 12 },
+  addressInput: { flex: 1, background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: 12, color: '#f1f5f9', fontSize: 16, outline: 'none' },
+  detectButton: { display: 'flex', alignItems: 'center', gap: 6, background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '0 16px', color: '#cbd5e1', cursor: 'pointer', whiteSpace: 'nowrap' },
   errorBox: { display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444', borderRadius: 8, padding: 12, marginBottom: 20, color: '#ef4444' },
   successBox: { display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(34,197,94,0.1)', border: '1px solid #22c55e', borderRadius: 8, padding: 12, marginBottom: 20, color: '#22c55e' },
   aiContainer: { display: 'flex', alignItems: 'center', gap: 8, background: '#1e293b', borderRadius: 8, padding: 12, marginBottom: 16 },
