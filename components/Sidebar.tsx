@@ -1,6 +1,7 @@
+// components/sidebar/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -16,11 +17,12 @@ import {
   Menu,
   X,
   LogOut,
+  FileText,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-// ---------- Custom Hook for User Role ----------
+// ---------- Custom Hook for User Role (with loading) ----------
 function useUserRole() {
   const [isMechanic, setIsMechanic] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -28,56 +30,81 @@ function useUserRole() {
 
   useEffect(() => {
     const fetchRoles = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setLoading(false);
-        return;
-      }
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setLoading(false);
+          return;
+        }
 
-      // Check mechanic
-      const { data: mechanic } = await supabase
-        .from('mechanics')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      setIsMechanic(!!mechanic);
-
-      // Admin check – hardcoded for teebaxy@gmail.com
-      if (user.email === 'teebaxy@gmail.com') {
-        setIsAdmin(true);
-      } else {
-        // Fallback to admins table if needed
-        const { data: admin } = await supabase
-          .from('admins')
+        // Check mechanic
+        const { data: mechanic } = await supabase
+          .from('mechanics')
           .select('id')
           .eq('user_id', user.id)
           .maybeSingle();
-        setIsAdmin(!!admin);
-      }
+        setIsMechanic(!!mechanic);
 
-      setLoading(false);
+        // Admin check – hardcoded for teebaxy@gmail.com (update as needed)
+        if (user.email === 'teebaxy@gmail.com') {
+          setIsAdmin(true);
+        } else {
+          const { data: admin } = await supabase
+            .from('admins')
+            .select('id')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          setIsAdmin(!!admin);
+        }
+      } catch (error) {
+        console.error('Error fetching user role:', error);
+      } finally {
+        setLoading(false);
+      }
     };
     fetchRoles();
   }, []);
 
   return { isMechanic, isAdmin, loading };
 }
-// ---------- End Hook ----------
 
-// Theme constants
-const primaryColor = '#22c55e';
-const textSecondary = '#94a3b8';
-const bgCard = '#0f172a';
-const borderLight = '#1e293b';
-const borderMedium = '#334155';
-const activeBg = '#1e293b';
+// ---------- Helper: safe theme access ----------
+const getThemeValue = (path: string, fallback: any) => {
+  const parts = path.split('.');
+  let current: any = theme;
+  for (const part of parts) {
+    if (current && typeof current === 'object' && part in current) {
+      current = current[part];
+    } else {
+      return fallback;
+    }
+  }
+  return current;
+};
 
+const primaryColor = getThemeValue('colors.primary', '#22c55e');
+const textSecondary = getThemeValue('colors.text.secondary', '#94a3b8');
+const bgCard = getThemeValue('colors.background.card', '#0f172a');
+const borderLight = getThemeValue('colors.border.light', '#1e293b');
+const borderMedium = getThemeValue('colors.border.medium', '#334155');
+const activeBg = getThemeValue('colors.background.elevated', '#1e293b');
+
+// ---------- Main Component ----------
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { isMechanic, isAdmin, loading } = useUserRole();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile screen size (client-side only)
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Public pages where sidebar should be hidden
   const publicPaths = ['/login', '/register', '/forgot-password', '/update-password'];
@@ -87,7 +114,7 @@ export default function Sidebar() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    window.location.href = '/login';
+    router.push('/login');
   };
 
   const menuItems = [
@@ -117,7 +144,11 @@ export default function Sidebar() {
       {items.map((item) => {
         const active = isActive(item.href);
         return (
-          <a key={item.href} onClick={() => router.push(item.href)} style={{ textDecoration: 'none', cursor: 'pointer' }}>
+          <a
+            key={item.href}
+            onClick={() => router.push(item.href)}
+            style={{ textDecoration: 'none', cursor: 'pointer' }}
+          >
             <motion.div
               whileHover={{ x: 4 }}
               transition={{ type: 'spring', stiffness: 300, damping: 20 }}
@@ -136,11 +167,28 @@ export default function Sidebar() {
     </>
   );
 
+  // Render main content (with Privacy Policy link before logout)
   const renderContent = () => (
     <>
       {renderNavItems(menuItems)}
       {!loading && isMechanic && renderNavItems(mechanicItems)}
       {!loading && isAdmin && renderNavItems(adminItems)}
+
+      {/* Privacy Policy link */}
+      <a
+        onClick={() => router.push('/privacy')}
+        style={{ textDecoration: 'none', cursor: 'pointer' }}
+      >
+        <motion.div
+          whileHover={{ x: 4 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+          style={styles.navItem}
+        >
+          <FileText size={20} color={textSecondary} />
+          {!isCollapsed && <span style={{ marginLeft: '12px' }}>Privacy Policy</span>}
+        </motion.div>
+      </a>
+
       <motion.button
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
@@ -182,41 +230,48 @@ export default function Sidebar() {
 
   return (
     <>
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => setIsMobileOpen(true)}
-        style={styles.menuButton}
-      >
-        <Menu size={24} />
-      </motion.button>
+      {/* Mobile menu button (only shown on small screens) */}
+      {isMobile && (
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setIsMobileOpen(true)}
+          style={styles.menuButton}
+        >
+          <Menu size={24} />
+        </motion.button>
+      )}
       <MobileDrawer />
 
-      <motion.aside
-        initial={{ x: -260 }}
-        animate={{ x: 0 }}
-        transition={{ type: 'spring', damping: 20, stiffness: 100 }}
-        style={{
-          ...styles.desktopSidebar,
-          width: isCollapsed ? 80 : 260,
-        }}
-      >
-        <div style={styles.logoContainer}>
-          <motion.h1 whileHover={{ scale: 1.02 }} style={styles.logoText}>
-            {!isCollapsed ? 'Yogat' : 'Y'}
-          </motion.h1>
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            style={styles.collapseButton}
-          >
-            {isCollapsed ? '→' : '←'}
-          </motion.button>
-        </div>
-        <nav style={styles.nav}>{renderContent()}</nav>
-      </motion.aside>
+      {/* Desktop sidebar (hidden on mobile) */}
+      {!isMobile && (
+        <motion.aside
+          initial={{ x: -260 }}
+          animate={{ x: 0 }}
+          transition={{ type: 'spring', damping: 20, stiffness: 100 }}
+          style={{
+            ...styles.desktopSidebar,
+            width: isCollapsed ? 80 : 260,
+          }}
+        >
+          <div style={styles.logoContainer}>
+            <motion.h1 whileHover={{ scale: 1.02 }} style={styles.logoText}>
+              {!isCollapsed ? 'Yogat' : 'Y'}
+            </motion.h1>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              style={styles.collapseButton}
+            >
+              {isCollapsed ? '→' : '←'}
+            </motion.button>
+          </div>
+          <nav style={styles.nav}>{renderContent()}</nav>
+        </motion.aside>
+      )}
 
+      {/* Overlay for mobile drawer */}
       {isMobileOpen && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -230,7 +285,7 @@ export default function Sidebar() {
   );
 }
 
-// Styles (unchanged)
+// ==================== STYLES ====================
 const styles: Record<string, React.CSSProperties> = {
   desktopSidebar: {
     position: 'fixed',
@@ -283,7 +338,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     cursor: 'pointer',
     transition: 'background 0.2s, border-left 0.2s',
-    color: '#f1f5f9',
+    color: getThemeValue('colors.text.primary', '#f1f5f9'),
   },
   logoutButton: {
     display: 'flex',
@@ -308,7 +363,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '8px',
     cursor: 'pointer',
     zIndex: 40,
-    display: 'none',
   },
   mobileDrawer: {
     position: 'fixed',
@@ -348,14 +402,3 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 45,
   },
 };
-
-// Mobile media query (runs client‑side)
-if (typeof window !== 'undefined') {
-  const mediaQuery = window.matchMedia('(max-width: 768px)');
-  const handleMediaChange = (e: MediaQueryListEvent | MediaQueryList) => {
-    const btn = document.querySelector('button[style*="position: fixed"]') as HTMLElement;
-    if (btn) btn.style.display = e.matches ? 'flex' : 'none';
-  };
-  handleMediaChange(mediaQuery);
-  mediaQuery.addEventListener('change', handleMediaChange);
-}
