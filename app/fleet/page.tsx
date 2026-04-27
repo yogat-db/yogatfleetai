@@ -1,12 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion, PanInfo } from 'framer-motion';
-import { Plus, Search, AlertTriangle, CheckCircle, Trash2, Edit, Crown } from 'lucide-react';
+import { motion, AnimatePresence, PanInfo } from 'framer-motion';
+import { 
+  Plus, Search, AlertTriangle, CheckCircle, 
+  Trash2, Edit, Car, ChevronRight, Activity, 
+  History, Info, Loader2 
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
+// ==================== TYPES ====================
 type Vehicle = {
   id: string;
   license_plate: string;
@@ -18,6 +23,7 @@ type Vehicle = {
   health_score: number | null;
 };
 
+// ==================== MAIN COMPONENT ====================
 export default function FleetPage() {
   const router = useRouter();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -25,35 +31,23 @@ export default function FleetPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'healthy' | 'warning' | 'critical'>('all');
-  const [hasMultiVehicle, setHasMultiVehicle] = useState(false);
-  const [upgradeLoading, setUpgradeLoading] = useState(false);
 
-  useEffect(() => {
-    fetchVehicles();
-    fetchProfile();
-  }, []);
-
-  const fetchVehicles = async () => {
+  const fetchVehicles = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not logged in');
-const handleDelete = async () => {
-  if (!confirm('Are you sure you want to delete this vehicle?')) return;
-  try {
-    const res = await fetch(`/api/vehicles/{plate}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Delete failed');
-    router.push('/vehicles');
-  } catch (err) {
-    console.error('Delete error:', err);
-    alert('Failed to delete vehicle');
-  }
-};
+      
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('vehicles')
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('health_score', { ascending: true }); // Prioritize critical assets
 
       if (error) throw error;
       setVehicles(data || []);
@@ -62,550 +56,219 @@ const handleDelete = async () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
 
-  const fetchProfile = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('has_multi_vehicle')
-        .eq('id', user.id)
-        .single();
-      setHasMultiVehicle(profile?.has_multi_vehicle || false);
-    } catch (err) {
-      console.warn('Failed to fetch profile:', err);
-    }
-  };
+  useEffect(() => {
+    fetchVehicles();
+  }, [fetchVehicles]);
 
-  const handleUpgrade = async () => {
-    setUpgradeLoading(true);
-    try {
-      const res = await fetch('/api/stripe/create-multi-vehicle-checkout', { method: 'POST' });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        alert('Failed to create checkout session');
-      }
-    } catch (err) {
-      alert('Something went wrong. Please try again.');
-    } finally {
-      setUpgradeLoading(false);
-    }
-  };
-
-  const getHealthColor = (score: number | null) => {
-    if (score === null) return '#64748b';
-    if (score >= 80) return theme.colors.status.healthy;
-    if (score >= 50) return theme.colors.status.warning;
-    return theme.colors.status.critical;
-  };
-
-  const getStatusText = (status: string) => {
-    if (status === 'active') return 'Active';
-    if (status === 'warning') return 'Warning';
-    if (status === 'critical') return 'Critical';
-    return 'Unknown';
-  };
-
-  const filteredVehicles = vehicles.filter((v) => {
-    const matchesSearch =
-      v.license_plate.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      `${v.make} ${v.model}`.toLowerCase().includes(searchTerm.toLowerCase());
-    let matchesStatus = true;
-    if (filterStatus === 'healthy') matchesStatus = (v.health_score || 0) >= 80;
-    else if (filterStatus === 'warning') matchesStatus = (v.health_score || 0) >= 50 && (v.health_score || 0) < 80;
-    else if (filterStatus === 'critical') matchesStatus = (v.health_score || 0) < 50;
-    return matchesSearch && matchesStatus;
-  });
-
-  const stats = {
+  // Derivative Analytics & Filtering
+  const stats = useMemo(() => ({
     total: vehicles.length,
     healthy: vehicles.filter(v => (v.health_score || 0) >= 80).length,
     warning: vehicles.filter(v => (v.health_score || 0) >= 50 && (v.health_score || 0) < 80).length,
     critical: vehicles.filter(v => (v.health_score || 0) < 50).length,
-  };
+  }), [vehicles]);
 
-  const handleDelete = async (id: string) => {
-  try {
-    const res = await fetch(`/api/vehicles/${id}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Delete failed');
-    // Re‑fetch the vehicles list (assuming you have a fetchVehicles function)
-    await fetchVehicles();  // or refetch your data
-    // Optionally show a success toast/alert
-  } catch (error) {
-    console.error('Delete failed:', error);
-    alert('Failed to delete vehicle');
-  }
-};
+  const filteredVehicles = useMemo(() => {
+    return vehicles.filter((v) => {
+      const matchesSearch =
+        v.license_plate.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        `${v.make} ${v.model}`.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      let matchesStatus = true;
+      if (filterStatus === 'healthy') matchesStatus = (v.health_score || 0) >= 80;
+      else if (filterStatus === 'warning') matchesStatus = (v.health_score || 0) >= 50 && (v.health_score || 0) < 80;
+      else if (filterStatus === 'critical') matchesStatus = (v.health_score || 0) < 50;
+      
+      return matchesSearch && matchesStatus;
+    });
+  }, [vehicles, searchTerm, filterStatus]);
 
-  const handleEdit = (vehicleId: string) => {
-    router.push(`/vehicles/edit/${vehicleId}`);
-  };
-
-  if (loading) {
-    return (
-      <div style={styles.centered}>
-        <div className="spinner" />
-        <p>Loading fleet...</p>
-        <style jsx>{`
-          .spinner {
-            border: 3px solid ${theme.colors.border.medium};
-            border-top: 3px solid ${theme.colors.primary};
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={styles.centered}>
-        <p style={{ color: theme.colors.error }}>Error: {error}</p>
-        <button onClick={fetchVehicles} style={styles.retryButton}>Retry</button>
-      </div>
-    );
-  }
-
-  const showUpgradeBanner = vehicles.length === 1 && !hasMultiVehicle;
+  if (loading) return <LoadingState />;
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>Fleet Management</h1>
+      
+      {/* 1. BRANDED HEADER */}
+      <header style={styles.header}>
+        <div>
+          <h1 style={styles.title}>Asset Management</h1>
+          <p style={styles.subtitle}>Fleet telemetry and lifecycle tracking</p>
+        </div>
         <button onClick={() => router.push('/vehicles/add')} style={styles.addButton}>
-          <Plus size={20} />
-          Add Vehicle
+          <Plus size={18} /> Add Vehicle
         </button>
-      </div>
+      </header>
 
+      {/* 2. KPI STRIP */}
       <div style={styles.statsGrid}>
-        <div style={styles.statCard}>
-          <span style={styles.statLabel}>TOTAL</span>
-          <span style={styles.statValue}>{stats.total}</span>
-        </div>
-        <div style={styles.statCard}>
-          <span style={styles.statLabel}>HEALTHY</span>
-          <span style={styles.statValue}>{stats.healthy}</span>
-        </div>
-        <div style={styles.statCard}>
-          <span style={styles.statLabel}>WARNING</span>
-          <span style={styles.statValue}>{stats.warning}</span>
-        </div>
-        <div style={styles.statCard}>
-          <span style={styles.statLabel}>CRITICAL</span>
-          <span style={styles.statValue}>{stats.critical}</span>
-        </div>
+        <StatCard label="Active Fleet" value={stats.total} color={theme.colors.text.primary} />
+        <StatCard label="Optimal" value={stats.healthy} color={theme.colors.status.healthy} />
+        <StatCard label="At Risk" value={stats.warning} color={theme.colors.status.warning} />
+        <StatCard label="Critical" value={stats.critical} color={theme.colors.status.critical} />
       </div>
 
-      {showUpgradeBanner && (
-        <div style={styles.upgradeBanner}>
-          <div style={styles.upgradeContent}>
-            <Crown size={24} color={theme.colors.warning} />
-            <div>
-              <strong>Unlock Multi‑Vehicle Management</strong>
-              <p>You currently have one vehicle. Add more vehicles for a one‑time fee of £10.</p>
-            </div>
-          </div>
-          <button
-            onClick={handleUpgrade}
-            disabled={upgradeLoading}
-            style={styles.upgradeButton}
-          >
-            {upgradeLoading ? 'Processing...' : 'Upgrade Now (£10)'}
-          </button>
+      {/* 3. SEARCH & CONTROL BAR */}
+      <div style={styles.controlRow}>
+        <div style={styles.searchBar}>
+          <Search size={18} color="#64748b" />
+          <input
+            type="text"
+            placeholder="Search by license plate or model..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={styles.searchInput}
+          />
         </div>
-      )}
-
-      <div style={styles.searchBar}>
-        <Search size={18} color="#64748b" />
-        <input
-          type="text"
-          placeholder="Search by plate, make, model..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          style={styles.searchInput}
-        />
-      </div>
-
-      <div style={styles.filterTabs}>
-        {(['all', 'healthy', 'warning', 'critical'] as const).map((status) => (
-          <button
-            key={status}
-            onClick={() => setFilterStatus(status)}
-            style={{
-              ...styles.filterTab,
-              ...(filterStatus === status ? styles.filterTabActive : {}),
-            }}
-          >
-            {status.charAt(0).toUpperCase() + status.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      {filteredVehicles.length === 0 ? (
-        <div style={styles.empty}>No vehicles found</div>
-      ) : (
-        <div style={styles.grid}>
-          {filteredVehicles.map((vehicle) => (
-            <SwipeableCard
-              key={vehicle.id}
-              vehicle={vehicle}
-              onDelete={() => handleDelete(vehicle.id)}
-              onEdit={() => handleEdit(vehicle.id)}
-              onCardClick={() => router.push(`/vehicles/${vehicle.license_plate}`)}
-              getHealthColor={getHealthColor}
-              getStatusText={getStatusText}
-            />
+        <div style={styles.filterTabs}>
+          {(['all', 'healthy', 'warning', 'critical'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilterStatus(s)}
+              style={{
+                ...styles.filterTab,
+                ...(filterStatus === s ? styles.filterTabActive : {}),
+              }}
+            >
+              {s}
+            </button>
           ))}
         </div>
-      )}
+      </div>
+
+      {/* 4. ASSET GRID */}
+      <AnimatePresence mode="popLayout">
+        {filteredVehicles.length === 0 ? (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={styles.empty}>
+            <Car size={48} color="#1e293b" strokeWidth={1} />
+            <p>No assets found in current segment.</p>
+          </motion.div>
+        ) : (
+          <div style={styles.grid}>
+            {filteredVehicles.map((vehicle) => (
+              <SwipeableCard
+                key={vehicle.id}
+                vehicle={vehicle}
+                onDelete={fetchVehicles}
+                onEdit={() => router.push(`/vehicles/edit/${vehicle.id}`)}
+                onView={() => router.push(`/vehicles/${vehicle.license_plate}`)}
+              />
+            ))}
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
 
-// Swipeable Card Component
-interface SwipeableCardProps {
-  vehicle: Vehicle;
-  onDelete: () => void;
-  onEdit: () => void;
-  onCardClick: () => void;
-  getHealthColor: (score: number | null) => string;
-  getStatusText: (status: string) => string;
-}
+// ==================== SUB-COMPONENTS ====================
 
-function SwipeableCard({
-  vehicle,
-  onDelete,
-  onEdit,
-  onCardClick,
-  getHealthColor,
-  getStatusText,
-}: SwipeableCardProps) {
-  const [dragX, setDragX] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-
-  const handleDrag = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-    const newX = info.offset.x;
-    setDragX(newX);
-    setIsDragging(true);
-  };
-
-  const handleDragEnd = () => {
-    if (Math.abs(dragX) > 100) {
-      if (dragX > 0) {
-        onEdit();
-      } else {
-        onDelete();
-      }
-    }
-    setDragX(0);
-    setIsDragging(false);
-  };
-
+function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div style={styles.cardWrapper}>
-      <motion.div
-        drag="x"
-        dragConstraints={{ left: -100, right: 100 }}
-        dragElastic={0.2}
-        onDrag={handleDrag}
-        onDragEnd={handleDragEnd}
-        animate={{ x: dragX }}
-        transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-        style={{
-          ...styles.card,
-          cursor: isDragging ? 'grabbing' : 'pointer',
-          position: 'relative',
-          zIndex: 2,
-        }}
-        onClick={(e) => {
-          if (!isDragging && Math.abs(dragX) < 5) onCardClick();
-        }}
-      >
-        <div style={styles.cardHeader}>
-          <h2 style={styles.vehicleName}>
-            {vehicle.make} {vehicle.model}
-          </h2>
-          <span
-            style={{
-              ...styles.healthBadge,
-              background: `${getHealthColor(vehicle.health_score)}20`,
-              color: getHealthColor(vehicle.health_score),
-            }}
-          >
-            {vehicle.health_score ? `${vehicle.health_score}%` : '—'}
-          </span>
-        </div>
-        <p style={styles.licensePlate}>{vehicle.license_plate}</p>
-        <div style={styles.details}>
-          <span>Year: {vehicle.year || '—'}</span>
-          <span>Mileage: {vehicle.mileage?.toLocaleString() || '—'} mi</span>
-        </div>
-        <div style={styles.statusBadge}>
-          {vehicle.status === 'warning' && <AlertTriangle size={14} />}
-          {vehicle.status === 'active' && <CheckCircle size={14} />}
-          {getStatusText(vehicle.status)}
-        </div>
-      </motion.div>
-
-      <div style={styles.actionButtons}>
-        <button
-          onClick={onEdit}
-          style={{ ...styles.actionButton, background: '#3b82f6' }}
-          aria-label="Edit"
-        >
-          <Edit size={18} />
-        </button>
-        <button
-          onClick={onDelete}
-          style={{ ...styles.actionButton, background: '#ef4444' }}
-          aria-label="Delete"
-        >
-          <Trash2 size={18} />
-        </button>
-      </div>
+    <div style={styles.statCard}>
+      <span style={styles.statLabel}>{label}</span>
+      <span style={{ ...styles.statValue, color }}>{value}</span>
     </div>
   );
 }
 
-// Styles
+function SwipeableCard({ vehicle, onDelete, onEdit, onView }: any) {
+  const [dragX, setDragX] = useState(0);
+
+  const getHealthMeta = (score: number | null) => {
+    if (score === null) return { color: '#64748b', label: 'Incomplete' };
+    if (score >= 80) return { color: theme.colors.status.healthy, label: 'Optimal' };
+    if (score >= 50) return { color: theme.colors.status.warning, label: 'Warning' };
+    return { color: theme.colors.status.critical, label: 'Critical' };
+  };
+
+  const meta = getHealthMeta(vehicle.health_score);
+
+  const handleDelete = async () => {
+    if (confirm(`Permanently remove ${vehicle.license_plate}?`)) {
+      const { error } = await supabase.from('vehicles').delete().eq('id', vehicle.id);
+      if (!error) onDelete();
+    }
+  };
+
+  return (
+    <div style={styles.cardWrapper}>
+      {/* Background Actions (Revealed on Swipe) */}
+      <div style={styles.actionLayer}>
+        <div style={{ ...styles.bgBtn, background: '#3b82f6' }} onClick={onEdit}><Edit size={20} /></div>
+        <div style={{ ...styles.bgBtn, background: '#ef4444' }} onClick={handleDelete}><Trash2 size={20} /></div>
+      </div>
+
+      <motion.div
+        drag="x"
+        dragConstraints={{ left: -120, right: 0 }}
+        dragElastic={0.1}
+        onDrag={(e, info) => setDragX(info.offset.x)}
+        onDragEnd={() => setDragX(0)}
+        animate={{ x: dragX === 0 ? 0 : dragX }}
+        onClick={() => dragX === 0 && onView()}
+        style={styles.card}
+      >
+        <div style={styles.cardContent}>
+          <div style={styles.cardHeader}>
+            <span style={styles.platePill}>{vehicle.license_plate}</span>
+            <div style={{ ...styles.healthBadge, backgroundColor: `${meta.color}15`, color: meta.color }}>
+              <Activity size={12} /> {vehicle.health_score || 0}%
+            </div>
+          </div>
+          
+          <h3 style={styles.vehicleTitle}>{vehicle.make} {vehicle.model}</h3>
+          
+          <div style={styles.metaRow}>
+            <div style={styles.metaItem}><History size={14} /> {vehicle.mileage?.toLocaleString() ?? '0'} mi</div>
+            <div style={styles.metaItem}><Info size={14} /> {vehicle.year ?? '—'}</div>
+          </div>
+        </div>
+        <ChevronRight size={20} color="#1e293b" />
+      </motion.div>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div style={styles.centered}>
+      <Loader2 size={40} color={theme.colors.primary} className="animate-spin" />
+      <p style={{ marginTop: 16, fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px', opacity: 0.6 }}>SYNCING FLEET ENGINE</p>
+    </div>
+  );
+}
+
+// ==================== STYLES ====================
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    padding: theme.spacing[10],
-    background: theme.colors.background.main,
-    minHeight: '100vh',
-    color: theme.colors.text.primary,
-    fontFamily: theme.fontFamilies.sans,
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[8],
-  },
-  title: {
-    fontSize: theme.fontSizes['4xl'],
-    fontWeight: theme.fontWeights.bold,
-    background: theme.gradients.title,
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  addButton: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    background: theme.colors.primary,
-    border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    color: theme.colors.background.main,
-    fontWeight: theme.fontWeights.semibold,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
-  },
-  statsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: theme.spacing[4],
-    marginBottom: theme.spacing[8],
-  },
-  statCard: {
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[4],
-    textAlign: 'center',
-  },
-  statLabel: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.muted,
-    display: 'block',
-    marginBottom: theme.spacing[1],
-  },
-  statValue: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.text.primary,
-  },
-  upgradeBanner: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    background: `${theme.colors.warning}20`,
-    border: `1px solid ${theme.colors.warning}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[3]} ${theme.spacing[5]}`,
-    marginBottom: theme.spacing[6],
-  },
-  upgradeContent: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-  },
-  upgradeButton: {
-    background: theme.colors.warning,
-    border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    color: theme.colors.background.main,
-    fontWeight: theme.fontWeights.semibold,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
-  },
-  searchBar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    marginBottom: theme.spacing[4],
-  },
-  searchInput: {
-    flex: 1,
-    background: 'transparent',
-    border: 'none',
-    outline: 'none',
-    color: theme.colors.text.primary,
-    fontSize: theme.fontSizes.base,
-  },
-  filterTabs: {
-    display: 'flex',
-    gap: theme.spacing[2],
-    marginBottom: theme.spacing[6],
-  },
-  filterTab: {
-    background: 'transparent',
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.full,
-    padding: `${theme.spacing[1]} ${theme.spacing[4]}`,
-    color: theme.colors.text.secondary,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
-  },
-  filterTabActive: {
-    background: theme.colors.primary,
-    borderColor: theme.colors.primary,
-    color: theme.colors.background.main,
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: theme.spacing[6],
-  },
-  cardWrapper: {
-    position: 'relative',
-    overflow: 'hidden',
-    borderRadius: theme.borderRadius.xl,
-  },
-  card: {
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[6],
-    transition: 'box-shadow 0.2s ease',
-    position: 'relative',
-    zIndex: 2,
-    willChange: 'transform',
-  },
-  cardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[2],
-  },
-  vehicleName: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.text.primary,
-  },
-  healthBadge: {
-    padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-    borderRadius: theme.borderRadius.full,
-    fontSize: theme.fontSizes.xs,
-    fontWeight: theme.fontWeights.medium,
-  },
-  licensePlate: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[2],
-  },
-  details: {
-    display: 'flex',
-    gap: theme.spacing[4],
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.muted,
-    marginBottom: theme.spacing[3],
-  },
-  statusBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: theme.spacing[1],
-    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
-    borderRadius: theme.borderRadius.full,
-    background: `${theme.colors.status.warning}20`,
-    color: theme.colors.status.warning,
-    fontSize: theme.fontSizes.xs,
-    width: 'fit-content',
-  },
-  actionButtons: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    display: 'flex',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    padding: `0 ${theme.spacing[4]}`,
-    pointerEvents: 'none',
-    zIndex: 1,
-  },
-  actionButton: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '48px',
-    height: '48px',
-    borderRadius: '50%',
-    border: 'none',
-    cursor: 'pointer',
-    pointerEvents: 'auto',
-    transition: 'transform 0.2s ease',
-    color: '#fff',
-  },
-  centered: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: theme.colors.text.secondary,
-  },
-  retryButton: {
-    marginTop: theme.spacing[4],
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    background: theme.colors.primary,
-    border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    color: theme.colors.background.main,
-    cursor: 'pointer',
-  },
-  empty: {
-    textAlign: 'center',
-    padding: theme.spacing[12],
-    color: theme.colors.text.muted,
-  },
+  page: { padding: '40px', background: '#020617', minHeight: '100vh', color: '#f1f5f9' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' },
+  title: { fontSize: '32px', fontWeight: '800', background: 'linear-gradient(to right, #fff, #64748b)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-1px' },
+  subtitle: { color: '#64748b', fontSize: '14px' },
+  addButton: { background: '#22c55e', color: '#020617', border: 'none', borderRadius: '12px', padding: '12px 24px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
+  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '32px' },
+  statCard: { background: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '20px' },
+  statLabel: { fontSize: '10px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px' },
+  statValue: { fontSize: '24px', fontWeight: '900', display: 'block', marginTop: '4px' },
+  controlRow: { display: 'flex', gap: '16px', marginBottom: '24px', alignItems: 'center' },
+  searchBar: { flex: 1, background: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '0 16px', display: 'flex', alignItems: 'center', gap: '12px' },
+  searchInput: { flex: 1, background: 'transparent', border: 'none', padding: '14px 0', color: '#fff', outline: 'none' },
+  filterTabs: { display: 'flex', gap: '4px', background: '#0f172a', padding: '4px', borderRadius: '12px', border: '1px solid #1e293b' },
+  filterTab: { background: 'transparent', border: 'none', color: '#64748b', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', textTransform: 'capitalize' },
+  filterTabActive: { background: '#1e293b', color: '#fff' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' },
+  cardWrapper: { position: 'relative', background: '#0f172a', borderRadius: '24px', overflow: 'hidden' },
+  actionLayer: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '120px', display: 'flex', zIndex: 1 },
+  bgBtn: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' },
+  card: { background: '#0f172a', border: '1px solid #1e293b', padding: '24px', borderRadius: '24px', display: 'flex', alignItems: 'center', cursor: 'pointer', position: 'relative', zIndex: 2 },
+  cardContent: { flex: 1 },
+  cardHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'center' },
+  platePill: { fontFamily: 'monospace', background: '#1e293b', color: '#94a3b8', padding: '2px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold' },
+  healthBadge: { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: '900', padding: '4px 8px', borderRadius: '8px' },
+  vehicleTitle: { fontSize: '20px', fontWeight: '800', marginBottom: '16px', color: '#f1f5f9' },
+  metaRow: { display: 'flex', gap: '16px' },
+  metaItem: { fontSize: '13px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' },
+  centered: { height: '80vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
+  empty: { gridColumn: '1 / -1', padding: '80px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', color: '#475569' }
 };

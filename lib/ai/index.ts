@@ -1,72 +1,118 @@
-import type { Vehicle } from '@/app/types/fleet'
+import type { Vehicle, VehicleAI, RiskLevel } from '@/app/types/fleet'
 
-export interface VehicleAI extends Vehicle {
-  health_score: number
-  risk: 'low' | 'medium' | 'high'
-  predictedFailureDate: string | null
-  daysToFailure: number | null
-  estimatedRepairCost: number | null
+// --- Constants & Config ---
+
+const CONFIG = {
+  WEIGHTS: {
+    AGE: 2.5,          // Penalty per year
+    MILEAGE: 0.0002,   // Penalty per mile (100k miles = -20 points)
+    INACTIVE: 15,      // Penalty for non-operational units
+  },
+  PREMIUM_BRANDS: ['BMW', 'AUDI', 'MERCEDES', 'PORSCHE', 'TESLA', 'LAND ROVER'],
+  THRESHOLDS: {
+    LOW: 75,
+    MEDIUM: 45,
+  }
 }
 
-// Helper functions
-function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n))
+// --- Helper Functions ---
+
+/**
+ * Calculates vehicle age with a fallback to the average fleet age
+ */
+function getVehicleAge(year: number | null): number {
+  const currentYear = new Date().getFullYear();
+  if (!year || year > currentYear) return 6; // Fleet average fallback
+  return currentYear - year;
 }
 
-function yearsOld(year?: number | string | null): number {
-  if (year == null) return 6
-  const y = typeof year === 'string' ? parseInt(year, 10) : year
-  return isNaN(y) ? 6 : new Date().getFullYear() - y
-}
+/**
+ * Determines if a vehicle belongs to a luxury/premium segment
+ */
+const isPremiumBrand = (make: string | null) => 
+  make ? CONFIG.PREMIUM_BRANDS.includes(make.toUpperCase()) : false;
+
+// --- Core Logic ---
 
 function calculateHealthScore(vehicle: Vehicle): number {
-  let score = 100
-  const age = yearsOld(vehicle.year)
-  score -= Math.min(age * 2, 30)
+  let score = 100;
+  
+  // 1. Age Impact
+  const age = getVehicleAge(vehicle.year);
+  score -= age * CONFIG.WEIGHTS.AGE;
+
+  // 2. Mileage Impact (Exponential decay is more realistic than linear)
   if (vehicle.mileage) {
-    const mileagePenalty = Math.floor(vehicle.mileage / 5000)
-    score -= Math.min(mileagePenalty, 40)
+    const mileageImpact = vehicle.mileage * CONFIG.WEIGHTS.MILEAGE;
+    score -= Math.min(mileageImpact, 45); // Cap mileage penalty
   }
-  if (vehicle.status === 'inactive') score -= 20
-  else if (vehicle.status === 'warning') score -= 10
-  return clamp(score, 0, 100)
+
+  // 3. Status Impact
+  if (vehicle.status === 'in_service') score -= 5;
+  if (vehicle.status === 'parked') score -= 15;
+  if (vehicle.status === 'decommissioned') score = 0;
+
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-function determineRisk(score: number): 'low' | 'medium' | 'high' {
-  if (score >= 70) return 'low'
-  if (score >= 40) return 'medium'
-  return 'high'
+function determineRisk(score: number): RiskLevel {
+  if (score >= CONFIG.THRESHOLDS.LOW) return 'low';
+  if (score >= CONFIG.THRESHOLDS.MEDIUM) return 'medium';
+  return score > 15 ? 'high' : 'critical';
 }
 
-function estimateFailureDate(risk: 'low' | 'medium' | 'high'): string | null {
-  if (risk === 'low') return null
-  const days = risk === 'medium' ? 90 : 30
-  return new Date(Date.now() + days * 86400000).toISOString()
+function estimateRepairCost(risk: RiskLevel, make: string | null): number | null {
+  if (risk === 'low') return null;
+
+  const isPremium = isPremiumBrand(make);
+  const baseRate = isPremium ? 1800 : 750;
+
+  const multipliers: Record<RiskLevel, number> = {
+    low: 0,
+    medium: 1,
+    high: 2.5,
+    critical: 4.5
+  };
+
+  return baseRate * multipliers[risk];
 }
 
-function estimateRepairCost(risk: 'low' | 'medium' | 'high', vehicle: Vehicle): number | null {
-  if (risk === 'low') return null
-  const base = vehicle.make?.toUpperCase() === 'BMW' || vehicle.make?.toUpperCase() === 'AUDI' ? 2000 : 800
-  return risk === 'high' ? base * 2 : base
-}
+// --- Main Enrichment ---
 
 function enrichVehicle(vehicle: Vehicle): VehicleAI {
-  const health = calculateHealthScore(vehicle)
-  const risk = determineRisk(health)
-  const failureDate = estimateFailureDate(risk)
-  const days = failureDate ? Math.ceil((new Date(failureDate).getTime() - Date.now()) / 86400000) : null
-  const cost = estimateRepairCost(risk, vehicle)
+  const health = calculateHealthScore(vehicle);
+  const risk = determineRisk(health);
+  
+  // Predict failure date based on health trend
+  let predictedFailureDate: string | null = null;
+  let daysToFailure: number | null = null;
+
+  if (risk !== 'low') {
+    // Logic: Lower health = closer failure. 
+    // health 0 = today, health 75 = ~180 days
+    const days = Math.floor((health / 75) * 180);
+    daysToFailure = Math.max(7, days); // Minimum 1 week warning
+    predictedFailureDate = new Date(Date.now() + daysToFailure * 86400000).toISOString();
+  }
 
   return {
     ...vehicle,
     health_score: health,
     risk,
-    predictedFailureDate: failureDate,
-    daysToFailure: days,
-    estimatedRepairCost: cost,
-  }
+    predicted_failure_date: predictedFailureDate,
+    days_to_failure: daysToFailure,
+    estimated_repair_cost: estimateRepairCost(risk, vehicle.make),
+    ai_summary: `${vehicle.make} is performing at ${health}% health. Risk is ${risk.toUpperCase()}.`
+  };
 }
 
+/**
+ * Computes intelligence for the entire fleet
+ */
 export function computeFleetBrain(vehicles: Vehicle[]): VehicleAI[] {
-  return vehicles.map(vehicle => enrichVehicle(vehicle))
+  if (!vehicles.length) return [];
+  
+  return vehicles
+    .map(enrichVehicle)
+    .sort((a, b) => a.health_score - b.health_score); // Worst vehicles first
 }

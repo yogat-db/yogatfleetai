@@ -1,10 +1,11 @@
+// app/vehicles/[plate]/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
-import { Edit, ArrowLeft, Calendar, Wrench, Trash2 } from 'lucide-react';
+import { Edit, ArrowLeft, Calendar, Wrench, Trash2, Loader2 } from 'lucide-react';
 import theme from '@/app/theme';
 
 export default function VehicleDetailPage() {
@@ -15,6 +16,7 @@ export default function VehicleDetailPage() {
   const [vehicle, setVehicle] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!plate) return;
@@ -29,18 +31,7 @@ export default function VehicleDetailPage() {
         .select('*')
         .eq('license_plate', plate.toUpperCase())
         .single();
-const handleDelete = async () => {
-  if (!confirm('Are you sure you want to delete this vehicle?')) return;
 
-  try {
-    const res = await fetch(`/api/vehicles/${plate}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Delete failed');
-    router.push('/vehicles'); // redirect after successful delete
-  } catch (err) {
-    console.error('Delete error:', err);
-    alert('Failed to delete vehicle');
-  }
-};
       if (error) {
         if (error.code === 'PGRST116') {
           setError('Vehicle not found');
@@ -58,34 +49,40 @@ const handleDelete = async () => {
   };
 
   const handleDelete = async () => {
-  if (!confirm('Are you sure you want to delete this vehicle?')) return;
-  try {
-    const res = await fetch(`/api/vehicles/${plate}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Delete failed');
-    router.push('/vehicles');
-  } catch (err) {
-    console.error('Delete error:', err);
-    alert('Failed to delete vehicle');
-  }
-};
+    if (!confirm('Are you sure you want to delete this vehicle? This action cannot be undone.')) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/vehicles/${encodeURIComponent(plate)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Delete failed');
+      }
+      router.push('/vehicles');
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const displayValue = (value: any, fallback = '—') =>
+    value !== null && value !== undefined && value !== '' ? String(value) : fallback;
 
   if (loading) {
     return (
       <div style={styles.container}>
         <div className="spinner" />
         <p>Loading vehicle details...</p>
-        <style jsx>{`
+        <style>{`
           .spinner {
-            border: 3px solid ${theme.colors.border.medium};
-            border-top: 3px solid ${theme.colors.primary};
+            border: 2px solid ${theme.colors.border.medium};
+            border-top: 2px solid ${theme.colors.primary};
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
+            width: 32px;
+            height: 32px;
+            animation: spin 0.8s linear infinite;
           }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
+          @keyframes spin { to { transform: rotate(360deg); } }
         `}</style>
       </div>
     );
@@ -95,16 +92,13 @@ const handleDelete = async () => {
     return (
       <div style={styles.container}>
         <h2>Vehicle not found</h2>
-        <p>{error}</p>
-        <button onClick={handleDelete} className="...">
-  <Trash2 size={20} /> Delete
-</button>
+        <p>{error || 'No vehicle with that registration plate'}</p>
+        <button onClick={() => router.back()} style={styles.backButton}>
+          <ArrowLeft size={16} /> Go Back
+        </button>
       </div>
     );
   }
-
-  const displayValue = (value: any, fallback = '—') =>
-    value !== null && value !== undefined && value !== '' ? String(value) : fallback;
 
   return (
     <div style={styles.container}>
@@ -132,8 +126,9 @@ const handleDelete = async () => {
           <Link href={`/vehicles/edit/${vehicle.id}`} style={styles.editButton}>
             <Edit size={16} /> Edit Vehicle
           </Link>
-          <button onClick={handleDelete} style={styles.deleteButton}>
-            <Trash2 size={16} /> Delete Vehicle
+          <button onClick={handleDelete} disabled={deleting} style={styles.deleteButton}>
+            {deleting ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />}
+            {deleting ? ' Deleting...' : ' Delete Vehicle'}
           </button>
           <Link href={`/service-history/add?vehicleId=${vehicle.id}`} style={styles.serviceButton}>
             <Calendar size={16} /> Log Service
@@ -143,11 +138,15 @@ const handleDelete = async () => {
           </Link>
         </div>
       </div>
+
+      <style>{`
+        .spin { animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
 
-// Styles (same as before, unchanged)
 const styles: Record<string, React.CSSProperties> = {
   container: {
     padding: theme.spacing[10],
@@ -167,7 +166,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: theme.borderRadius.lg,
     padding: `${theme.spacing[1]} ${theme.spacing[4]}`,
     cursor: 'pointer',
-    transition: 'background 0.2s ease',
   },
   card: {
     background: theme.colors.background.card,
@@ -208,46 +206,42 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: 'none',
     fontSize: theme.fontSizes.sm,
     fontWeight: theme.fontWeights.medium,
-    transition: 'background 0.2s ease',
   },
   deleteButton: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: theme.spacing[2],
     background: 'transparent',
-    border: `1px solid ${theme.colors.error}`,
-    color: theme.colors.error,
+    border: `1px solid ${theme.colors.status.critical}`,
+    color: theme.colors.status.critical,
     padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
     borderRadius: theme.borderRadius.lg,
     fontSize: theme.fontSizes.sm,
     fontWeight: theme.fontWeights.medium,
     cursor: 'pointer',
-    transition: 'all 0.2s ease',
   },
   serviceButton: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: theme.spacing[2],
-    background: theme.colors.secondary,
+    background: theme.colors.status.info,
     color: '#fff',
     padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
     borderRadius: theme.borderRadius.lg,
     textDecoration: 'none',
     fontSize: theme.fontSizes.sm,
     fontWeight: theme.fontWeights.medium,
-    transition: 'background 0.2s ease',
   },
   diagnosticsButton: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: theme.spacing[2],
-    background: theme.colors.warning,
+    background: theme.colors.status.warning,
     color: '#020617',
     padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
     borderRadius: theme.borderRadius.lg,
     textDecoration: 'none',
     fontSize: theme.fontSizes.sm,
     fontWeight: theme.fontWeights.medium,
-    transition: 'background 0.2s ease',
   },
 };

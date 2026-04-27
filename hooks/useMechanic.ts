@@ -1,27 +1,32 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
+'use client';
 
+/**
+ * PATH CHECK: 
+ * If your RoleContext is in 'src/context', use '@/context/RoleContext'
+ * If it's in 'app/context', use '@/app/context/RoleContext'
+ * If you get an error, try the relative path: '../context/RoleContext'
+ */
+import { useUser } from '@/app/contexts/RoleContext';
+
+/**
+ * useMechanic Hook
+ * * UPGRADE: Instead of managing its own state and database calls, 
+ * this hook now consumes the global RoleProvider. 
+ */
 export function useMechanic() {
-  const [isMechanic, setIsMechanic] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const { 
+    isMechanic, 
+    mechanicId, 
+    loading, 
+    error,
+    refresh 
+  } = useUser();
 
-  useEffect(() => {
-    const check = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-      const { data: mechanic } = await supabase
-        .from('mechanics')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      setIsMechanic(!!mechanic);
-      setLoading(false);
-    };
-    check();
-  }, []);
-
-  return { isMechanic, loading };
+  return { 
+    isMechanic, // boolean: true if user is a mechanic
+    mechanicId, // string: the mechanic's UUID from the DB
+    loading,    // boolean: true if session is still loading
+    error,      // string: error message if DB/Auth failed
+    refresh     // function: call this to force a re-check of roles
+  };
 }

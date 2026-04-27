@@ -1,48 +1,65 @@
+// app/admin/jobs/actions.ts
 'use server';
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { stripe } from '@/lib/stripe/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+
+async function assertAdmin() {
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll: () => cookieStore.getAll(),
+        setAll: () => {},
+      },
+    }
+  );
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
+
+  const { data: profile } = await supabaseAdmin
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile || profile.role !== 'admin') {
+    redirect('/unauthorized');
+  }
+  return user;
+}
 
 export async function deleteJob(formData: FormData) {
-  const id = formData.get('id') as string;
-  if (!id) return;
+  await assertAdmin();
+  const jobId = formData.get('jobId') as string;
+  if (!jobId) throw new Error('Job ID required');
 
-  const { error } = await supabaseAdmin
-    .from('jobs')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
-    console.error('Delete failed:', error);
-    throw new Error('Failed to delete job');
-  }
+  // Delete associated applications first (if foreign key doesn't cascade)
+  await supabaseAdmin.from('applications').delete().eq('job_id', jobId);
+  
+  const { error } = await supabaseAdmin.from('jobs').delete().eq('id', jobId);
+  if (error) throw new Error(`Failed to delete job: ${error.message}`);
 
   revalidatePath('/admin/jobs');
   redirect('/admin/jobs');
 }
 
 export async function releasePayment(formData: FormData) {
+  await assertAdmin();
   const jobId = formData.get('jobId') as string;
-  const paymentIntentId = formData.get('paymentIntentId') as string;
-  if (!jobId || !paymentIntentId) return;
+  if (!jobId) throw new Error('Job ID required');
 
-  try {
-    // Capture the held payment
-    await stripe.paymentIntents.capture(paymentIntentId);
-
-    // Update job record
-    await supabaseAdmin
-      .from('jobs')
-      .update({ payment_status: 'released' })
-      .eq('id', jobId);
-  } catch (err) {
-    console.error('Release payment failed:', err);
-    throw new Error('Could not release payment');
-  }
+  const { error } = await supabaseAdmin
+    .from('jobs')
+    .update({ payment_status: 'released', status: 'completed' })
+    .eq('id', jobId);
+  if (error) throw new Error(`Failed to release payment: ${error.message}`);
 
   revalidatePath('/admin/jobs');
   redirect('/admin/jobs');
 }
-

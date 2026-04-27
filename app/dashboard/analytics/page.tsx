@@ -1,14 +1,18 @@
-// app/dashboard/analytics/page.tsx
 'use client';
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
+  Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area
 } from 'recharts';
-import { RefreshCw, Loader2 } from 'lucide-react';
+import { 
+  RefreshCw, Loader2, TrendingUp, ShieldCheck, 
+  Wallet, Car, Activity, ArrowUpRight, Filter
+} from 'lucide-react';
+
+// Core Logic & Theme
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
@@ -18,500 +22,363 @@ interface Vehicle {
   license_plate: string;
   make: string;
   model: string;
-  year: number;
   health_score: number | null;
 }
 
 interface Job {
   id: string;
   title: string;
-  budget: number | null;
   status: string;
   created_at: string;
-  user_id: string;
-  mechanic_id?: string;
 }
 
 interface Transaction {
   id: string;
-  job_id: string;
-  amount: number;        // in pence
-  platform_fee: number;  // in pence
+  amount: number; // pence
   status: string;
   created_at: string;
   mechanic_id: string;
-  user_id: string;
-}
-
-interface Mechanic {
-  id: string;
-  business_name: string | null;
 }
 
 type TimeRange = '3m' | '6m' | '1y' | 'all';
 
-// ==================== HELPER ====================
+// ==================== UTILS ====================
 const getThemeValue = (path: string, fallback: any): any => {
   const parts = path.split('.');
   let current: any = theme;
   for (const part of parts) {
     if (current && typeof current === 'object' && part in current) {
       current = current[part];
-    } else {
-      return fallback;
-    }
+    } else return fallback;
   }
   return current;
 };
 
-// ==================== MAIN COMPONENT ====================
+const formatCurrency = (pence: number) => 
+  new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(pence / 100);
+
+// ==================== COMPONENT ====================
 export default function OwnerAnalyticsPage() {
   const router = useRouter();
+  
+  // Data States
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [mechanics, setMechanics] = useState<Record<string, string>>({});
+  
+  // UI States
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>('6m');
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      setError(null);
       setRefreshing(true);
-
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push('/login');
-        return;
+      if (!user) return router.push('/login');
+
+      // Concurrent fetching for production performance
+      const [vRes, jRes, tRes] = await Promise.all([
+        supabase.from('vehicles').select('id, license_plate, make, model, health_score').eq('user_id', user.id),
+        supabase.from('jobs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
+      ]);
+
+      setVehicles(vRes.data || []);
+      setJobs(jRes.data || []);
+      setTransactions(tRes.data || []);
+
+      // Resolve Mechanic Names
+      const mechIds = [...new Set(tRes.data?.map(t => t.mechanic_id).filter(Boolean) || [])];
+      if (mechIds.length) {
+        const { data: mData } = await supabase.from('mechanics').select('id, business_name').in('id', mechIds);
+        const mMap: Record<string, string> = {};
+        mData?.forEach(m => { mMap[m.id] = m.business_name || 'Independent'; });
+        setMechanics(mMap);
       }
-      setCurrentUserId(user.id);
-
-      // Fetch vehicles
-      const { data: vehiclesData, error: vehiclesError } = await supabase
-        .from('vehicles')
-        .select('id, license_plate, make, model, year, health_score')
-        .eq('user_id', user.id);
-      if (vehiclesError) throw vehiclesError;
-      setVehicles(vehiclesData || []);
-
-      // Fetch jobs (direct Supabase query, no API dependency)
-      const { data: jobsData, error: jobsError } = await supabase
-        .from('jobs')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      if (jobsError) throw jobsError;
-      setJobs(jobsData || []);
-
-      // Fetch transactions
-      const { data: txData, error: txError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      if (txError) throw txError;
-      setTransactions(txData || []);
-
-      // Fetch mechanic names
-      const mechanicIds = [...new Set(txData?.map(t => t.mechanic_id).filter(Boolean) || [])];
-      if (mechanicIds.length > 0) {
-        const { data: mechs, error: mechError } = await supabase
-          .from('mechanics')
-          .select('id, business_name')
-          .in('id', mechanicIds);
-        if (!mechError && mechs) {
-          const mechMap: Record<string, string> = {};
-          mechs.forEach(m => { mechMap[m.id] = m.business_name || 'Unknown'; });
-          setMechanics(mechMap);
-        }
-      }
-    } catch (err: any) {
-      console.error('Analytics fetch error:', err);
-      setError(err.message || 'Failed to load analytics');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [router]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Filter transactions by time range and status
-  const filteredTransactions = useMemo(() => {
+  // Derived Analytics
+  const filteredTx = useMemo(() => {
     const completed = transactions.filter(t => t.status === 'completed');
     if (timeRange === 'all') return completed;
-    const now = new Date();
     const cutoff = new Date();
-    if (timeRange === '3m') cutoff.setMonth(now.getMonth() - 3);
-    if (timeRange === '6m') cutoff.setMonth(now.getMonth() - 6);
-    if (timeRange === '1y') cutoff.setFullYear(now.getFullYear() - 1);
+    const months = { '3m': 3, '6m': 6, '1y': 12 };
+    cutoff.setMonth(cutoff.getMonth() - months[timeRange as keyof typeof months]);
     return completed.filter(t => new Date(t.created_at) >= cutoff);
   }, [transactions, timeRange]);
 
-  // KPI calculations
-  const totalSpent = useMemo(() =>
-    filteredTransactions.reduce((sum, t) => sum + t.amount / 100, 0), [filteredTransactions]
-  );
-  const totalVehicles = vehicles.length;
-  const avgHealth = useMemo(() => {
-    const valid = vehicles.filter(v => v.health_score != null);
-    return valid.length ? valid.reduce((sum, v) => sum + (v.health_score || 0), 0) / valid.length : 0;
-  }, [vehicles]);
-  const completedJobs = jobs.filter(j => j.status === 'completed').length;
+  const kpis = useMemo(() => ({
+    totalSpent: filteredTx.reduce((sum, t) => sum + t.amount, 0),
+    avgHealth: Math.round(vehicles.reduce((a, b) => a + (b.health_score || 0), 0) / (vehicles.length || 1)),
+    activeAssets: vehicles.length,
+    efficiency: Math.round((jobs.filter(j => j.status === 'completed').length / (jobs.length || 1)) * 100)
+  }), [filteredTx, vehicles, jobs]);
 
-  // Spending by month
-  const spendingByMonth = useMemo(() => {
-    const monthMap: Record<string, number> = {};
-    filteredTransactions.forEach(t => {
-      const date = new Date(t.created_at);
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      monthMap[key] = (monthMap[key] || 0) + t.amount / 100;
+  const spendingChart = useMemo(() => {
+    const map: Record<string, number> = {};
+    filteredTx.forEach(t => {
+      const date = new Date(t.created_at).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+      map[date] = (map[date] || 0) + t.amount / 100;
     });
-    return Object.entries(monthMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, amount]) => ({ month, amount }));
-  }, [filteredTransactions]);
+    return Object.entries(map).map(([name, amount]) => ({ name, amount }));
+  }, [filteredTx]);
 
-  // Health distribution
-  const healthDistribution = useMemo(() => {
-    const healthy = vehicles.filter(v => (v.health_score || 0) >= 70).length;
-    const warning = vehicles.filter(v => (v.health_score || 0) >= 40 && (v.health_score || 0) < 70).length;
-    const critical = vehicles.filter(v => (v.health_score || 0) < 40).length;
-    const total = healthy + warning + critical;
-    if (total === 0) return [];
-    return [
-      { name: 'Healthy', value: healthy, color: getThemeValue('colors.status.healthy', '#22c55e') },
-      { name: 'Warning', value: warning, color: getThemeValue('colors.status.warning', '#f59e0b') },
-      { name: 'Critical', value: critical, color: getThemeValue('colors.status.critical', '#ef4444') },
-    ].filter(item => item.value > 0);
-  }, [vehicles]);
-
-  // Top mechanics by spending
-  const topMechanics = useMemo(() => {
-    const mechMap: Record<string, { name: string; total: number; count: number }> = {};
-    filteredTransactions.forEach(t => {
-      const mechId = t.mechanic_id;
-      if (!mechId) return;
-      if (!mechMap[mechId]) {
-        mechMap[mechId] = { name: mechanics[mechId] || 'Unknown', total: 0, count: 0 };
-      }
-      mechMap[mechId].total += t.amount / 100;
-      mechMap[mechId].count += 1;
-    });
-    return Object.values(mechMap)
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 5);
-  }, [filteredTransactions, mechanics]);
-
-  // Recent jobs
-  const recentJobs = useMemo(() => jobs.slice(0, 5), [jobs]);
-
-  const handleRefresh = () => {
-    setLoading(true);
-    fetchData();
-  };
-
-  if (loading && !refreshing) {
-    return (
-      <div style={styles.centered}>
-        <div className="spinner" />
-        <p>Loading analytics...</p>
-        <style jsx>{`
-          .spinner {
-            border: 3px solid ${getThemeValue('colors.border.medium', '#334155')};
-            border-top: 3px solid ${getThemeValue('colors.primary', '#22c55e')};
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </div>
-    );
-  }
-
-  if (error && !refreshing) {
-    return (
-      <div style={styles.centered}>
-        <p style={{ color: getThemeValue('colors.error', '#ef4444') }}>Error: {error}</p>
-        <button onClick={handleRefresh} style={styles.retryButton}>Retry</button>
-      </div>
-    );
-  }
+  if (loading && !refreshing) return <LoadingState />;
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>Fleet Owner Analytics</h1>
-        <button onClick={handleRefresh} disabled={refreshing} style={styles.refreshButton}>
-          {refreshing ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
-          {refreshing ? ' Refreshing...' : ' Refresh'}
-        </button>
-      </div>
+    <div style={styles.page}>
+      {/* HEADER SECTION */}
+      <header style={styles.header}>
+        <div>
+          <motion.h1 initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} style={styles.title}>
+            Financial Intelligence
+          </motion.h1>
+          <p style={styles.subtitle}>Fleet expenditure and health telemetry</p>
+        </div>
+        
+        <div style={styles.controls}>
+          <div style={styles.rangeBox}>
+            <Filter size={14} color="#64748b" />
+            <select value={timeRange} onChange={(e) => setTimeRange(e.target.value as TimeRange)} style={styles.select}>
+              <option value="3m">Last Quarter</option>
+              <option value="6m">Last 6 Months</option>
+              <option value="1y">Last Year</option>
+              <option value="all">Lifetime</option>
+            </select>
+          </div>
+          <button onClick={fetchData} disabled={refreshing} style={styles.refreshBtn}>
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </header>
 
-      {/* Time Range Selector */}
-      <div style={styles.rangeSelector}>
-        <label style={styles.rangeLabel}>Time Range:</label>
-        <select value={timeRange} onChange={(e) => setTimeRange(e.target.value as TimeRange)} style={styles.select}>
-          <option value="3m">Last 3 months</option>
-          <option value="6m">Last 6 months</option>
-          <option value="1y">Last year</option>
-          <option value="all">All time</option>
-        </select>
-      </div>
+      {/* KPI GRID */}
+      <section style={styles.kpiGrid}>
+        <KpiItem label="Total Capital Outlay" value={formatCurrency(kpis.totalSpent)} icon={<Wallet />} trend="+2.4%" color="#22c55e" />
+        <KpiItem label="Avg Fleet Health" value={`${kpis.avgHealth}%`} icon={<Activity />} trend="Stable" color="#3b82f6" />
+        <KpiItem label="Active Assets" value={kpis.activeAssets} icon={<Car />} trend="0" color="#8b5cf6" />
+        <KpiItem label="Service Efficiency" value={`${kpis.efficiency}%`} icon={<ShieldCheck />} trend="+12%" color="#f59e0b" />
+      </section>
 
-      {/* KPI Cards */}
-      <div style={styles.kpiGrid}>
-        <div style={styles.kpiCard}>
-          <span style={styles.kpiLabel}>Total Spent</span>
-          <span style={styles.kpiValue}>£{totalSpent.toFixed(2)}</span>
-        </div>
-        <div style={styles.kpiCard}>
-          <span style={styles.kpiLabel}>Vehicles</span>
-          <span style={styles.kpiValue}>{totalVehicles}</span>
-        </div>
-        <div style={styles.kpiCard}>
-          <span style={styles.kpiLabel}>Avg. Health</span>
-          <span style={styles.kpiValue}>{avgHealth.toFixed(1)}%</span>
-        </div>
-        <div style={styles.kpiCard}>
-          <span style={styles.kpiLabel}>Completed Jobs</span>
-          <span style={styles.kpiValue}>{completedJobs}</span>
-        </div>
-      </div>
-
-      {/* Charts Row */}
-      <div style={styles.chartsRow}>
-        <div style={styles.chartCard}>
-          <h3 style={styles.chartTitle}>Spending Over Time</h3>
-          {spendingByMonth.length === 0 ? (
-            <p style={styles.emptyText}>No spending data for this period</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={spendingByMonth}>
-                <CartesianGrid strokeDasharray="3 3" stroke={getThemeValue('colors.border.medium', '#334155')} />
-                <XAxis dataKey="month" stroke={getThemeValue('colors.text.secondary', '#94a3b8')} />
-                <YAxis stroke={getThemeValue('colors.text.secondary', '#94a3b8')} />
-                <Tooltip contentStyle={{ background: getThemeValue('colors.background.card', '#0f172a'), border: 'none' }} />
-                <Legend />
-                <Line type="monotone" dataKey="amount" stroke={getThemeValue('colors.primary', '#22c55e')} name="Amount (£)" />
-              </LineChart>
+      {/* MAIN ANALYTICS GRID */}
+      <div style={styles.bentoGrid}>
+        {/* SPENDING AREA CHART */}
+        <motion.div whileHover={{ y: -5 }} style={{ ...styles.card, gridColumn: 'span 2' }}>
+          <div style={styles.cardHeader}>
+            <TrendingUp size={18} color="#22c55e" />
+            <h3 style={styles.cardTitle}>Expenditure Velocity</h3>
+          </div>
+          <div style={{ height: 300 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={spendingChart}>
+                <defs>
+                  <linearGradient id="colorAmt" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `£${val}`} />
+                <Tooltip 
+                  contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                  itemStyle={{ color: '#22c55e', fontWeight: 'bold' }}
+                />
+                <Area type="monotone" dataKey="amount" stroke="#22c55e" fillOpacity={1} fill="url(#colorAmt)" strokeWidth={3} />
+              </AreaChart>
             </ResponsiveContainer>
-          )}
-        </div>
+          </div>
+        </motion.div>
 
-        <div style={styles.chartCard}>
-          <h3 style={styles.chartTitle}>Vehicle Health</h3>
-          {healthDistribution.length === 0 ? (
-            <p style={styles.emptyText}>No vehicle data</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={healthDistribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                  label={({ name, value, percent }) => `${name} ${(percent! * 100).toFixed(0)}%`}
-                >
-                  {healthDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
-
-      {/* Bottom Row */}
-      <div style={styles.chartsRow}>
-        <div style={styles.chartCard}>
-          <h3 style={styles.chartTitle}>Top Mechanics by Spending</h3>
-          {topMechanics.length === 0 ? (
-            <p style={styles.emptyText}>No mechanic data</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={topMechanics} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke={getThemeValue('colors.border.medium', '#334155')} />
-                <XAxis type="number" stroke={getThemeValue('colors.text.secondary', '#94a3b8')} />
-                <YAxis type="category" dataKey="name" stroke={getThemeValue('colors.text.secondary', '#94a3b8')} width={150} />
-                <Tooltip contentStyle={{ background: getThemeValue('colors.background.card', '#0f172a'), border: 'none' }} />
-                <Bar dataKey="total" fill={getThemeValue('colors.primary', '#22c55e')} name="Total Spent (£)" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div style={styles.chartCard}>
-          <h3 style={styles.chartTitle}>Recent Jobs</h3>
-          {recentJobs.length === 0 ? (
-            <p style={styles.emptyText}>No recent jobs</p>
-          ) : (
-            <div style={styles.jobList}>
-              {recentJobs.map(job => (
-                <div key={job.id} style={styles.jobItem}>
-                  <span style={styles.jobTitle}>{job.title}</span>
-                  <span style={styles.jobStatus}>{job.status}</span>
-                  <span style={styles.jobDate}>{new Date(job.created_at).toLocaleDateString()}</span>
+        {/* RECENT JOBS MINI-LOG */}
+        <div style={styles.card}>
+          <div style={styles.cardHeader}>
+            <ShieldCheck size={18} color="#3b82f6" />
+            <h3 style={styles.cardTitle}>Recent Operations</h3>
+          </div>
+          <div style={styles.jobList}>
+            {jobs.slice(0, 5).map(job => (
+              <div key={job.id} style={styles.jobItem}>
+                <div>
+                  <div style={styles.jobName}>{job.title}</div>
+                  <div style={styles.jobDate}>{new Date(job.created_at).toLocaleDateString()}</div>
                 </div>
-              ))}
-            </div>
-          )}
+                <span style={{ ...styles.statusBadge, backgroundColor: job.status === 'completed' ? '#22c55e20' : '#f59e0b20', color: job.status === 'completed' ? '#22c55e' : '#f59e0b' }}>
+                  {job.status}
+                </span>
+              </div>
+            ))}
+          </div>
+          <button style={styles.ghostBtn} onClick={() => router.push('/dashboard/jobs')}>
+            View All Logged Operations <ArrowUpRight size={14} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== SUB-COMPONENTS ====================
+
+function KpiItem({ label, value, icon, trend, color }: any) {
+  return (
+    <motion.div whileHover={{ scale: 1.02 }} style={styles.kpiCard}>
+      <div style={{ ...styles.iconCircle, backgroundColor: `${color}15`, color }}>{icon}</div>
+      <div style={styles.kpiContent}>
+        <span style={styles.kpiLabel}>{label}</span>
+        <div style={styles.kpiValueRow}>
+          <span style={styles.kpiValue}>{value}</span>
+          <span style={{ ...styles.trend, color: trend.includes('+') ? '#22c55e' : '#64748b' }}>{trend}</span>
         </div>
       </div>
     </motion.div>
   );
 }
 
+function LoadingState() {
+  return (
+    <div style={styles.center}>
+      <Loader2 size={40} color="#22c55e" className="animate-spin" />
+      <p style={styles.loadingText}>Synthesizing Analytics...</p>
+    </div>
+  );
+}
+
 // ==================== STYLES ====================
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    padding: getThemeValue('spacing.10', '40px'),
-    background: getThemeValue('colors.background.main', '#020617'),
+    padding: '40px',
+    background: '#020617',
     minHeight: '100vh',
-    color: getThemeValue('colors.text.primary', '#f1f5f9'),
-    fontFamily: getThemeValue('fontFamilies.sans', 'Inter, sans-serif'),
+    color: '#f1f5f9',
+    fontFamily: 'Inter, sans-serif'
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: getThemeValue('spacing.8', '32px'),
-    flexWrap: 'wrap',
-    gap: getThemeValue('spacing.4', '16px'),
+    marginBottom: '40px'
   },
   title: {
-    fontSize: getThemeValue('fontSizes.3xl', '32px'),
-    fontWeight: getThemeValue('fontWeights.bold', '700'),
-    background: getThemeValue('gradients.title', 'linear-gradient(135deg, #94a3b8, #f1f5f9)'),
+    fontSize: '32px',
+    fontWeight: '800',
+    letterSpacing: '-1px',
+    background: 'linear-gradient(to right, #fff, #94a3b8)',
     WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
+    WebkitTextFillColor: 'transparent'
   },
-  refreshButton: {
-    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
-    background: getThemeValue('colors.background.card', '#0f172a'),
-    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
-    borderRadius: getThemeValue('borderRadius.lg', '12px'),
-    color: getThemeValue('colors.text.primary', '#f1f5f9'),
+  subtitle: { color: '#64748b', fontSize: '14px' },
+  controls: { display: 'flex', gap: '12px' },
+  rangeBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: '#0f172a',
+    border: '1px solid #1e293b',
+    borderRadius: '12px',
+    padding: '0 12px'
+  },
+  select: {
+    background: 'transparent',
+    border: 'none',
+    color: '#f1f5f9',
+    fontSize: '13px',
+    padding: '10px 0',
+    cursor: 'pointer',
+    outline: 'none'
+  },
+  refreshBtn: {
+    background: '#0f172a',
+    border: '1px solid #1e293b',
+    color: '#f1f5f9',
+    borderRadius: '12px',
+    width: '42px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
-    gap: getThemeValue('spacing.2', '8px'),
-  },
-  rangeSelector: {
-    marginBottom: getThemeValue('spacing.6', '24px'),
-    display: 'flex',
-    alignItems: 'center',
-    gap: getThemeValue('spacing.3', '12px'),
-  },
-  rangeLabel: {
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
-    color: getThemeValue('colors.text.secondary', '#94a3b8'),
-  },
-  select: {
-    background: getThemeValue('colors.background.card', '#0f172a'),
-    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
-    borderRadius: getThemeValue('borderRadius.lg', '12px'),
-    padding: getThemeValue('spacing.2', '8px'),
-    color: getThemeValue('colors.text.primary', '#f1f5f9'),
+    justifyContent: 'center'
   },
   kpiGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: getThemeValue('spacing.5', '20px'),
-    marginBottom: getThemeValue('spacing.8', '32px'),
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '24px',
+    marginBottom: '32px'
   },
   kpiCard: {
-    background: getThemeValue('colors.background.card', '#0f172a'),
-    padding: getThemeValue('spacing.5', '20px'),
-    borderRadius: getThemeValue('borderRadius.xl', '16px'),
-    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
-  },
-  kpiLabel: {
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
-    color: getThemeValue('colors.text.secondary', '#94a3b8'),
-    display: 'block',
-  },
-  kpiValue: {
-    fontSize: getThemeValue('fontSizes.2xl', '28px'),
-    fontWeight: getThemeValue('fontWeights.bold', '700'),
-    marginTop: getThemeValue('spacing.2', '8px'),
-  },
-  chartsRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
-    gap: getThemeValue('spacing.5', '20px'),
-    marginBottom: getThemeValue('spacing.5', '20px'),
-  },
-  chartCard: {
-    background: getThemeValue('colors.background.card', '#0f172a'),
-    padding: getThemeValue('spacing.5', '20px'),
-    borderRadius: getThemeValue('borderRadius.xl', '16px'),
-    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
-  },
-  chartTitle: {
-    fontSize: getThemeValue('fontSizes.lg', '18px'),
-    fontWeight: getThemeValue('fontWeights.semibold', '600'),
-    marginBottom: getThemeValue('spacing.4', '16px'),
-  },
-  emptyText: {
-    color: getThemeValue('colors.text.muted', '#64748b'),
-    textAlign: 'center',
-    padding: getThemeValue('spacing.5', '20px'),
-  },
-  jobList: {
+    background: '#0f172a',
+    borderRadius: '20px',
+    padding: '24px',
+    border: '1px solid #1e293b',
     display: 'flex',
-    flexDirection: 'column',
-    gap: getThemeValue('spacing.3', '12px'),
+    alignItems: 'center',
+    gap: '16px'
   },
+  iconCircle: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '14px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  kpiLabel: { color: '#64748b', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  kpiValueRow: { display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '4px' },
+  kpiValue: { fontSize: '24px', fontWeight: '800' },
+  trend: { fontSize: '11px', fontWeight: 'bold' },
+  bentoGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '24px'
+  },
+  card: {
+    background: '#0f172a',
+    borderRadius: '24px',
+    padding: '28px',
+    border: '1px solid #1e293b'
+  },
+  cardHeader: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' },
+  cardTitle: { fontSize: '16px', fontWeight: '700' },
+  jobList: { display: 'flex', flexDirection: 'column', gap: '16px' },
   jobItem: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: getThemeValue('spacing.2', '8px'),
-    borderBottom: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
+    paddingBottom: '12px',
+    borderBottom: '1px solid #1e293b'
   },
-  jobTitle: {
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
-    fontWeight: getThemeValue('fontWeights.medium', '500'),
+  jobName: { fontSize: '14px', fontWeight: '600' },
+  jobDate: { fontSize: '12px', color: '#64748b' },
+  statusBadge: {
+    fontSize: '10px',
+    fontWeight: '800',
+    padding: '4px 8px',
+    borderRadius: '6px',
+    textTransform: 'uppercase'
   },
-  jobStatus: {
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
-    color: getThemeValue('colors.primary', '#22c55e'),
-    textTransform: 'capitalize' as const,
-  },
-  jobDate: {
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
-    color: getThemeValue('colors.text.muted', '#64748b'),
-  },
-  centered: {
-    minHeight: '100vh',
+  ghostBtn: {
+    width: '100%',
+    marginTop: '20px',
+    padding: '12px',
+    background: 'transparent',
+    border: '1px solid #1e293b',
+    borderRadius: '12px',
+    color: '#64748b',
+    fontSize: '12px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
     display: 'flex',
-    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    color: getThemeValue('colors.text.secondary', '#94a3b8'),
+    gap: '8px'
   },
-  retryButton: {
-    marginTop: getThemeValue('spacing.4', '16px'),
-    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
-    background: getThemeValue('colors.primary', '#22c55e'),
-    border: 'none',
-    borderRadius: getThemeValue('borderRadius.lg', '12px'),
-    color: getThemeValue('colors.background.main', '#020617'),
-    cursor: 'pointer',
-  },
+  center: { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
+  loadingText: { marginTop: '16px', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px', color: '#64748b' }
 };

@@ -1,46 +1,48 @@
 {
   "compilerOptions": {
-    // Enable strict type checking (recommended)
-    "strict": true,
-    // Allow implicit any (temporarily for older code)
-    "noImplicitAny": false,
-    // Skip type checking of declaration files (speeds up build)
-    "skipLibCheck": true,
-    // Use the latest ECMAScript features
+    /* Base Options */
     "target": "ES2022",
     "lib": [
-      "DOM",
-      "DOM.Iterable",
-      "ES2022"
+      "dom",
+      "dom.iterable",
+      "esnext"
     ],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
     "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true,
     "jsx": "react-jsx",
     "incremental": true,
-    "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    // Path aliases (matching your project structure)
+    /* Strictness - No "Any" allowed for AI calculations */
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    /* Path Aliases - Fixes your @/lib import errors */
     "baseUrl": ".",
     "paths": {
       "@/*": [
         "./*"
       ]
     },
-    // Include Next.js types
+    /* Plugins & Types */
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "types": [
       "node",
       "react",
       "react-dom",
       "next"
-    ],
-    "plugins": [
-      {
-        "name": "next"
-      }
     ]
   },
   "include": [

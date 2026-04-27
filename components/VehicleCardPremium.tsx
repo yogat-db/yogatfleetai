@@ -1,18 +1,20 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import Image from 'next/image'
-import { motion, AnimatePresence } from 'framer-motion'
-import type { Vehicle } from '@/app/types/fleet'
+import { useState } from 'react';
+import Image from 'next/image';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Fuel, Gauge, Calendar, Trash2, Edit3, ShieldCheck } from 'lucide-react';
+// FIX: Pointing to the specific vehicle type we verified
+import type { Vehicle } from '@/app/types/vehicle';
 
 interface VehicleCardPremiumProps {
-  vehicle?: Vehicle | null
-  onClick?: () => void
-  onEdit?: () => void
-  onDelete?: () => void
+  vehicle: Vehicle; // Removed optional '?' to ensure the map function has data
+  onClick?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
-const FALLBACK_IMAGE = 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'600\' height=\'400\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' strokeWidth=\'1\' strokeLinecap=\'round\' strokeLinejoin=\'round\'%3E%3Crect x=\'2\' y=\'6\' width=\'20\' height=\'12\' rx=\'2\'/%3E%3Ccircle cx=\'7\' cy=\'16\' r=\'2\'/%3E%3Ccircle cx=\'17\' cy=\'16\' r=\'2\'/%3E%3Cpath d=\'M9 10h6\'/%3E%3C/svg%3E'
+const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=600';
 
 export default function VehicleCardPremium({
   vehicle,
@@ -20,223 +22,143 @@ export default function VehicleCardPremium({
   onEdit,
   onDelete,
 }: VehicleCardPremiumProps) {
-  if (!vehicle) return null
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
-  const [expanded, setExpanded] = useState(false)
-  const [imgError, setImgError] = useState(false)
+  // Fallback for missing vehicle to prevent "Cannot read property of undefined"
+  if (!vehicle) return null;
 
-  const healthScore = vehicle.health_score ?? 0
-  const getHealthColor = () => {
-    if (healthScore >= 70) return '#22c55e'
-    if (healthScore >= 40) return '#f59e0b'
-    return '#ef4444'
-  }
+  // Use values from our type or sensible defaults
+  const healthScore = vehicle.health_score ?? 85; // Defaulting to 85 if not in DB yet
+  
+  const getHealthStatus = () => {
+    if (healthScore >= 70) return { color: 'text-emerald-400', bg: 'bg-emerald-500/20', bar: 'bg-emerald-500', label: 'Healthy' };
+    if (healthScore >= 40) return { color: 'text-amber-400', bg: 'bg-amber-500/20', bar: 'bg-amber-500', label: 'Warning' };
+    return { color: 'text-rose-400', bg: 'bg-rose-500/20', bar: 'bg-rose-500', label: 'Critical' };
+  };
 
-  const imageUrl = !imgError && vehicle.image_url ? vehicle.image_url : FALLBACK_IMAGE
+  const status = getHealthStatus();
+  const imageUrl = !imgError && vehicle.image_url ? vehicle.image_url : FALLBACK_IMAGE;
 
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      whileHover={{ scale: 1.02 }}
-      style={styles.card}
-      onClick={() => {
-        setExpanded(!expanded)
-        onClick?.()
-      }}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -4 }}
+      onClick={() => setIsExpanded(!isExpanded)}
+      className="group relative flex flex-col overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/50 backdrop-blur-xl transition-all hover:border-slate-700 hover:shadow-2xl hover:shadow-emerald-500/10 cursor-pointer"
     >
-      <div style={styles.imageContainer}>
+      {/* --- Header Image --- */}
+      <div className="relative h-48 w-full overflow-hidden">
         <Image
           src={imageUrl}
-          alt={`${vehicle.make || 'Unknown'} ${vehicle.model || ''}`}
+          alt={`${vehicle.make} ${vehicle.model}`}
           fill
-          style={{ objectFit: 'cover' }}
-          sizes="(max-width: 768px) 100vw, 300px"
+          sizes="(max-width: 768px) 100vw, 33vw"
+          className="object-cover transition-transform duration-500 group-hover:scale-110"
           onError={() => setImgError(true)}
         />
-        <div style={styles.badgeContainer}>
-          <div style={{ ...styles.healthBadge, color: getHealthColor() }}>
-            {healthScore}%
-          </div>
-          {onDelete && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onDelete()
-              }}
-              style={styles.deleteButton}
-              title="Delete vehicle"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      </div>
-      <div style={styles.content}>
-        <h3 style={styles.title}>
-          {vehicle.make || 'Unknown'} {vehicle.model || ''}
-        </h3>
-        <p style={styles.plate}>{vehicle.license_plate || 'No plate'}</p>
-        <div style={styles.details}>
-          <span style={styles.detailText}>Year: {vehicle.year || '—'}</span>
-          <span style={styles.detailText}>
-            Mileage: {vehicle.mileage?.toLocaleString() ?? '—'} mi
-          </span>
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-transparent" />
+        
+        {/* Health Floating Badge */}
+        <div className={`absolute left-4 top-4 flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold backdrop-blur-md ${status.bg} ${status.color} border border-white/10`}>
+          <ShieldCheck size={14} />
+          {healthScore}%
         </div>
 
+        {/* Quick Action Overlay */}
+        <div className="absolute right-4 top-4 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+           {onEdit && (
+            <button 
+              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              className="rounded-full bg-slate-900/80 p-2 text-slate-300 hover:bg-emerald-500 hover:text-white transition-colors"
+            >
+              <Edit3 size={16} />
+            </button>
+           )}
+        </div>
+      </div>
+
+      {/* --- Content --- */}
+      <div className="p-5">
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h3 className="text-xl font-bold tracking-tight text-white">
+              {vehicle.make} <span className="text-slate-400 font-medium">{vehicle.model}</span>
+            </h3>
+            <p className="font-mono text-sm font-bold tracking-widest text-emerald-500 uppercase">
+              {vehicle.license_plate}
+            </p>
+          </div>
+          <div className="text-right text-xs text-slate-500">
+             <p>Status</p>
+             <p className={`font-bold ${status.color}`}>{status.label}</p>
+          </div>
+        </div>
+
+        {/* --- Specs Grid --- */}
+        <div className="grid grid-cols-3 gap-4 border-t border-slate-800/50 pt-4">
+          <div className="flex flex-col items-center gap-1">
+            <Calendar size={14} className="text-slate-500" />
+            <span className="text-xs font-bold text-slate-300">{vehicle.year || 'N/A'}</span>
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <Gauge size={14} className="text-slate-500" />
+            <span className="text-xs font-bold text-slate-300">
+              {vehicle.mileage ? vehicle.mileage.toLocaleString() : '0'}
+            </span>
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <Fuel size={14} className="text-slate-500" />
+            <span className="text-xs font-bold text-slate-300 truncate w-full text-center">
+              {vehicle.fuel_type || 'Gas'}
+            </span>
+          </div>
+        </div>
+
+        {/* --- Health Bar --- */}
+        <div className="mt-6">
+          <div className="mb-1.5 flex justify-between text-[10px] font-bold uppercase tracking-wider text-slate-500">
+            <span>Overall Health</span>
+            <span className={status.color}>{healthScore}%</span>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-slate-800">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${healthScore}%` }}
+              className={`h-full rounded-full ${status.bar}`}
+            />
+          </div>
+        </div>
+
+        {/* --- Expanded Actions --- */}
         <AnimatePresence>
-          {expanded && (
+          {isExpanded && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              style={styles.expandedContent}
+              className="mt-4 flex gap-2 border-t border-slate-800 pt-4"
             >
-              <p style={styles.expandedText}>
-                <span style={styles.label}>Status:</span> {vehicle.status || 'Active'}
-              </p>
-              <p style={styles.expandedText}>
-                <span style={styles.label}>Health Score:</span>{' '}
-                <span style={{ color: getHealthColor() }}>{healthScore}%</span>
-              </p>
-              {(onEdit || onDelete) && (
-                <div style={styles.buttonGroup}>
-                  {onEdit && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onEdit()
-                      }}
-                      style={styles.editButton}
-                    >
-                      Edit
-                    </button>
-                  )}
-                  {onDelete && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onDelete()
-                      }}
-                      style={styles.deleteButtonSmall}
-                    >
-                      Delete
-                    </button>
-                  )}
-                </div>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onClick?.(); }}
+                className="flex-1 rounded-xl bg-emerald-600 py-2 text-sm font-bold text-white hover:bg-emerald-500 transition-colors"
+              >
+                View History
+              </button>
+              {onDelete && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                  className="rounded-xl bg-rose-500/10 px-4 py-2 text-rose-500 hover:bg-rose-500 hover:text-white transition-all"
+                >
+                  <Trash2 size={18} />
+                </button>
               )}
             </motion.div>
           )}
         </AnimatePresence>
       </div>
     </motion.div>
-  )
-}
-
-const styles: { [key: string]: React.CSSProperties } = {
-  card: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '12px',
-    overflow: 'hidden',
-    cursor: 'pointer',
-    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
-  },
-  imageContainer: {
-    position: 'relative',
-    height: '180px',
-    width: '100%',
-    background: '#1e293b',
-  },
-  badgeContainer: {
-    position: 'absolute',
-    top: '12px',
-    right: '12px',
-    display: 'flex',
-    gap: '8px',
-  },
-  healthBadge: {
-    background: 'rgba(0,0,0,0.6)',
-    borderRadius: '9999px',
-    padding: '4px 12px',
-    fontSize: '14px',
-    fontWeight: 'bold',
-  },
-  deleteButton: {
-    background: '#ef4444cc',
-    borderRadius: '9999px',
-    width: '32px',
-    height: '32px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: 'white',
-    fontWeight: 'bold',
-    border: 'none',
-    cursor: 'pointer',
-  },
-  content: {
-    padding: '16px',
-  },
-  title: {
-    fontSize: '18px',
-    fontWeight: 600,
-    color: '#ffffff',
-    margin: '0 0 4px 0',
-  },
-  plate: {
-    fontSize: '14px',
-    color: '#94a3b8',
-    margin: '0 0 8px 0',
-  },
-  details: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: '8px',
-  },
-  detailText: {
-    fontSize: '12px',
-    color: '#64748b',
-  },
-  expandedContent: {
-    marginTop: '16px',
-    paddingTop: '16px',
-    borderTop: '1px solid #1e293b',
-  },
-  expandedText: {
-    fontSize: '14px',
-    color: '#cbd5e1',
-    margin: '0 0 4px 0',
-  },
-  label: {
-    fontWeight: 500,
-    color: '#94a3b8',
-  },
-  buttonGroup: {
-    display: 'flex',
-    gap: '8px',
-    marginTop: '12px',
-  },
-  editButton: {
-    background: '#2563eb',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '4px 12px',
-    fontSize: '12px',
-    fontWeight: 500,
-    cursor: 'pointer',
-  },
-  deleteButtonSmall: {
-    background: '#dc2626',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '4px 12px',
-    fontSize: '12px',
-    fontWeight: 500,
-    cursor: 'pointer',
-  },
+  );
 }

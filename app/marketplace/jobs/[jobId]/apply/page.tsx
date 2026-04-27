@@ -1,302 +1,369 @@
+// app/marketplace/jobs/[jobId]/apply/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowLeft, Loader2, AlertCircle, CheckCircle, Gavel, Info } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-export default function ApplyPage() {
+export default function ApplyJobPage() {
   const params = useParams();
   const router = useRouter();
-  const jobId = params.jobId as string;
+  const jobId = params?.jobId as string;
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [bid, setBid] = useState('');
-  const [message, setMessage] = useState('');
-  const [mechanicId, setMechanicId] = useState<string | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [alreadyApplied, setAlreadyApplied] = useState(false);
-  const [jobTitle, setJobTitle] = useState('');
+  const [success, setSuccess] = useState(false);
+  const [bidAmount, setBidAmount] = useState('');
+  const [proposal, setProposal] = useState('');
+  const [mechanicVerified, setMechanicVerified] = useState<boolean | null>(null);
+  const [checkingMechanic, setCheckingMechanic] = useState(true);
 
+  // Check mechanic status on mount
   useEffect(() => {
-    checkAuthAndJob();
-  }, [jobId]);
+    async function checkMechanic() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          router.push('/login');
+          return;
+        }
 
-  const checkAuthAndJob = async () => {
-    // 1. Get current user
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      router.push('/login');
-      return;
+        const { data: mechanic } = await supabase
+          .from('mechanics')
+          .select('id, verified')
+          .eq('user_id', user.id)
+          .single();
+
+        if (!mechanic) {
+          setMechanicVerified(false);
+          setError('No mechanic profile found. Please complete registration first.');
+        } else if (!mechanic.verified) {
+          setMechanicVerified(false);
+          setError('Your mechanic account is pending verification. Please contact support.');
+        } else {
+          setMechanicVerified(true);
+        }
+      } catch (err) {
+        setMechanicVerified(false);
+        setError('Unable to verify mechanic status. Please try again.');
+      } finally {
+        setCheckingMechanic(false);
+      }
     }
+    checkMechanic();
+  }, [router]);
 
-    // 2. Fetch mechanic profile
-    const { data: mechanic, error: mechError } = await supabase
-      .from('mechanics')
-      .select('id')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (mechError || !mechanic) {
-      setError('You need to register as a mechanic before applying.');
-      setAuthChecked(true);
-      return;
+  const validateForm = (): boolean => {
+    const bid = parseFloat(bidAmount);
+    if (isNaN(bid) || bid <= 0) {
+      setError('Please enter a valid bid amount greater than 0');
+      return false;
     }
-    setMechanicId(mechanic.id);
-
-    // 3. Get job title for display
-    const { data: job } = await supabase
-      .from('jobs')
-      .select('title')
-      .eq('id', jobId)
-      .single();
-    if (job) setJobTitle(job.title);
-
-    // 4. Check if already applied
-    const { data: existing } = await supabase
-      .from('applications')
-      .select('id')
-      .eq('job_id', jobId)
-      .eq('mechanic_id', mechanic.id)
-      .maybeSingle();
-
-    if (existing) {
-      setAlreadyApplied(true);
-      setError('You have already applied to this job.');
+    if (!proposal.trim() || proposal.trim().length < 10) {
+      setError('Proposal must be at least 10 characters');
+      return false;
     }
-
-    setAuthChecked(true);
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-
-    if (alreadyApplied) {
-      setError('You have already applied to this job.');
+    if (!validateForm()) return;
+    if (!mechanicVerified) {
+      setError('Mechanic profile is required to submit a bid');
       return;
-    }
-
-    if (!mechanicId) {
-      setError('Mechanic profile not found.');
-      return;
-    }
-
-    // Validate bid if provided
-    let bidNumber: number | null = null;
-    if (bid && bid.trim() !== '') {
-      bidNumber = parseInt(bid, 10);
-      if (isNaN(bidNumber) || bidNumber <= 0) {
-        setError('Bid must be a positive number.');
-        return;
-      }
     }
 
     setLoading(true);
+    setError(null);
 
     try {
-      const { error: insertError } = await supabase.from('applications').insert({
-        job_id: jobId,
-        mechanic_id: mechanicId,
-        bid_amount: bidNumber,
-        message: message.trim() || null,
-        status: 'pending',
+      const response = await fetch(`/api/jobs/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bid_amount: parseFloat(bidAmount),
+          message: proposal.trim(),
+        }),
       });
 
-      if (insertError) throw insertError;
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Failed to submit application');
 
-      router.push(`/marketplace/jobs/${jobId}`);
+      setSuccess(true);
+      setTimeout(() => router.push(`/marketplace/jobs/${jobId}`), 2000);
     } catch (err: any) {
-      setError(err.message || 'Failed to submit application.');
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!authChecked) {
+  // Show loading skeleton while checking mechanic
+  if (checkingMechanic) {
     return (
-      <div style={styles.centered}>
-        <div className="spinner" />
-        <p>Loading...</p>
-        <style jsx>{`
-          .spinner {
-            border: 3px solid ${theme.colors.border.medium};
-            border-top: 3px solid ${theme.colors.primary};
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </div>
-    );
-  }
-
-  if (alreadyApplied) {
-    return (
-      <div style={styles.page}>
-        <button onClick={() => router.back()} style={styles.backButton}>
-          ← Back
-        </button>
-        <div style={styles.errorBox}>
-          You have already applied to this job. You cannot submit another application.
-        </div>
+      <div style={styles.loadingContainer}>
+        <Loader2 className="animate-spin" size={40} color={theme.colors.primary} />
+        <p style={styles.loadingText}>Verifying mechanic status...</p>
       </div>
     );
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      style={styles.page}
-    >
-      <button onClick={() => router.back()} style={styles.backButton}>
-        ← Back to Job
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.container}>
+      <button onClick={() => router.back()} style={styles.backBtn}>
+        <ArrowLeft size={16} /> Back
       </button>
-      <h1 style={styles.title}>Apply to Job: {jobTitle || 'Repair Job'}</h1>
 
-      {error && <div style={styles.errorBox}>{error}</div>}
+      <header style={styles.header}>
+        <h1 style={styles.title}>Submit Bid</h1>
+        <p style={styles.subtitle}>Job ID: {jobId?.slice(0, 8)}</p>
+      </header>
 
-      <form onSubmit={handleSubmit} style={styles.form}>
-        <div style={styles.field}>
-          <label style={styles.label}>Bid (£)</label>
-          <input
-            type="number"
-            value={bid}
-            onChange={(e) => setBid(e.target.value)}
-            style={styles.input}
-            placeholder="Optional"
-            step="1"
-            min="1"
-          />
-          <p style={styles.hint}>Leave empty if you prefer to negotiate.</p>
-        </div>
+      <div style={styles.card}>
+        {!mechanicVerified && !success && (
+          <div style={styles.warningBox}>
+            <Info size={16} />
+            <span>You need a verified mechanic profile to submit bids.</span>
+          </div>
+        )}
 
-        <div style={styles.field}>
-          <label style={styles.label}>Message</label>
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={4}
-            style={styles.textarea}
-            placeholder="Introduce yourself and explain why you're a good fit..."
-          />
-        </div>
+        <form onSubmit={handleSubmit} style={styles.form}>
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>Bid Amount (£)</label>
+            <input
+              type="number"
+              required
+              step="0.01"
+              min="0.01"
+              style={styles.input}
+              value={bidAmount}
+              onChange={(e) => setBidAmount(e.target.value)}
+              disabled={loading || success || !mechanicVerified}
+              placeholder="e.g., 150.00"
+            />
+          </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          style={styles.submitButton}
-        >
-          {loading ? 'Submitting...' : 'Submit Application'}
-        </button>
-      </form>
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>Proposal</label>
+            <textarea
+              required
+              style={styles.textarea}
+              rows={5}
+              value={proposal}
+              onChange={(e) => setProposal(e.target.value)}
+              disabled={loading || success || !mechanicVerified}
+              placeholder="Describe your experience, timeline, and why you're the right mechanic for this job..."
+            />
+            <div style={styles.counter}>
+              {proposal.trim().length}/10 minimum characters
+            </div>
+          </div>
+
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                style={styles.errorBox}
+              >
+                <AlertCircle size={16} />
+                <span>{error}</span>
+              </motion.div>
+            )}
+            {success && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                style={styles.successBox}
+              >
+                <CheckCircle size={16} />
+                <span>Application sent successfully! Redirecting...</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <button
+            type="submit"
+            disabled={loading || success || !mechanicVerified}
+            style={{
+              ...styles.submitBtn,
+              opacity: loading || success || !mechanicVerified ? 0.6 : 1,
+              cursor: loading || success || !mechanicVerified ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {loading ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <>
+                <Gavel size={18} />
+                Send Bid
+              </>
+            )}
+          </button>
+        </form>
+      </div>
+
+      <style jsx global>{`
+        .animate-spin {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </motion.div>
   );
 }
 
+// ==================== STYLES ====================
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    padding: theme.spacing[10],
-    background: theme.colors.background.main,
-    minHeight: '100vh',
+  container: {
+    padding: '40px 20px',
+    maxWidth: '600px',
+    margin: '0 auto',
     color: theme.colors.text.primary,
     fontFamily: theme.fontFamilies.sans,
   },
-  backButton: {
-    background: 'transparent',
+  backBtn: {
+    background: 'none',
     border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.borderRadius.md,
     padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
     color: theme.colors.text.secondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
     cursor: 'pointer',
     marginBottom: theme.spacing[6],
-    transition: 'background 0.2s ease',
+    transition: 'all 0.2s',
+  },
+  header: {
+    marginBottom: theme.spacing[6],
   },
   title: {
     fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    marginBottom: theme.spacing[6],
-    background: theme.gradients.title,
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
+    fontWeight: 900,
+    marginBottom: theme.spacing[1],
+  },
+  subtitle: {
+    color: theme.colors.text.muted,
+    fontSize: theme.fontSizes.sm,
+  },
+  card: {
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.light}`,
+    borderRadius: theme.borderRadius['2xl'],
+    padding: theme.spacing[6],
   },
   form: {
-    maxWidth: '600px',
-    marginTop: theme.spacing[4],
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[5],
   },
-  field: {
-    marginBottom: theme.spacing[6],
+  inputGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[2],
   },
   label: {
-    display: 'block',
-    fontSize: theme.fontSizes.sm,
-    fontWeight: theme.fontWeights.medium,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[2],
+    fontSize: theme.fontSizes.xs,
+    fontWeight: 800,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    color: theme.colors.text.muted,
   },
   input: {
-    width: '100%',
-    background: theme.colors.background.elevated,
+    background: theme.colors.background.subtle,
     border: `1px solid ${theme.colors.border.medium}`,
     borderRadius: theme.borderRadius.lg,
     padding: theme.spacing[3],
     color: theme.colors.text.primary,
     fontSize: theme.fontSizes.base,
     outline: 'none',
-    transition: 'border 0.2s ease',
+    transition: 'border-color 0.2s',
   },
   textarea: {
-    width: '100%',
-    background: theme.colors.background.elevated,
+    background: theme.colors.background.subtle,
     border: `1px solid ${theme.colors.border.medium}`,
     borderRadius: theme.borderRadius.lg,
     padding: theme.spacing[3],
     color: theme.colors.text.primary,
     fontSize: theme.fontSizes.base,
-    outline: 'none',
     resize: 'vertical',
     fontFamily: 'inherit',
+    outline: 'none',
   },
-  hint: {
+  counter: {
     fontSize: theme.fontSizes.xs,
     color: theme.colors.text.muted,
+    textAlign: 'right',
     marginTop: theme.spacing[1],
   },
   errorBox: {
-    marginBottom: theme.spacing[5],
-    padding: theme.spacing[3],
-    background: `${theme.colors.error}20`,
-    border: `1px solid ${theme.colors.error}`,
+    background: `${theme.colors.status.critical}15`,
+    border: `1px solid ${theme.colors.status.critical}`,
     borderRadius: theme.borderRadius.lg,
-    color: theme.colors.error,
+    padding: theme.spacing[3],
+    color: theme.colors.status.critical,
     fontSize: theme.fontSizes.sm,
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
   },
-  submitButton: {
-    width: '100%',
+  successBox: {
+    background: `${theme.colors.primary}20`,
+    border: `1px solid ${theme.colors.primary}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.primary,
+    fontSize: theme.fontSizes.sm,
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+  },
+  warningBox: {
+    background: `${theme.colors.status.warning}15`,
+    border: `1px solid ${theme.colors.status.warning}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.status.warning,
+    fontSize: theme.fontSizes.sm,
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[4],
+  },
+  submitBtn: {
     background: theme.colors.primary,
+    color: theme.colors.background.main,
     border: 'none',
     borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
-    color: theme.colors.background.main,
+    padding: theme.spacing[4],
+    fontWeight: 900,
     fontSize: theme.fontSizes.base,
-    fontWeight: theme.fontWeights.semibold,
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: theme.spacing[2],
     cursor: 'pointer',
-    transition: 'background 0.2s ease',
-    marginTop: theme.spacing[2],
+    transition: 'opacity 0.2s',
   },
-  centered: {
-    minHeight: '100vh',
+  loadingContainer: {
+    minHeight: '80vh',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: theme.spacing[4],
+  },
+  loadingText: {
     color: theme.colors.text.secondary,
   },
 };

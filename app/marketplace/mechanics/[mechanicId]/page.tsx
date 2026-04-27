@@ -1,202 +1,269 @@
-import { notFound } from 'next/navigation';
+// app/profile/[id]/page.tsx (or wherever your route is)
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { 
+  ShieldCheck, Mail, MapPin, Phone, 
+  ArrowLeft, Loader2, UserCog, Calendar, AlertCircle
+} from 'lucide-react';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
-import { MapPin, Phone, Star, CheckCircle, AlertCircle } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-interface Mechanic {
+interface AdminProfile {
   id: string;
-  business_name: string;
-  phone: string | null;
-  address: string | null;
-  lat: number | null;
-  lng: number | null;
-  verified: boolean;
-  subscription_status: string;
-  created_at: string;
+  full_name: string;
+  email: string;
+  role: string;
+  location?: string;
+  phone?: string;
+  created_at?: string;
 }
 
-export default async function MechanicDetailPage({
-  params,
-}: {
-  params: Promise<{ mechanicId: string }>;
-}) {
-  const { mechanicId } = await params;
+export default function AdminDetailPage() {
+  const { id } = useParams();
+  const [profile, setProfile] = useState<AdminProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  let supabase;
-  try {
-    // ✅ Await the client if createClient is async
-    supabase = await createClient();
-  } catch (err) {
-    console.error('Failed to create Supabase client:', err);
-    notFound();
+  useEffect(() => {
+    if (id) fetchProfile();
+  }, [id]);
+
+  const fetchProfile = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Use the same Mac‑safe fetch override as in your supabase client (already configured)
+      // If not, we add a simple retry mechanism
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error) throw error;
+      if (!data) throw new Error('Profile not found');
+      setProfile(data);
+    } catch (err: any) {
+      console.error('Error loading profile:', err);
+      setError(err.message || 'Failed to load profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={styles.center}>
+        <Loader2 className="animate-spin" size={40} color={theme.colors.primary} />
+        <p style={{ marginTop: 16, color: theme.colors.text.muted }}>Loading profile...</p>
+        <style>{`
+          .animate-spin { animation: spin 1s linear infinite; }
+          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        `}</style>
+      </div>
+    );
   }
 
-  // Now supabase is a valid client
-  const { data: mechanic, error } = await supabase
-    .from('mechanics')
-    .select('*')
-    .eq('id', mechanicId)
-    .maybeSingle();
-
-  if (error || !mechanic) {
-    console.error('Mechanic fetch error:', error);
-    notFound();
-  }
-
-  if (mechanic.subscription_status !== 'active') {
-    notFound();
+  if (error || !profile) {
+    return (
+      <div style={styles.center}>
+        <AlertCircle size={48} color={theme.colors.status.critical} />
+        <p style={{ margin: '16px 0', color: theme.colors.text.primary }}>
+          {error || 'Profile not found'}
+        </p>
+        <button 
+          onClick={() => fetchProfile()} 
+          style={styles.retryButton}
+        >
+          Try Again
+        </button>
+        <Link href="/marketplace" style={{ color: theme.colors.primary, marginTop: '20px' }}>
+          ← Return to Directory
+        </Link>
+      </div>
+    );
   }
 
   return (
-    <div style={styles.container}>
-      <Link href="/marketplace/mechanics" style={styles.backLink}>
-        ← Back to Directory
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={styles.container}>
+      <Link href="/marketplace" style={styles.backLink}>
+        <ArrowLeft size={18} /> Back to Directory
       </Link>
 
-      <div style={styles.card}>
-        <div style={styles.header}>
-          <h1 style={styles.name}>{mechanic.business_name}</h1>
-          {mechanic.verified ? (
-            <span style={styles.verifiedBadge}>
-              <CheckCircle size={14} style={{ marginRight: '4px' }} />
-              Verified
-            </span>
-          ) : (
-            <span style={styles.unverifiedBadge}>
-              <AlertCircle size={14} style={{ marginRight: '4px' }} />
-              Unverified
-            </span>
-          )}
+      <div style={styles.profileHeader}>
+        <div style={styles.avatarLarge}>
+          <UserCog size={48} />
         </div>
-
-        {mechanic.address && (
-          <div style={styles.detail}>
-            <MapPin size={18} color={theme.colors.text.muted} />
-            <span>{mechanic.address}</span>
+        <div style={styles.headerContent}>
+          <div style={styles.roleBadge}>
+            <ShieldCheck size={14} /> <span>{profile.role?.toUpperCase()} ACCESS</span>
           </div>
-        )}
-
-        {mechanic.phone && (
-          <div style={styles.detail}>
-            <Phone size={18} color={theme.colors.text.muted} />
-            <a href={`tel:${mechanic.phone}`} style={styles.phoneLink}>
-              {mechanic.phone}
-            </a>
-          </div>
-        )}
-
-        <div style={styles.meta}>
-          <span style={styles.metaItem}>
-            <Star size={14} color="#fbbf24" fill="#fbbf24" />
-            Rating: Coming soon
-          </span>
-          <span style={styles.metaItem}>
-            Member since: {new Date(mechanic.created_at).toLocaleDateString()}
-          </span>
+          <h1 style={styles.nameTitle}>{profile.full_name || 'Staff Member'}</h1>
+          <p style={styles.emailSub}>{profile.email}</p>
         </div>
-
-        <button style={styles.contactButton}>Contact Mechanic</button>
       </div>
-    </div>
+
+      <div style={styles.infoGrid}>
+        <section style={styles.card}>
+          <h2 style={styles.sectionTitle}>Contact Information</h2>
+          <div style={styles.detailRow}>
+            <Mail size={18} color={theme.colors.primary} />
+            <div>
+              <label style={styles.label}>Email Address</label>
+              <div style={styles.value}>{profile.email}</div>
+            </div>
+          </div>
+          <div style={styles.detailRow}>
+            <Phone size={18} color={theme.colors.primary} />
+            <div>
+              <label style={styles.label}>Direct Line</label>
+              <div style={styles.value}>{profile.phone || 'No phone listed'}</div>
+            </div>
+          </div>
+        </section>
+
+        <section style={styles.card}>
+          <h2 style={styles.sectionTitle}>System Details</h2>
+          <div style={styles.detailRow}>
+            <MapPin size={18} color={theme.colors.primary} />
+            <div>
+              <label style={styles.label}>Primary Location</label>
+              <div style={styles.value}>{profile.location || 'Remote / HQ'}</div>
+            </div>
+          </div>
+          <div style={styles.detailRow}>
+            <Calendar size={18} color={theme.colors.primary} />
+            <div>
+              <label style={styles.label}>Member Since</label>
+              <div style={styles.value}>
+                {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : 'N/A'}
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </motion.div>
   );
 }
 
+// ==================== STYLES ====================
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    padding: theme.spacing[10],
-    background: theme.colors.background.main,
-    minHeight: '100vh',
+    maxWidth: '1000px',
+    margin: '0 auto',
+    padding: '40px 20px',
     color: theme.colors.text.primary,
     fontFamily: theme.fontFamilies.sans,
   },
   backLink: {
-    display: 'inline-block',
-    background: 'transparent',
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
     color: theme.colors.text.secondary,
     textDecoration: 'none',
-    transition: 'background 0.2s ease',
-    marginBottom: theme.spacing[6],
+    fontSize: '14px',
+    marginBottom: '40px',
+    transition: 'color 0.2s',
+  },
+  profileHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '32px',
+    marginBottom: '48px',
+    flexWrap: 'wrap',
+  },
+  avatarLarge: {
+    width: '100px',
+    height: '100px',
+    borderRadius: '32px',
+    background: `${theme.colors.primary}20`,
+    border: `1px solid ${theme.colors.primary}40`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: theme.colors.primary,
+  },
+  roleBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: 'rgba(16, 185, 129, 0.1)',
+    color: theme.colors.primary,
+    padding: '6px 14px',
+    borderRadius: '100px',
+    fontSize: '11px',
+    fontWeight: 900,
+    marginBottom: '12px',
+  },
+  nameTitle: {
+    fontSize: 'clamp(32px, 5vw, 42px)',
+    fontWeight: 900,
+    letterSpacing: '-0.04em',
+    margin: 0,
+  },
+  emailSub: {
+    fontSize: 'clamp(14px, 4vw, 18px)',
+    color: theme.colors.text.secondary,
+    marginTop: '4px',
+  },
+  infoGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '24px',
   },
   card: {
-    maxWidth: '600px',
     background: theme.colors.background.card,
-    borderRadius: theme.borderRadius.xl,
     border: `1px solid ${theme.colors.border.light}`,
-    padding: theme.spacing[8],
-    margin: '0 auto',
+    borderRadius: '24px',
+    padding: '32px',
   },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[4],
-  },
-  name: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    margin: 0,
+  sectionTitle: {
+    fontSize: '18px',
+    fontWeight: 800,
+    marginBottom: '24px',
     color: theme.colors.text.primary,
   },
-  verifiedBadge: {
-    background: `${theme.colors.primary}20`,
-    color: theme.colors.primary,
-    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
-    borderRadius: theme.borderRadius.full,
-    fontSize: theme.fontSizes.sm,
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  unverifiedBadge: {
-    background: `${theme.colors.error}20`,
-    color: theme.colors.error,
-    padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
-    borderRadius: theme.borderRadius.full,
-    fontSize: theme.fontSizes.sm,
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  detail: {
+  detailRow: {
     display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    marginBottom: theme.spacing[4],
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.text.secondary,
+    gap: '16px',
+    marginBottom: '20px',
+    alignItems: 'flex-start',
   },
-  phoneLink: {
-    color: theme.colors.text.primary,
-    textDecoration: 'none',
-    transition: 'color 0.2s ease',
-  },
-  meta: {
-    display: 'flex',
-    gap: theme.spacing[4],
-    marginTop: theme.spacing[6],
-    marginBottom: theme.spacing[8],
-    paddingTop: theme.spacing[4],
-    borderTop: `1px solid ${theme.colors.border.light}`,
-  },
-  metaItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    fontSize: theme.fontSizes.sm,
+  label: {
+    fontSize: '12px',
+    textTransform: 'uppercase',
     color: theme.colors.text.muted,
+    fontWeight: 700,
+    letterSpacing: '0.05em',
   },
-  contactButton: {
-    width: '100%',
-    background: theme.colors.primary,
-    border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
-    color: theme.colors.background.main,
-    fontSize: theme.fontSizes.base,
-    fontWeight: theme.fontWeights.semibold,
+  value: {
+    fontSize: '16px',
+    color: theme.colors.text.primary,
+    marginTop: '2px',
+  },
+  center: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '60vh',
+    color: theme.colors.text.primary,
+    textAlign: 'center',
+    padding: '20px',
+    gap: '16px',
+  },
+  retryButton: {
+    background: theme.colors.background.subtle,
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: '12px',
+    padding: '10px 20px',
+    color: theme.colors.text.primary,
     cursor: 'pointer',
-    transition: 'background 0.2s ease',
+    fontWeight: 600,
+    transition: 'all 0.2s',
   },
 };

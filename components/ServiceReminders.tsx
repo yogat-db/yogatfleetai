@@ -1,30 +1,31 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { Clock, Wrench } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Clock, AlertTriangle, ChevronRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 
-type Vehicle = {
-  id: string
-  license_plate: string
-  make: string | null
-  model: string | null
-  mileage: number | null
-}
+// --- Types & Constants ---
 
-type ServiceReminder = {
+interface ServiceReminder {
   vehicleId: string
   plate: string
   vehicleName: string
   task: string
-  dueMileage: number
-  dueDate?: string
-  daysLeft?: number
   milesLeft: number
+  daysLeft: number
   overdue: boolean
+  priority: number // 0: Overdue, 1: Urgent, 2: Soon
 }
+
+const MAINTENANCE_INTERVALS = [
+  { task: 'Oil change', miles: 5000, months: 6 },
+  { task: 'Brake inspection', miles: 20000, months: 12 },
+  { task: 'Timing belt', miles: 60000, months: 60 },
+  { task: 'Coolant flush', miles: 30000, months: 36 },
+  { task: 'Tire rotation', miles: 6000, months: 6 },
+]
 
 export default function ServiceReminders() {
   const router = useRouter()
@@ -32,172 +33,129 @@ export default function ServiceReminders() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchReminders()
+    fetchData()
   }, [])
 
-  const fetchReminders = async () => {
+  const fetchData = async () => {
     try {
-      // Fetch user's vehicles
-      const { data: vehicles, error: vehiclesError } = await supabase
+      // 1. Fetch Vehicles AND their last Service Events in one go if possible
+      // Otherwise, fetch all vehicles then all relevant service events for those vehicles.
+      const { data: vehicles, error: vError } = await supabase
         .from('vehicles')
-        .select('id, license_plate, make, model, mileage')
-        .order('created_at', { ascending: false })
+        .select(`
+          id, license_plate, make, model, mileage,
+          service_events (title, mileage, occurred_at)
+        `)
+        // Filter service_events to only get latest (Supabase doesn't easily limit 1 per child group, 
+        // so we'll process the array in JS)
 
-      if (vehiclesError) throw vehiclesError
+      if (vError) throw vError
 
-      // For each vehicle, get the latest service events for common tasks
       const remindersList: ServiceReminder[] = []
+      const now = new Date()
 
-      for (const vehicle of vehicles || []) {
-        const { data: events, error: eventsError } = await supabase
-          .from('service_events')
-          .select('title, mileage, occurred_at')
-          .eq('vehicle_id', vehicle.id)
-          .order('occurred_at', { ascending: false })
-
-        if (eventsError) continue
-
+      vehicles?.forEach(vehicle => {
         const currentMileage = vehicle.mileage || 0
+        const vehicleName = `${vehicle.make || ''} ${vehicle.model || ''}`.trim()
 
-        // Define intervals (you can expand or make configurable)
-        const intervals = [
-          { task: 'Oil change', intervalMiles: 5000, intervalMonths: 6 },
-          { task: 'Brake inspection', intervalMiles: 20000, intervalMonths: 12 },
-          { task: 'Timing belt', intervalMiles: 60000, intervalMonths: 60 },
-          { task: 'Coolant flush', intervalMiles: 30000, intervalMonths: 36 },
-          { task: 'Tire rotation', intervalMiles: 6000, intervalMonths: 6 },
-        ]
+        MAINTENANCE_INTERVALS.forEach(interval => {
+          // Find latest event for this specific task
+          const taskEvents = vehicle.service_events
+            .filter((e: any) => e.title.toLowerCase().includes(interval.task.toLowerCase()))
+            .sort((a: any, b: any) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
 
-        for (const interval of intervals) {
-          const lastEvent = events?.find(e => e.title.toLowerCase().includes(interval.task.toLowerCase()))
+          const lastEvent = taskEvents[0]
+          
+          // Calculate Miles
           const lastMileage = lastEvent?.mileage ?? 0
-          const nextMileage = lastMileage + interval.intervalMiles
-          const milesLeft = Math.max(0, nextMileage - currentMileage)
-          const overdue = milesLeft <= 0
+          const milesLeft = (lastMileage + interval.miles) - currentMileage
+          
+          // Calculate Days
+          const lastDate = lastEvent ? new Date(lastEvent.occurred_at) : new Date(0)
+          const nextDate = new Date(lastDate)
+          nextDate.setMonth(nextDate.getMonth() + interval.months)
+          const daysLeft = Math.ceil((nextDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
 
-          // Only show reminders that are due soon (within 2000 miles or overdue)
-          if (milesLeft <= 2000) {
+          const isOverdue = milesLeft <= 0 || daysLeft <= 0
+
+          // Threshold: Show if within 1000 miles or 30 days
+          if (isOverdue || milesLeft < 1000 || daysLeft < 30) {
             remindersList.push({
               vehicleId: vehicle.id,
               plate: vehicle.license_plate,
-              vehicleName: `${vehicle.make || ''} ${vehicle.model || ''}`.trim(),
+              vehicleName,
               task: interval.task,
-              dueMileage: nextMileage,
               milesLeft,
-              overdue,
+              daysLeft,
+              overdue: isOverdue,
+              priority: isOverdue ? 0 : (milesLeft < 300 || daysLeft < 7 ? 1 : 2)
             })
           }
-        }
-      }
-
-      // Sort by urgency (overdue first, then by miles left ascending)
-      remindersList.sort((a, b) => {
-        if (a.overdue !== b.overdue) return a.overdue ? -1 : 1
-        return a.milesLeft - b.milesLeft
+        })
       })
 
-      setReminders(remindersList)
+      setReminders(remindersList.sort((a, b) => a.priority - b.priority))
     } catch (err) {
-      console.error('Failed to fetch reminders', err)
+      console.error('Reminder Sync Error:', err)
     } finally {
       setLoading(false)
     }
   }
 
-  if (loading) return <div style={styles.loading}>Loading reminders...</div>
+  if (loading) return <div className="p-8 text-center animate-pulse text-slate-500">Scanning vehicle health...</div>
   if (reminders.length === 0) return null
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <Clock size={18} color="#22c55e" />
-        <h3 style={styles.title}>Service Reminders</h3>
+    <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 mb-6 shadow-xl">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Clock size={18} className="text-emerald-500" />
+          <h3 className="text-lg font-semibold text-slate-100">Service Reminders</h3>
+        </div>
+        <span className="text-xs text-slate-500">{reminders.length} flagged</span>
       </div>
-      <div style={styles.list}>
-        {reminders.slice(0, 4).map((reminder, idx) => (
-          <motion.div
-            key={`${reminder.vehicleId}-${reminder.task}`}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: idx * 0.05 }}
-            style={{
-              ...styles.item,
-              borderLeftColor: reminder.overdue ? '#ef4444' : '#f59e0b',
-            }}
-            onClick={() => router.push(`/vehicles/${reminder.plate}`)}
-          >
-            <div>
-              <div style={styles.itemTitle}>{reminder.task}</div>
-              <div style={styles.itemSub}>
-                {reminder.vehicleName} ({reminder.plate})
+
+      <div className="space-y-3">
+        <AnimatePresence>
+          {reminders.slice(0, 4).map((reminder, idx) => (
+            <motion.div
+              key={`${reminder.vehicleId}-${reminder.task}`}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ delay: idx * 0.05 }}
+              onClick={() => router.push(`/vehicles/${reminder.plate}`)}
+              className={`
+                group flex justify-between items-center p-3 rounded-xl cursor-pointer transition-all
+                bg-slate-800/50 hover:bg-slate-800 border-l-4
+                ${reminder.overdue ? 'border-red-500' : 'border-amber-500'}
+              `}
+            >
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-slate-200 group-hover:text-white flex items-center gap-1">
+                  {reminder.overdue && <AlertTriangle size={12} className="text-red-500" />}
+                  {reminder.task}
+                </span>
+                <span className="text-xs text-slate-400">
+                  {reminder.vehicleName} • {reminder.plate}
+                </span>
               </div>
-            </div>
-            <div style={styles.itemStatus}>
-              {reminder.overdue ? (
-                <span style={{ color: '#ef4444' }}>Overdue</span>
-              ) : (
-                <span style={{ color: '#f59e0b' }}>{reminder.milesLeft} mi left</span>
-              )}
-            </div>
-          </motion.div>
-        ))}
+
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <p className={`text-xs font-bold ${reminder.overdue ? 'text-red-400' : 'text-amber-400'}`}>
+                    {reminder.overdue ? 'Action Required' : `${Math.max(0, reminder.milesLeft)} mi left`}
+                  </p>
+                  {reminder.daysLeft > 0 && !reminder.overdue && (
+                    <p className="text-[10px] text-slate-500">approx. {reminder.daysLeft} days</p>
+                  )}
+                </div>
+                <ChevronRight size={14} className="text-slate-600 group-hover:text-slate-400 transition-colors" />
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
-    </div>
+    </section>
   )
 }
-
-const styles = {
-  container: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '16px',
-    padding: '20px',
-    marginBottom: '24px',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    marginBottom: '16px',
-  },
-  title: {
-    fontSize: '18px',
-    fontWeight: 600,
-    color: '#f1f5f9',
-    margin: 0,
-  },
-  list: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  item: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '12px',
-    background: '#1e293b',
-    borderRadius: '12px',
-    borderLeft: '4px solid',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  itemTitle: {
-    fontSize: '14px',
-    fontWeight: 600,
-    marginBottom: '4px',
-  },
-  itemSub: {
-    fontSize: '12px',
-    color: '#94a3b8',
-  },
-  itemStatus: {
-    fontSize: '13px',
-    fontWeight: 500,
-  },
-  loading: {
-    textAlign: 'center',
-    color: '#94a3b8',
-    padding: '20px',
-  },
-} as const

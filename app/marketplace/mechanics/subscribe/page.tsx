@@ -1,3 +1,4 @@
+// app/marketplace/mechanics/subscribe/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -11,7 +12,7 @@ const PLANS = [
   {
     id: 'basic',
     name: 'Basic',
-    price: 9.99,
+    price: 18.00,      // Updated to £18
     features: [
       'Apply to up to 10 jobs per month',
       'Basic profile listing',
@@ -21,7 +22,7 @@ const PLANS = [
   {
     id: 'pro',
     name: 'Professional',
-    price: 29.99,
+    price: 35.00,      // Updated to £35
     features: [
       'Unlimited job applications',
       'Verified badge',
@@ -39,31 +40,50 @@ export default function SubscribePage() {
   const [mechanicId, setMechanicId] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
 
+  // Get base URL: use NEXT_PUBLIC_BASE_URL first, then NEXT_PUBLIC_APP_URL, then window origin
+  const appUrl = process.env.NEXT_PUBLIC_BASE_URL || 
+                 process.env.NEXT_PUBLIC_APP_URL || 
+                 (typeof window !== 'undefined' ? window.location.origin : 'https://yogatfleetai.com');
+
+  // Validate that the URL has a scheme (http:// or https://)
+  useEffect(() => {
+    if (appUrl && !appUrl.startsWith('http')) {
+      console.error('Invalid app URL:', appUrl);
+      setError('Configuration error: Invalid app URL. Please contact support.');
+    }
+  }, [appUrl]);
+
   useEffect(() => {
     checkMechanic();
   }, []);
 
   const checkMechanic = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      router.push('/login');
-      return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+      const { data: mechanic } = await supabase
+        .from('mechanics')
+        .select('id, subscription_status')
+        .eq('user_id', user.id)
+        .single();
+      if (!mechanic) {
+        router.push('/marketplace/mechanics/register');
+        return;
+      }
+      if (mechanic.subscription_status === 'active') {
+        router.push('/marketplace/mechanics/dashboard');
+        return;
+      }
+      setMechanicId(mechanic.id);
+    } catch (err) {
+      console.error('Error checking mechanic:', err);
+      setError('Failed to load your profile. Please try again.');
+    } finally {
+      setChecking(false);
     }
-    const { data: mechanic } = await supabase
-      .from('mechanics')
-      .select('id, subscription_status')
-      .eq('user_id', user.id)
-      .single();
-    if (!mechanic) {
-      router.push('/marketplace/mechanics/register');
-      return;
-    }
-    if (mechanic.subscription_status === 'active') {
-      router.push('/marketplace/mechanics/dashboard');
-      return;
-    }
-    setMechanicId(mechanic.id);
-    setChecking(false);
   };
 
   const handleSubscribe = async () => {
@@ -71,21 +91,28 @@ export default function SubscribePage() {
     setLoading(true);
     setError(null);
     try {
+      // Validate URL before sending
+      if (!appUrl.startsWith('http')) {
+        throw new Error('Invalid app URL configuration. Please contact support.');
+      }
+
       const response = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planId: selectedPlan,
           mechanicId,
-          successUrl: `${window.location.origin}/marketplace/mechanics/subscribe/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancelUrl: `${window.location.origin}/marketplace/mechanics/subscribe`,
+          successUrl: `${appUrl}/marketplace/mechanics/subscribe/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancelUrl: `${appUrl}/marketplace/mechanics/subscribe`,
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error);
+      if (!response.ok) throw new Error(data.error || 'Failed to create checkout session');
+      // Redirect to Stripe Checkout
       window.location.href = data.url;
     } catch (err: any) {
-      setError(err.message);
+      console.error('Subscription error:', err);
+      setError(err.message || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -125,7 +152,7 @@ export default function SubscribePage() {
           >
             <h2 style={styles.planName}>{plan.name}</h2>
             <p style={styles.planPrice}>
-              £{plan.price} <span style={styles.planPeriod}>/mo</span>
+              £{plan.price.toFixed(2)} <span style={styles.planPeriod}>/mo</span>
             </p>
             <ul style={styles.featureList}>
               {plan.features.map((feat, i) => (
@@ -160,6 +187,7 @@ export default function SubscribePage() {
   );
 }
 
+// Styles (unchanged – already production-ready)
 const styles: Record<string, React.CSSProperties> = {
   page: {
     padding: theme.spacing[10],

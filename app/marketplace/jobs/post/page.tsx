@@ -1,456 +1,264 @@
+// app/jobs/post/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { MapPin, AlertCircle, CheckCircle, Loader2, Crosshair } from 'lucide-react';
+import { Briefcase, MapPin, PoundSterling, Car, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import mbxGeocoding from '@mapbox/mapbox-sdk/services/geocoding';
 import theme from '@/app/theme';
-
-const geocodingClient = mbxGeocoding({
-  accessToken: process.env.NEXT_PUBLIC_MAPBOX_TOKEN!,
-});
-
-interface Vehicle {
-  id: string;
-  make: string;
-  model: string;
-  license_plate: string;
-}
+import toast from 'react-hot-toast';
 
 export default function PostJobPage() {
   const router = useRouter();
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [selectedVehicle, setSelectedVehicle] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [budget, setBudget] = useState('');
   const [location, setLocation] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-  const [detecting, setDetecting] = useState(false);
+  const [vehicleId, setVehicleId] = useState('');
+  const [vehicles, setVehicles] = useState<Array<{ id: string; make: string; model: string; license_plate: string }>>([]);
+  const [fetchingVehicles, setFetchingVehicles] = useState(false);
 
   useEffect(() => {
-    fetchVehicles();
-  }, []);
-
-  const fetchVehicles = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-    const { data, error } = await supabase
-      .from('vehicles')
-      .select('id, make, model, license_plate')
-      .eq('user_id', user.id);
-    if (!error && data) setVehicles(data);
-  };
-
-  const detectLocation = () => {
-    if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser');
-      return;
-    }
-    setDetecting(true);
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          // Reverse geocode using Mapbox
-          const res = await fetch(
-            `https://api.mapbox.com/geocoding/v5/mapbox.places/${position.coords.longitude},${position.coords.latitude}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_TOKEN}&types=address&limit=1`
-          );
-          const data = await res.json();
-          if (data.features && data.features.length) {
-            setLocation(data.features[0].place_name);
-          } else {
-            setLocation(`${position.coords.latitude}, ${position.coords.longitude}`);
-          }
-        } catch (err) {
-          console.error('Reverse geocoding failed', err);
-          setLocation(`${position.coords.latitude}, ${position.coords.longitude}`);
-        } finally {
-          setDetecting(false);
-        }
-      },
-      (err) => {
-        setError('Unable to detect location: ' + err.message);
-        setDetecting(false);
+    async function loadVehicles() {
+      setFetchingVehicles(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase
+          .from('vehicles')
+          .select('id, make, model, license_plate')
+          .eq('user_id', user.id);
+        if (data) setVehicles(data);
       }
-    );
-  };
+      setFetchingVehicles(false);
+    }
+    loadVehicles();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    if (!title.trim()) {
+      setError('Title is required');
+      return;
+    }
     setLoading(true);
-
+    setError(null);
     try {
-      if (!selectedVehicle) throw new Error('Please select a vehicle');
-      if (!title.trim()) throw new Error('Job title is required');
-      if (!description.trim()) throw new Error('Job description is required');
-      const budgetNum = parseFloat(budget);
-      if (isNaN(budgetNum) || budgetNum <= 0) throw new Error('Budget must be a positive number');
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('You must be logged in');
-
-      // Geocode location if provided
-      let lat: number | null = null;
-      let lng: number | null = null;
-      if (location.trim()) {
-        try {
-          const response = await geocodingClient.forwardGeocode({
-            query: location,
-            limit: 1,
-          }).send();
-          if (response.body.features.length) {
-            [lng, lat] = response.body.features[0].center;
-          }
-        } catch (geoErr) {
-          console.warn('Geocoding failed, proceeding without coordinates', geoErr);
-        }
-      }
-
-      const { error: insertError } = await supabase.from('jobs').insert({
-        title: title.trim(),
-        description: description.trim(),
-        budget: budgetNum,
-        status: 'open',
-        user_id: user.id,
-        vehicle_id: selectedVehicle,
-        location: location.trim() || null,
-        lat,
-        lng,
+      const response = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim() || null,
+          budget: budget ? parseFloat(budget) : null,
+          location: location.trim() || null,
+          vehicle_id: vehicleId || null,
+        }),
       });
-
-      if (insertError) throw insertError;
-
-      setSuccess(true);
-      setTimeout(() => router.push('/marketplace/jobs'), 2000);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to post job');
+      toast.success('Job posted successfully!');
+      router.push('/marketplace/jobs');
     } catch (err: any) {
       setError(err.message);
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  if (vehicles.length === 0 && !loading) {
-    return (
-      <div style={styles.centered}>
-        <p>You don't have any vehicles yet.</p>
-        <button onClick={() => router.push('/vehicles/add')} style={styles.addVehicleButton}>
-          Add a Vehicle
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      style={styles.page}
-    >
-      <button onClick={() => router.back()} style={styles.backButton}>
-        ← Back
-      </button>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.container}>
       <div style={styles.card}>
         <h1 style={styles.title}>Post a Repair Job</h1>
-        <p style={styles.subtitle}>
-          Describe the issue and attract local mechanics
-        </p>
+        <p style={styles.subtitle}>Describe the issue and get quotes from trusted mechanics</p>
 
         <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.field}>
-            <label style={styles.label}>Vehicle *</label>
-            <select
-              value={selectedVehicle}
-              onChange={(e) => setSelectedVehicle(e.target.value)}
-              style={styles.select}
-              required
-              disabled={loading}
-            >
-              <option value="">Select a vehicle</option>
-              {vehicles.map(v => (
-                <option key={v.id} value={v.id}>
-                  {v.make} {v.model} ({v.license_plate})
-                </option>
-              ))}
-            </select>
-          </div>
-
           <div style={styles.field}>
             <label style={styles.label}>Job Title *</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Engine diagnostic"
+              placeholder="e.g., Engine won't start, Brake pad replacement"
               style={styles.input}
               required
-              disabled={loading}
             />
           </div>
 
           <div style={styles.field}>
-            <label style={styles.label}>Description *</label>
+            <label style={styles.label}>Description</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows={5}
-              placeholder="Describe the issue in detail..."
+              rows={4}
+              placeholder="Provide details about the issue, your car, etc."
               style={styles.textarea}
-              required
-              disabled={loading}
             />
           </div>
 
-          <div style={styles.field}>
-            <label style={styles.label}>Budget (£) *</label>
-            <input
-              type="number"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-              placeholder="e.g., 200"
-              style={styles.input}
-              required
-              disabled={loading}
-              step="1"
-              min="1"
-            />
-          </div>
-
-          <div style={styles.field}>
-            <label style={styles.label}>
-              <MapPin size={16} style={{ marginRight: '4px' }} />
-              Location (optional)
-            </label>
-            <div style={styles.locationRow}>
+          <div style={styles.row}>
+            <div style={styles.field}>
+              <label style={styles.label}><PoundSterling size={14} /> Budget (£)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+                placeholder="e.g., 150"
+                style={styles.input}
+              />
+            </div>
+            <div style={styles.field}>
+              <label style={styles.label}><MapPin size={14} /> Location</label>
               <input
                 type="text"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                placeholder="e.g., 123 High Street, Leicester"
-                style={styles.locationInput}
-                disabled={loading}
+                placeholder="e.g., London, SW1A 1AA"
+                style={styles.input}
               />
-              <button
-                type="button"
-                onClick={detectLocation}
-                disabled={detecting}
-                style={styles.detectButton}
-              >
-                {detecting ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Crosshair size={16} />}
-                Auto‑detect
-              </button>
             </div>
+          </div>
+
+          <div style={styles.field}>
+            <label style={styles.label}><Car size={14} /> Select Vehicle (optional)</label>
+            <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} style={styles.select}>
+              <option value="">-- Choose a vehicle --</option>
+              {vehicles.map(v => (
+                <option key={v.id} value={v.id}>{v.make} {v.model} ({v.license_plate})</option>
+              ))}
+            </select>
+            {fetchingVehicles && <span style={styles.helper}>Loading your vehicles...</span>}
           </div>
 
           {error && (
             <div style={styles.errorBox}>
               <AlertCircle size={16} />
-              {error}
+              <span>{error}</span>
             </div>
           )}
 
-          {success && (
-            <div style={styles.successBox}>
-              <CheckCircle size={16} />
-              Job posted successfully! Redirecting...
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading || success}
-            style={styles.submitButton}
-          >
+          <button type="submit" disabled={loading} style={styles.button}>
+            {loading ? <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> : <Briefcase size={18} />}
             {loading ? 'Posting...' : 'Post Job'}
           </button>
         </form>
       </div>
-
-      <style jsx>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </motion.div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    padding: theme.spacing[10],
+  container: {
+    maxWidth: '800px',
+    margin: '0 auto',
+    padding: '40px 20px',
     background: theme.colors.background.main,
     minHeight: '100vh',
-    color: theme.colors.text.primary,
-    fontFamily: theme.fontFamilies.sans,
-    display: 'flex',
-    justifyContent: 'center',
-  },
-  backButton: {
-    position: 'absolute',
-    top: theme.spacing[5],
-    left: theme.spacing[5],
-    background: 'transparent',
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    color: theme.colors.text.secondary,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
   },
   card: {
-    maxWidth: '600px',
-    width: '100%',
     background: theme.colors.background.card,
+    borderRadius: '32px',
     border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[8],
-    marginTop: theme.spacing[10],
+    padding: '40px',
   },
   title: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    marginBottom: theme.spacing[2],
+    fontSize: '32px',
+    fontWeight: 800,
+    marginBottom: '8px',
     color: theme.colors.text.primary,
   },
   subtitle: {
-    fontSize: theme.fontSizes.sm,
+    fontSize: '14px',
     color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[6],
+    marginBottom: '32px',
   },
   form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: theme.spacing[5],
+    gap: '24px',
   },
   field: {
     display: 'flex',
     flexDirection: 'column',
-    gap: theme.spacing[2],
+    gap: '8px',
+  },
+  row: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '20px',
   },
   label: {
-    fontSize: theme.fontSizes.sm,
+    fontSize: '13px',
+    fontWeight: 600,
     color: theme.colors.text.secondary,
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[1],
+    gap: '6px',
   },
   input: {
-    width: '100%',
-    background: theme.colors.background.elevated,
+    background: theme.colors.background.subtle,
     border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
+    borderRadius: '12px',
+    padding: '12px 16px',
     color: theme.colors.text.primary,
-    fontSize: theme.fontSizes.base,
+    fontSize: '14px',
     outline: 'none',
-    transition: 'border 0.2s ease',
   },
   textarea: {
-    width: '100%',
-    background: theme.colors.background.elevated,
+    background: theme.colors.background.subtle,
     border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
+    borderRadius: '12px',
+    padding: '12px 16px',
     color: theme.colors.text.primary,
-    fontSize: theme.fontSizes.base,
-    outline: 'none',
+    fontSize: '14px',
     resize: 'vertical',
-    fontFamily: 'inherit',
+    outline: 'none',
   },
   select: {
-    width: '100%',
-    background: theme.colors.background.elevated,
+    background: theme.colors.background.subtle,
     border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
+    borderRadius: '12px',
+    padding: '12px 16px',
     color: theme.colors.text.primary,
-    fontSize: theme.fontSizes.base,
-    outline: 'none',
-    cursor: 'pointer',
-  },
-  locationRow: {
-    display: 'flex',
-    gap: theme.spacing[3],
-  },
-  locationInput: {
-    flex: 1,
-    background: theme.colors.background.elevated,
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
-    color: theme.colors.text.primary,
-    fontSize: theme.fontSizes.base,
+    fontSize: '14px',
     outline: 'none',
   },
-  detectButton: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing[1],
-    background: theme.colors.background.elevated,
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: `0 ${theme.spacing[3]}`,
-    color: theme.colors.text.secondary,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
-    whiteSpace: 'nowrap',
+  helper: {
+    fontSize: '11px',
+    color: theme.colors.text.muted,
+    marginTop: '4px',
   },
   errorBox: {
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[2],
-    background: `${theme.colors.error}20`,
-    border: `1px solid ${theme.colors.error}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
-    color: theme.colors.error,
-    fontSize: theme.fontSizes.sm,
+    gap: '10px',
+    background: `${theme.colors.status.critical}15`,
+    border: `1px solid ${theme.colors.status.critical}`,
+    borderRadius: '12px',
+    padding: '12px 16px',
+    fontSize: '13px',
+    color: theme.colors.status.critical,
   },
-  successBox: {
+  button: {
     display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    background: `${theme.colors.primary}20`,
-    border: `1px solid ${theme.colors.primary}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
-    color: theme.colors.primary,
-    fontSize: theme.fontSizes.sm,
-  },
-  submitButton: {
-    background: theme.colors.primary,
-    border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
-    fontSize: theme.fontSizes.base,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.background.main,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
-    marginTop: theme.spacing[2],
-  },
-  centered: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    color: theme.colors.text.secondary,
-    gap: theme.spacing[4],
-  },
-  addVehicleButton: {
+    gap: '10px',
     background: theme.colors.primary,
     border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
+    borderRadius: '40px',
+    padding: '14px 24px',
+    fontSize: '16px',
+    fontWeight: 700,
     color: theme.colors.background.main,
     cursor: 'pointer',
+    transition: 'opacity 0.2s',
   },
 };

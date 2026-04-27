@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { supabase } from '@/lib/supabase/client'; // Fix: import supabase instead of createClient
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { Send, User, Clock } from 'lucide-react';
+import theme from '@/app/theme';
 
 interface Message {
   id: string;
@@ -9,9 +11,7 @@ interface Message {
   sender_id: string;
   content: string;
   created_at: string;
-  sender?: {
-    email?: string;
-  };
+  isOptimistic?: boolean; // Track locally added messages
 }
 
 interface ChatWindowProps {
@@ -21,19 +21,44 @@ interface ChatWindowProps {
   otherUserName: string;
 }
 
-export default function ChatWindow({ jobId, currentUserId, otherUserId, otherUserName }: ChatWindowProps) {
+export default function ChatWindow({ jobId, currentUserId, otherUserName }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  };
+
+  const fetchMessages = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data, error: fetchErr } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: true });
+
+      if (fetchErr) throw fetchErr;
+      setMessages(data || []);
+      // Instant scroll on first load
+      setTimeout(() => scrollToBottom('auto'), 100);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId]);
 
   useEffect(() => {
-    if (!jobId || !currentUserId || !otherUserId) return;
+    if (!jobId || !currentUserId) return;
 
     fetchMessages();
 
-    // Subscribe to new messages
     const channel = supabase
       .channel(`chat:${jobId}`)
       .on(
@@ -46,9 +71,11 @@ export default function ChatWindow({ jobId, currentUserId, otherUserId, otherUse
         },
         (payload) => {
           const newMsg = payload.new as Message;
-          if (newMsg.sender_id !== currentUserId) {
-            setMessages((prev) => [...prev, newMsg]);
-          }
+          // Deduplicate if we already added it optimistically
+          setMessages((prev) => {
+            if (prev.some(m => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
         }
       )
       .subscribe();
@@ -56,182 +83,180 @@ export default function ChatWindow({ jobId, currentUserId, otherUserId, otherUse
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [jobId, currentUserId, otherUserId]);
+  }, [jobId, currentUserId, fetchMessages]);
 
-  const fetchMessages = async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('chat_messages')
-        .select('*, sender:users(email)')
-        .eq('job_id', jobId)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-      setMessages(data || []);
-    } catch (err: any) {
-      console.error('Error fetching messages:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim()) return;
-
-    try {
-      const { error } = await supabase.from('chat_messages').insert({
-        job_id: jobId,
-        sender_id: currentUserId,
-        content: newMessage.trim(),
-      });
-
-      if (error) throw error;
-      setNewMessage('');
-      scrollToBottom();
-    } catch (err: any) {
-      console.error('Error sending message:', err);
-      setError(err.message);
-    }
-  };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  // Scroll to bottom when messages change, but only if user is already near bottom
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  if (loading) {
-    return <div style={styles.loading}>Loading messages...</div>;
-  }
+  const sendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const content = newMessage.trim();
+    if (!content) return;
 
-  if (error) {
-    return <div style={styles.error}>Error: {error}</div>;
-  }
+    // --- OPTIMISTIC UPDATE ---
+    const tempId = crypto.randomUUID();
+    const optimisticMsg: Message = {
+      id: tempId,
+      job_id: jobId,
+      sender_id: currentUserId,
+      content,
+      created_at: new Date().toISOString(),
+      isOptimistic: true,
+    };
+
+    setMessages(prev => [...prev, optimisticMsg]);
+    setNewMessage('');
+
+    try {
+      const { data, error: sendErr } = await supabase
+        .from('chat_messages')
+        .insert({
+          job_id: jobId,
+          sender_id: currentUserId,
+          content,
+        })
+        .select()
+        .single();
+
+      if (sendErr) throw sendErr;
+
+      // Replace optimistic message with server data
+      setMessages(prev => prev.map(m => m.id === tempId ? data : m));
+    } catch (err: any) {
+      // Rollback on error
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      setError('Failed to send message.');
+    }
+  };
+
+  if (loading) return <div className="flex h-full items-center justify-center text-slate-500">Connecting to secure chat...</div>;
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h3>Chat with {otherUserName}</h3>
+    <div style={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      height: '500px', 
+      background: theme.colors.background.card,
+      border: `1px solid ${theme.colors.border.light}`,
+      borderRadius: theme.borderRadius.xl,
+      overflow: 'hidden',
+      boxShadow: theme.shadows.lg
+    }}>
+      {/* Header */}
+      <div style={{ 
+        padding: theme.spacing[4], 
+        background: theme.colors.background.subtle,
+        borderBottom: `1px solid ${theme.colors.border.light}`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: theme.spacing[3]
+      }}>
+        <div style={{ 
+          width: 32, height: 32, borderRadius: '50%', 
+          background: theme.colors.background.card, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center' 
+        }}>
+          <User size={18} className="text-emerald-500" />
+        </div>
+        <div>
+          <h3 style={{ fontSize: theme.fontSizes.base, fontWeight: theme.fontWeights.bold, color: theme.colors.text.primary, margin: 0 }}>
+            {otherUserName}
+          </h3>
+          <span style={{ fontSize: '10px', color: theme.colors.status.healthy }}>● Online</span>
+        </div>
       </div>
-      <div style={styles.messagesContainer}>
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            style={{
-              ...styles.message,
-              ...(msg.sender_id === currentUserId ? styles.sent : styles.received),
-            }}
-          >
-            <div style={styles.messageContent}>{msg.content}</div>
-            <div style={styles.messageTime}>
-              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+
+      {/* Messages */}
+      <div 
+        ref={containerRef}
+        style={{ flex: 1, overflowY: 'auto', padding: theme.spacing[4], display: 'flex', flexDirection: 'column', gap: theme.spacing[3] }}
+      >
+        {messages.map((msg) => {
+          const isMe = msg.sender_id === currentUserId;
+          return (
+            <div
+              key={msg.id}
+              style={{
+                alignSelf: isMe ? 'flex-end' : 'flex-start',
+                maxWidth: '80%',
+                opacity: msg.isOptimistic ? 0.7 : 1,
+                transition: 'opacity 0.2s'
+              }}
+            >
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: isMe ? '16px 16px 2px 16px' : '16px 16px 16px 2px',
+                background: isMe ? theme.colors.primary : theme.colors.background.subtle,
+                color: isMe ? theme.colors.text.inverse : theme.colors.text.primary,
+                fontSize: theme.fontSizes.sm,
+                boxShadow: theme.shadows.sm,
+              }}>
+                {msg.content}
+              </div>
+              <div style={{ 
+                fontSize: '10px', 
+                color: theme.colors.text.muted, 
+                marginTop: 4, 
+                textAlign: isMe ? 'right' : 'left',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isMe ? 'flex-end' : 'flex-start',
+                gap: 4
+              }}>
+                <Clock size={10} />
+                {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
-      <form onSubmit={sendMessage} style={styles.form}>
+
+      {/* Input */}
+      <form onSubmit={sendMessage} style={{ 
+        padding: theme.spacing[3], 
+        background: theme.colors.background.subtle, 
+        display: 'flex', 
+        gap: theme.spacing[2],
+        borderTop: `1px solid ${theme.colors.border.light}`
+      }}>
         <input
           type="text"
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
-          placeholder="Type a message..."
-          style={styles.input}
+          placeholder="Type your message..."
+          style={{
+            flex: 1,
+            background: theme.colors.background.card,
+            border: `1px solid ${theme.colors.border.medium}`,
+            borderRadius: theme.borderRadius.lg,
+            padding: '10px 16px',
+            color: theme.colors.text.primary,
+            fontSize: theme.fontSizes.sm,
+            outline: 'none',
+          }}
         />
-        <button type="submit" style={styles.button}>
-          Send
+        <button 
+          type="submit" 
+          disabled={!newMessage.trim()}
+          style={{
+            width: 42,
+            height: 42,
+            background: theme.colors.primary,
+            border: 'none',
+            borderRadius: theme.borderRadius.lg,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'transform 0.1s',
+          }}
+        >
+          <Send size={18} color={theme.colors.text.inverse} />
         </button>
       </form>
     </div>
   );
 }
-
-// Simple inline styles – you can replace with your theme if desired
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '400px',
-    border: '1px solid #1e293b',
-    borderRadius: '12px',
-    overflow: 'hidden',
-    background: '#0f172a',
-  },
-  header: {
-    padding: '12px 16px',
-    borderBottom: '1px solid #1e293b',
-    background: '#1e293b',
-    color: '#f1f5f9',
-  },
-  messagesContainer: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  message: {
-    maxWidth: '70%',
-    padding: '8px 12px',
-    borderRadius: '12px',
-    fontSize: '14px',
-  },
-  sent: {
-    alignSelf: 'flex-end',
-    background: '#22c55e',
-    color: '#020617',
-  },
-  received: {
-    alignSelf: 'flex-start',
-    background: '#334155',
-    color: '#f1f5f9',
-  },
-  messageContent: {
-    wordBreak: 'break-word',
-  },
-  messageTime: {
-    fontSize: '10px',
-    marginTop: '4px',
-    opacity: 0.7,
-  },
-  form: {
-    display: 'flex',
-    padding: '12px',
-    borderTop: '1px solid #1e293b',
-    gap: '8px',
-  },
-  input: {
-    flex: 1,
-    padding: '8px 12px',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    background: '#1e293b',
-    color: '#f1f5f9',
-    outline: 'none',
-  },
-  button: {
-    padding: '8px 16px',
-    background: '#22c55e',
-    border: 'none',
-    borderRadius: '8px',
-    color: '#020617',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  loading: {
-    textAlign: 'center',
-    padding: '20px',
-    color: '#94a3b8',
-  },
-  error: {
-    textAlign: 'center',
-    padding: '20px',
-    color: '#ef4444',
-  },
-};

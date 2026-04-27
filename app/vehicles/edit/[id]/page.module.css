@@ -1,60 +1,173 @@
+/* app/vehicles/edit/[id]/page.module.css */
+
 .page {
-  padding: 40px;
-  background: #020617;
+  padding: 60px 20px;
+  background: #020617; /* Matches theme.colors.background.main */
   min-height: 100vh;
-  color: #f1f5f9;
-  font-family: 'Inter', sans-serif;
+  color: #ffffff;
+  font-family: 'Inter', system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
+
+.container {
+  width: 100%;
+  max-width: 800px;
+}
+
 .title {
-  font-size: 32px;
-  font-weight: 700;
-  margin-bottom: 24px;
-  background: linear-gradient(135deg, #94a3b8, #f1f5f9);
+  font-size: 36px;
+  font-weight: 900;
+  margin: 0 0 8px 0;
+  /* Fleet AI Gradient */
+  background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  letter-spacing: -0.02em;
 }
+
+.subtitle {
+  color: #94a3b8;
+  font-size: 16px;
+  margin-bottom: 40px;
+}
+
+/* Upgraded Glassmorphism Card */
 .card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
-  border-radius: 16px;
-  padding: 24px;
-  max-width: 600px;
-  margin: 0 auto;
+  background: rgba(30, 41, 59, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  padding: 32px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
 }
+
 .formGroup {
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
+
 .label {
   display: block;
-  font-size: 14px;
-  color: #94a3b8;
-  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
 }
+
+/* Sleek Input Styling */
 .input {
   width: 100%;
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  padding: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 14px 16px;
   color: #f1f5f9;
   font-size: 16px;
+  transition: all 0.2s ease;
+  outline: none;
 }
-.button {
-  background: #22c55e;
+
+.input:focus {
+  border-color: #facc15;
+  background: rgba(15, 23, 42, 0.9);
+  box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.1);
+}
+
+/* Specialized Plate Input */
+.plateInput {
+  background: #facc15;
+  color: #000;
+  font-weight: 800;
+  font-size: 20px;
+  text-align: center;
   border: none;
-  border-radius: 8px;
-  padding: 12px;
-  color: #020617;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Action Buttons */
+.buttonRow {
+  display: flex;
+  gap: 16px;
+  margin-top: 32px;
+}
+
+.submitButton {
+  flex: 2;
+  background: #facc15;
+  border: none;
+  border-radius: 14px;
+  padding: 16px;
+  color: #000;
+  font-weight: 800;
+  font-size: 16px;
+  cursor: pointer;
+  transition: transform 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.submitButton:hover {
+  transform: translateY(-2px);
+  background: #fde047;
+}
+
+.submitButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.cancelButton {
+  flex: 1;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  border-radius: 14px;
+  padding: 16px;
   font-weight: 600;
   cursor: pointer;
-  width: 100%;
+  transition: all 0.2s;
 }
-.backButton {
-  background: transparent;
-  border: 1px solid #334155;
+
+.cancelButton:hover {
+  background: rgba(255, 255, 255, 0.05);
   color: #f1f5f9;
-  padding: 8px 16px;
-  border-radius: 8px;
+}
+
+.backButton {
+  background: none;
+  border: none;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
   cursor: pointer;
   margin-bottom: 24px;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.backButton:hover {
+  color: #facc15;
+}
+
+/* Grid for smaller inputs */
+.rowFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+@media (max-width: 640px) {
+  .rowFields {
+    grid-template-columns: 1fr;
+  }
 }

@@ -1,93 +1,122 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { supabase } from '@/lib/supabase/client';
 
-interface GeolocationState {
-  loading: boolean
-  accuracy: number | null
-  altitude: number | null
-  altitudeAccuracy: number | null
-  heading: number | null
-  latitude: number | null
-  longitude: number | null
-  speed: number | null
-  timestamp: number | null
-  error: string | null
+export interface Message {
+  id: string;
+  job_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+  isOptimistic?: boolean; // Added to track unsaved messages
 }
 
-interface GeolocationOptions {
-  enableHighAccuracy?: boolean
-  timeout?: number
-  maximumAge?: number
-  watch?: boolean
-}
+export function useJobMessages(jobId: string, currentUserId: string | undefined) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Use a ref to keep track of the latest messages to avoid stale closures in the subscription
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
 
-export function useGeolocation(options: GeolocationOptions = {}) {
-  const [state, setState] = useState<GeolocationState>({
-    loading: true,
-    accuracy: null,
-    altitude: null,
-    altitudeAccuracy: null,
-    heading: null,
-    latitude: null,
-    longitude: null,
-    speed: null,
-    timestamp: null,
-    error: null,
-  })
+  const fetchMessages = useCallback(async () => {
+    if (!jobId) return;
+    try {
+      const { data, error: fetchErr } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: true });
+
+      if (fetchErr) throw fetchErr;
+      setMessages(data || []);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId]);
 
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setState(prev => ({ ...prev, loading: false, error: 'Geolocation not supported' }))
-      return
-    }
+    if (!jobId || !currentUserId) return;
 
-    const onSuccess = (position: GeolocationPosition) => {
-      setState({
-        loading: false,
-        accuracy: position.coords.accuracy,
-        altitude: position.coords.altitude,
-        altitudeAccuracy: position.coords.altitudeAccuracy,
-        heading: position.coords.heading,
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        speed: position.coords.speed,
-        timestamp: position.timestamp,
-        error: null,
-      })
-    }
+    fetchMessages();
 
-    const onError = (error: GeolocationPositionError) => {
-      setState(prev => ({
-        ...prev,
-        loading: false,
-        error: error.message,
-      }))
-    }
-
-    const { enableHighAccuracy = true, timeout = 10000, maximumAge = 0, watch = false } = options
-
-    let watchId: number | null = null
-    if (watch) {
-      watchId = navigator.geolocation.watchPosition(onSuccess, onError, {
-        enableHighAccuracy,
-        timeout,
-        maximumAge,
-      })
-    } else {
-      navigator.geolocation.getCurrentPosition(onSuccess, onError, {
-        enableHighAccuracy,
-        timeout,
-        maximumAge,
-      })
-    }
+    // 1. Robust Real-time Subscription
+    const channel = supabase
+      .channel(`job_chat_${jobId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `job_id=eq.${jobId}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as Message;
+          
+          // 2. deduplication: Only add if it's not our own optimistic message 
+          // (which we already added to the UI manually)
+          setMessages((prev) => {
+            const exists = prev.some(m => m.id === newMsg.id);
+            if (exists) return prev;
+            return [...prev, newMsg];
+          });
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          setError('Lost real-time connection. Messages may not be live.');
+        }
+      });
 
     return () => {
-      if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId)
-      }
-    }
-  }, [options.enableHighAccuracy, options.timeout, options.maximumAge, options.watch])
+      supabase.removeChannel(channel);
+    };
+  }, [jobId, currentUserId, fetchMessages]);
 
-  return state
+  const sendMessage = useCallback(async (content: string) => {
+    if (!content.trim() || !currentUserId || !jobId) return;
+
+    // 3. OPTIMISTIC UPDATE: Add the message to the UI instantly
+    const tempId = crypto.randomUUID();
+    const optimisticMsg: Message = {
+      id: tempId,
+      job_id: jobId,
+      sender_id: currentUserId,
+      content: content.trim(),
+      created_at: new Date().toISOString(),
+      isOptimistic: true,
+    };
+
+    setMessages((prev) => [...prev, optimisticMsg]);
+
+    try {
+      const { data, error: sendErr } = await supabase
+        .from('chat_messages')
+        .insert({
+          job_id: jobId,
+          sender_id: currentUserId,
+          content: content.trim(),
+        })
+        .select()
+        .single();
+
+      if (sendErr) throw sendErr;
+
+      // 4. Replace the optimistic message with the real one from the server
+      setMessages((prev) => 
+        prev.map(m => (m.id === tempId ? data : m))
+      );
+    } catch (err: any) {
+      // 5. ROLLBACK: Remove the optimistic message if it failed
+      setMessages((prev) => prev.filter(m => m.id !== tempId));
+      setError(`Failed to send: ${err.message}`);
+    }
+  }, [jobId, currentUserId]);
+
+  return { messages, loading, error, sendMessage };
 }

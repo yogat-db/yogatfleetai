@@ -1,10 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { supabase } from '@/lib/supabase/client'
+import { Plus, History, Car, ChevronRight, Clock } from 'lucide-react'
+import theme from '@/app/theme'
 
 type ServiceEvent = {
   id: string
@@ -13,13 +15,12 @@ type ServiceEvent = {
   description: string | null
   mileage: number | null
   occurred_at: string
-  created_at: string
-  vehicle?: {
-    id: string
+  // Relational join from Supabase
+  vehicles: {
     license_plate: string
     make: string | null
     model: string | null
-  }
+  } | null
 }
 
 export default function ServiceHistoryPage() {
@@ -28,83 +29,70 @@ export default function ServiceHistoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchEvents()
-  }, [])
-
-  async function fetchEvents() {
+  const fetchEvents = useCallback(async () => {
     try {
       setLoading(true)
-      // First get all vehicles for the current user
-      const { data: vehicles, error: vehiclesError } = await supabase
-        .from('vehicles')
-        .select('id, license_plate, make, model')
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
 
-      if (vehiclesError) throw vehiclesError
+      /** * UPGRADE: Relational Join
+       * Instead of looping, we fetch events and "join" the vehicle data 
+       * in one go. We filter by user_id through the vehicle relation.
+       */
+      const { data, error: sbError } = await supabase
+        .from('service_events')
+        .select(`
+          *,
+          vehicles!inner (
+            license_plate,
+            make,
+            model,
+            user_id
+          )
+        `)
+        .eq('vehicles.user_id', user.id)
+        .order('occurred_at', { ascending: false })
 
-      // Then fetch service events for each vehicle
-      const allEvents = await Promise.all(
-        (vehicles || []).map(async (vehicle) => {
-          const { data, error } = await supabase
-            .from('service_events')
-            .select('*')
-            .eq('vehicle_id', vehicle.id)
-            .order('occurred_at', { ascending: false })
-
-          if (error) {
-            console.error('Error fetching events for vehicle', vehicle.id, error)
-            return []
-          }
-          return (data || []).map((event) => ({
-            ...event,
-            vehicle,
-          }))
-        })
-      )
-
-      const flatEvents = allEvents.flat().sort(
-        (a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime()
-      )
-      setEvents(flatEvents)
+      if (sbError) throw sbError
+      setEvents(data || [])
     } catch (err: any) {
       setError(err.message)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  if (loading) {
-    return (
-      <div style={styles.centered}>
-        <div className="spinner" />
-        <p>Loading service history...</p>
-      </div>
-    )
-  }
+  useEffect(() => {
+    fetchEvents()
+  }, [fetchEvents])
 
-  if (error) {
-    return (
-      <div style={styles.centered}>
-        <p style={{ color: '#ef4444' }}>Error: {error}</p>
-        <button onClick={fetchEvents} style={styles.retryButton}>Retry</button>
-      </div>
-    )
-  }
+  if (loading) return (
+    <div style={styles.centered}>
+      <Clock className="spin" size={32} color={theme.colors.primary} />
+      <p style={{ marginTop: 12 }}>Retrieving fleet records...</p>
+      <style>{`.spin { animation: spin 2s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  )
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
       <div style={styles.header}>
-        <h1 style={styles.title}>Service History</h1>
+        <div>
+          <h1 style={styles.title}>Service History</h1>
+          <p style={styles.subtitle}>Maintenance logs and repair tracking for your fleet</p>
+        </div>
         <button onClick={() => router.push('/service-history/add')} style={styles.addButton}>
-          + Add Event
+          <Plus size={18} /> Add Record
         </button>
       </div>
 
       {events.length === 0 ? (
         <div style={styles.emptyState}>
-          <p>No service events recorded yet.</p>
+          <History size={48} style={{ opacity: 0.2, marginBottom: 16 }} />
+          <h3>No records found</h3>
+          <p>You haven't logged any maintenance for your vehicles yet.</p>
           <button onClick={() => router.push('/service-history/add')} style={styles.emptyButton}>
-            Add your first event
+            Log First Service
           </button>
         </div>
       ) : (
@@ -112,162 +100,192 @@ export default function ServiceHistoryPage() {
           {events.map((event) => (
             <motion.div
               key={event.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
+              whileHover={{ x: 4, backgroundColor: 'rgba(255,255,255,0.03)' }}
               style={styles.eventCard}
               onClick={() => router.push(`/service-history/${event.id}`)}
             >
-              <div style={styles.eventHeader}>
-                <div>
-                  <span style={styles.vehiclePlate}>{event.vehicle?.license_plate}</span>
-                  <span style={styles.vehicleName}>
-                    {event.vehicle?.make} {event.vehicle?.model}
+              <div style={styles.eventSidebar}>
+                <div style={styles.dateDot} />
+                <div style={styles.dateLine} />
+              </div>
+
+              <div style={styles.eventContent}>
+                <div style={styles.eventHeader}>
+                  <div style={styles.vehicleInfo}>
+                    <span style={styles.vehiclePlate}>{event.vehicles?.license_plate}</span>
+                    <span style={styles.vehicleName}>
+                      {event.vehicles?.make} {event.vehicles?.model}
+                    </span>
+                  </div>
+                  <span style={styles.eventDate}>
+                    {format(new Date(event.occurred_at), 'MMM d, yyyy')}
                   </span>
                 </div>
-                <span style={styles.eventDate}>
-                  {format(new Date(event.occurred_at), 'MMM d, yyyy')}
-                </span>
+
+                <h3 style={styles.eventTitle}>{event.title}</h3>
+                {event.description && <p style={styles.eventDescription}>{event.description}</p>}
+                
+                <div style={styles.metaRow}>
+                   {event.mileage && (
+                    <span style={styles.eventMileage}>
+                      <History size={12} /> {event.mileage.toLocaleString()} mi
+                    </span>
+                   )}
+                   <ChevronRight size={16} style={{ marginLeft: 'auto', opacity: 0.3 }} />
+                </div>
               </div>
-              <h3 style={styles.eventTitle}>{event.title}</h3>
-              {event.description && <p style={styles.eventDescription}>{event.description}</p>}
-              {event.mileage && <p style={styles.eventMileage}>Mileage: {event.mileage.toLocaleString()} mi</p>}
             </motion.div>
           ))}
         </div>
       )}
-
-      <style jsx>{`
-        .spinner {
-          border: 3px solid rgba(255,255,255,0.1);
-          border-top: 3px solid #22c55e;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </motion.div>
   )
 }
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    padding: '40px',
-    background: '#020617',
+    padding: theme.spacing[10],
+    background: theme.colors.background.main,
     minHeight: '100vh',
-    color: '#f1f5f9',
-    fontFamily: 'Inter, sans-serif',
+    color: theme.colors.text.primary,
+    maxWidth: '900px',
+    margin: '0 auto',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 30,
+    alignItems: 'flex-end',
+    marginBottom: 40,
   },
   title: {
     fontSize: 32,
-    fontWeight: 700,
-    background: 'linear-gradient(135deg, #94a3b8, #f1f5f9)',
+    fontWeight: 900,
+    background: theme.gradients.title,
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
     margin: 0,
   },
+  subtitle: {
+    color: theme.colors.text.muted,
+    fontSize: 14,
+    margin: '4px 0 0 0'
+  },
   addButton: {
-    background: '#22c55e',
-    color: '#020617',
+    background: theme.colors.primary,
+    color: '#000',
     border: 'none',
     padding: '10px 20px',
-    borderRadius: 30,
+    borderRadius: theme.borderRadius.lg,
     fontSize: 14,
-    fontWeight: 600,
+    fontWeight: 700,
     cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
   },
   centered: {
-    minHeight: '100vh',
+    height: '80vh',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#94a3b8',
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '60px 20px',
-    background: '#0f172a',
-    borderRadius: 16,
-    border: '1px solid #1e293b',
-  },
-  emptyButton: {
-    marginTop: 16,
-    background: '#22c55e',
-    color: '#020617',
-    border: 'none',
-    padding: '10px 20px',
-    borderRadius: 30,
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: 'pointer',
+    color: theme.colors.text.muted,
   },
   timeline: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 16,
   },
   eventCard: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: 16,
-    padding: 20,
+    display: 'flex',
+    gap: 20,
     cursor: 'pointer',
-    transition: 'all 0.2s',
+    padding: '0 0 32px 0',
+  },
+  eventSidebar: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    width: '20px',
+  },
+  dateDot: {
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
+    background: theme.colors.primary,
+    border: `3px solid ${theme.colors.background.main}`,
+    zIndex: 2,
+  },
+  dateLine: {
+    flex: 1,
+    width: '2px',
+    background: theme.colors.border.light,
+    marginTop: -4,
+  },
+  eventContent: {
+    flex: 1,
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.light}`,
+    borderRadius: theme.borderRadius.xl,
+    padding: 24,
+    marginTop: -8,
   },
   eventHeader: {
     display: 'flex',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  vehicleInfo: {
+    display: 'flex',
     alignItems: 'center',
-    marginBottom: 12,
+    gap: 12,
   },
   vehiclePlate: {
-    background: '#1e293b',
-    padding: '4px 10px',
-    borderRadius: 20,
-    fontSize: 13,
-    fontWeight: 600,
-    color: '#94a3b8',
-    marginRight: 8,
+    background: '#facc15',
+    color: '#000',
+    padding: '2px 8px',
+    borderRadius: 4,
+    fontSize: 11,
+    fontWeight: 800,
   },
   vehicleName: {
     fontSize: 13,
-    color: '#64748b',
+    color: theme.colors.text.secondary,
+    fontWeight: 500,
   },
   eventDate: {
-    fontSize: 13,
-    color: '#94a3b8',
+    fontSize: 12,
+    color: theme.colors.text.muted,
   },
   eventTitle: {
     fontSize: 18,
-    fontWeight: 600,
-    marginBottom: 8,
+    fontWeight: 700,
+    margin: '0 0 8px 0',
   },
   eventDescription: {
     fontSize: 14,
-    color: '#94a3b8',
-    marginBottom: 8,
+    color: theme.colors.text.secondary,
+    lineHeight: 1.5,
+    margin: '0 0 16px 0',
+  },
+  metaRow: {
+    display: 'flex',
+    alignItems: 'center',
+    paddingTop: 16,
+    borderTop: `1px solid ${theme.colors.border.light}`,
   },
   eventMileage: {
-    fontSize: 13,
-    color: '#64748b',
+    fontSize: 12,
+    color: theme.colors.text.muted,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
   },
-  retryButton: {
-    marginTop: 16,
-    padding: '8px 16px',
-    background: '#22c55e',
-    border: 'none',
-    borderRadius: 4,
-    color: '#020617',
-    cursor: 'pointer',
+  emptyState: {
+    textAlign: 'center',
+    padding: '80px 40px',
+    background: theme.colors.background.card,
+    borderRadius: 24,
+    border: `1px dashed ${theme.colors.border.light}`,
   },
 }

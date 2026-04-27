@@ -1,114 +1,241 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Briefcase, Shield, LayoutDashboard } from 'lucide-react';
-import { supabase } from '@/lib/supabase/client';
+import { Briefcase, Wrench, ShoppingBag, Truck, ArrowUpRight } from 'lucide-react';
 import theme from '@/app/theme';
 
 export default function MarketplacePage() {
-  const router = useRouter();
-  const [isMechanic, setIsMechanic] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const checkMechanic = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: mechanic } = await supabase
-          .from('mechanics')
-          .select('id')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        setIsMechanic(!!mechanic);
-      }
-      setLoading(false);
-    };
-    checkMechanic();
-  }, []);
+  const marketplaceOptions = [
+    {
+      title: 'Post a Repair Job',
+      description: 'Describe your issue and get competitive quotes.',
+      icon: Briefcase,
+      href: '/jobs/post',
+      color: theme.colors.primary,
+      badge: 'Vehicle Owners',
+    },
+    {
+      title: 'Find Jobs',
+      description: 'Browse open repair jobs and submit your application.',
+      icon: Wrench,
+      href: '/marketplace/jobs',
+      color: '#10b981',
+      badge: 'Mechanic Hub',
+    },
+    {
+      title: 'Car Accessories',
+      description: 'Shop premium parts, tools, and upgrades.',
+      icon: Truck,
+      href: '/marketplace/affiliate',
+      color: '#f59e0b',
+      badge: 'Shop & Save',
+    },
+  ];
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
-      <h1 style={styles.title}>Marketplace</h1>
-      <p style={styles.subtitle}>Everything you need to keep your vehicle on the road</p>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={styles.container}
+    >
+      <header style={styles.header}>
+        <div style={styles.badgeTop}>Fleet Ecosystem</div>
+        <h1 style={styles.title}>Marketplace</h1>
+        <p style={styles.subtitle}>Everything you need to keep your vehicle on the road</p>
+      </header>
 
       <div style={styles.grid}>
-        {/* Repair Jobs */}
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          transition={{ type: 'spring', stiffness: 300 }}
-          style={styles.card}
-          onClick={() => router.push('/marketplace/jobs')}
-        >
-          <Briefcase size={32} color={theme.colors.primary} />
-          <h2>Repair Jobs</h2>
-          <p>Post a repair job or find work</p>
-        </motion.div>
+        {marketplaceOptions.map((option, idx) => {
+          const Icon = option.icon;
+          return (
+            <motion.div
+              key={option.href}
+              whileHover={{ y: -3 }}
+              transition={{ type: 'spring', stiffness: 300 }}
+            >
+              <Link href={option.href} style={styles.card}>
+                <div style={{ ...styles.iconWrapper, background: `${option.color}15`, border: `1px solid ${option.color}30` }}>
+                  <Icon size={22} style={{ color: option.color }} />
+                </div>
+                <div style={styles.cardContent}>
+                  <div style={styles.cardHeader}>
+                    <h2 style={styles.cardTitle}>{option.title}</h2>
+                    <span style={{ ...styles.badge, background: `${option.color}20`, color: option.color }}>
+                      {option.badge}
+                    </span>
+                  </div>
+                  <p style={styles.cardDescription}>{option.description}</p>
+                </div>
+                <div style={styles.cardFooter}>
+                  <span style={styles.footerText}>Open Module</span>
+                  <ArrowUpRight size={12} style={styles.footerIcon} />
+                </div>
+              </Link>
+            </motion.div>
+          );
+        })}
+      </div>
 
-        {/* Breakdown Cover */}
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          transition={{ type: 'spring', stiffness: 300 }}
-          style={styles.card}
-          onClick={() => router.push('/marketplace/breakdown-cover')}
-        >
-          <Shield size={32} color={theme.colors.primary} />
-          <h2>Breakdown Cover</h2>
-          <p>Compare roadside assistance plans</p>
-        </motion.div>
-
-        {/* Mechanic Dashboard (only for mechanics) */}
-        {!loading && isMechanic && (
-          <motion.div
-            whileHover={{ scale: 1.02 }}
-            transition={{ type: 'spring', stiffness: 300 }}
-            style={styles.card}
-            onClick={() => router.push('/marketplace/mechanics/dashboard')}
-          >
-            <LayoutDashboard size={32} color={theme.colors.primary} />
-            <h2>Mechanic Dashboard</h2>
-            <p>View your applications, earnings, and manage your profile</p>
-          </motion.div>
-        )}
+      {/* Stats bar – also made more compact */}
+      <div style={styles.stats}>
+        <div style={styles.statItem}>
+          <span style={styles.statNumber}>500+</span>
+          <span style={styles.statLabel}>Jobs Completed</span>
+        </div>
+        <div style={styles.statDivider} />
+        <div style={styles.statItem}>
+          <span style={styles.statNumber}>150+</span>
+          <span style={styles.statLabel}>Verified Mechanics</span>
+        </div>
+        <div style={styles.statDivider} />
+        <div style={styles.statItem}>
+          <span style={styles.statNumber}>24/7</span>
+          <span style={styles.statLabel}>System Uptime</span>
+        </div>
       </div>
     </motion.div>
   );
 }
 
+// ==================== COMPACT STYLES (smaller cards) ====================
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    padding: theme.spacing[10],
+  container: {
+    padding: `${theme.spacing[8]} ${theme.spacing[6]}`,
+    maxWidth: '1200px',
+    margin: '0 auto',
     background: theme.colors.background.main,
     minHeight: '100vh',
-    color: theme.colors.text.primary,
-    fontFamily: theme.fontFamilies.sans,
+  },
+  header: {
+    textAlign: 'left',
+    marginBottom: theme.spacing[8],
+    paddingLeft: theme.spacing[2],
+  },
+  badgeTop: {
+    fontSize: '10px',
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: '0.3em',
+    color: theme.colors.text.muted,
+    marginBottom: theme.spacing[1],
   },
   title: {
-    fontSize: theme.fontSizes['4xl'],
-    fontWeight: theme.fontWeights.bold,
+    fontSize: '2.5rem',
+    fontWeight: '800',
+    letterSpacing: '-0.03em',
+    color: '#fff',
     marginBottom: theme.spacing[2],
-    background: theme.gradients.title,
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
+    lineHeight: 1.2,
   },
   subtitle: {
-    fontSize: theme.fontSizes.base,
+    fontSize: theme.fontSizes.sm,
     color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[8],
+    maxWidth: '500px',
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
     gap: theme.spacing[6],
+    marginBottom: theme.spacing[10],
   },
   card: {
-    background: theme.colors.background.card,
+    background: 'rgba(15, 23, 42, 0.4)',
+    borderRadius: '1.5rem',
     border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[6],
-    cursor: 'pointer',
+    padding: theme.spacing[5],
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    textDecoration: 'none',
+    transition: 'all 0.25s ease',
+  },
+  iconWrapper: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '1rem',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing[4],
+  },
+  cardContent: {
+    flex: 1,
+  },
+  cardHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[3],
+  },
+  cardTitle: {
+    fontSize: theme.fontSizes.xl,
+    fontWeight: '700',
+    color: '#fff',
+    margin: 0,
+    letterSpacing: '-0.01em',
+  },
+  badge: {
+    fontSize: '8px',
+    padding: '3px 10px',
+    borderRadius: '100px',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+  },
+  cardDescription: {
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.text.secondary,
+    lineHeight: 1.5,
+    margin: 0,
+  },
+  cardFooter: {
+    marginTop: theme.spacing[5],
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    color: theme.colors.text.muted,
+  },
+  footerText: {
+    fontSize: '10px',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+  },
+  footerIcon: {
+    transition: 'transform 0.2s',
+  },
+  stats: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: theme.spacing[5],
+    background: 'rgba(2, 6, 23, 0.5)',
+    borderRadius: '1.5rem',
+    border: `1px solid ${theme.colors.border.light}`,
+  },
+  statItem: {
+    flex: 1,
     textAlign: 'center',
-    transition: 'box-shadow 0.2s ease',
+  },
+  statDivider: {
+    width: '1px',
+    height: '30px',
+    background: theme.colors.border.light,
+  },
+  statNumber: {
+    display: 'block',
+    fontSize: theme.fontSizes['2xl'],
+    fontWeight: '800',
+    color: theme.colors.primary,
+    letterSpacing: '-0.03em',
+  },
+  statLabel: {
+    fontSize: '9px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: theme.colors.text.muted,
+    marginTop: theme.spacing[1],
   },
 };

@@ -1,77 +1,71 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import Link from 'next/link';
-import { Briefcase, Users, UserCog, ArrowRight, AlertCircle } from 'lucide-react';
+import { Briefcase, Users, UserCog, ArrowRight, AlertCircle, TrendingUp } from 'lucide-react';
 import theme from '@/app/theme';
 
-// ✅ New (correct)
 export const metadata = {
-  title: 'Admin Dashboard | Yogat Fleet AI',
-  description: '...',
-  // no viewport fields here
+  title: 'Admin Command Center | Yogat Fleet AI',
+  description: 'Global platform overview and management.',
 };
 
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#22c55e',
+  themeColor: '#020617', // Darker to match our Slate 950 background
 };
 
 export default async function AdminDashboardPage() {
-  let jobsCount = 0;
-  let mechanicsCount = 0;
-  let usersCount = 0;
-  let error = null;
+  // Concurrent fetching with fail-safes
+  const results = await Promise.allSettled([
+    supabaseAdmin.from('jobs').select('*', { count: 'exact', head: true }),
+    supabaseAdmin.from('mechanics').select('*', { count: 'exact', head: true }),
+    supabaseAdmin.auth.admin.listUsers()
+  ]);
 
-  try {
-    const { count: jobs, error: jobsErr } = await supabaseAdmin
-      .from('jobs')
-      .select('*', { count: 'exact', head: true });
-    if (jobsErr) throw jobsErr;
-    jobsCount = jobs || 0;
-
-    const { count: mechanics, error: mechErr } = await supabaseAdmin
-      .from('mechanics')
-      .select('*', { count: 'exact', head: true });
-    if (mechErr) throw mechErr;
-    mechanicsCount = mechanics || 0;
-
-    const { data: usersData, error: usersErr } = await supabaseAdmin.auth.admin.listUsers();
-    if (usersErr) throw usersErr;
-    usersCount = usersData?.users.length || 0;
-  } catch (err: any) {
-    console.error('Admin dashboard error:', err);
-    error = err.message;
-  }
+  const jobsCount = results[0].status === 'fulfilled' ? (results[0].value as any).count || 0 : 0;
+  const mechanicsCount = results[1].status === 'fulfilled' ? (results[1].value as any).count || 0 : 0;
+  const usersCount = results[2].status === 'fulfilled' ? (results[2].value as any).data.users.length || 0 : 0;
+  
+  // Check if everything failed
+  const allFailed = results.every(r => r.status === 'rejected');
 
   const stats = [
-    { label: 'Total Jobs', value: jobsCount, icon: Briefcase, href: '/admin/jobs', color: '#22c55e' },
-    { label: 'Total Mechanics', value: mechanicsCount, icon: Users, href: '/admin/mechanics', color: '#3b82f6' },
-    { label: 'Total Users', value: usersCount, icon: UserCog, href: '/admin/users', color: '#f59e0b' },
+    { label: 'Total Jobs', value: jobsCount, icon: Briefcase, href: '/admin/jobs', color: theme.colors.status.info },
+    { label: 'Mechanic Partners', value: mechanicsCount, icon: Users, href: '/admin/mechanics', color: theme.colors.primary },
+    { label: 'Registered Users', value: usersCount, icon: UserCog, href: '/admin/users', color: theme.colors.status.warning },
   ];
 
-  if (error) {
+  if (allFailed) {
     return (
       <div style={styles.errorContainer}>
-        <AlertCircle size={48} color={theme.colors.error} />
-        <h2>Unable to load admin data</h2>
-        <p>{error}</p>
-        <p>Check that Supabase environment variables are set correctly and the service role key has permission.</p>
+        <AlertCircle size={48} color={theme.colors.status.critical} />
+        <h2 style={{ fontSize: theme.fontSizes['2xl'], fontWeight: '700' }}>System Connectivity Issue</h2>
+        <p style={{ color: theme.colors.text.secondary, maxWidth: '400px' }}>
+          Unable to establish a connection with the Supabase Admin API. Please verify your Service Role Key.
+        </p>
       </div>
     );
   }
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}>Admin Dashboard</h1>
-      <p style={styles.subtitle}>Manage your platform from one place</p>
+      <header style={styles.header}>
+        <div style={styles.badge}>
+          <TrendingUp size={12} /> System Live
+        </div>
+        <h1 style={styles.title}>Admin Dashboard</h1>
+        <p style={styles.subtitle}>Real-time metrics and platform control.</p>
+      </header>
 
       <div style={styles.statsGrid}>
         {stats.map((stat) => (
           <Link key={stat.label} href={stat.href} style={{ textDecoration: 'none' }}>
             <div style={styles.statCard}>
-              <stat.icon size={32} color={stat.color} />
+              <div style={{ ...styles.iconBox, background: `${stat.color}15` }}>
+                <stat.icon size={24} color={stat.color} />
+              </div>
               <div style={styles.statContent}>
-                <span style={styles.statValue}>{stat.value}</span>
+                <span style={styles.statValue}>{stat.value.toLocaleString()}</span>
                 <span style={styles.statLabel}>{stat.label}</span>
               </div>
               <ArrowRight size={18} style={styles.arrow} />
@@ -80,123 +74,185 @@ export default async function AdminDashboardPage() {
         ))}
       </div>
 
-      <h2 style={styles.sectionTitle}>Quick Actions</h2>
+      <div style={styles.sectionHeader}>
+        <h2 style={styles.sectionTitle}>Quick Actions</h2>
+        <div style={styles.divider} />
+      </div>
+
       <div style={styles.actionGrid}>
-        <Link href="/admin/jobs" style={{ textDecoration: 'none' }}>
-          <div style={styles.actionCard}>
-            <Briefcase size={24} color={theme.colors.primary} />
-            <div>
-              <h3>Manage Jobs</h3>
-              <p>View, edit, or delete repair jobs</p>
-            </div>
-          </div>
-        </Link>
-        <Link href="/admin/mechanics" style={{ textDecoration: 'none' }}>
-          <div style={styles.actionCard}>
-            <Users size={24} color={theme.colors.primary} />
-            <div>
-              <h3>Manage Mechanics</h3>
-              <p>Verify, edit, or remove mechanics</p>
-            </div>
-          </div>
-        </Link>
-        <Link href="/admin/users" style={{ textDecoration: 'none' }}>
-          <div style={styles.actionCard}>
-            <UserCog size={24} color={theme.colors.primary} />
-            <div>
-              <h3>Manage Users</h3>
-              <p>Promote users to admin, view details</p>
-            </div>
-          </div>
-        </Link>
+        <ActionCard 
+          href="/admin/jobs" 
+          icon={Briefcase} 
+          title="Manage Jobs" 
+          desc="Audit active repair requests and history." 
+        />
+        <ActionCard 
+          href="/admin/mechanics" 
+          icon={Users} 
+          title="Mechanic Approval" 
+          desc="Review pending shop verifications." 
+        />
+        <ActionCard 
+          href="/admin/users" 
+          icon={UserCog} 
+          title="User Permissions" 
+          desc="Adjust roles and account status." 
+        />
       </div>
     </div>
   );
 }
 
-// Inline styles – no CSS module required, no :hover pseudo‑class
+// Reusable Sub-component (Internal)
+function ActionCard({ href, icon: Icon, title, desc }: any) {
+  return (
+    <Link href={href} style={{ textDecoration: 'none' }}>
+      <div style={styles.actionCard}>
+        <div style={styles.actionIconWrapper}>
+          <Icon size={20} color={theme.colors.text.primary} />
+        </div>
+        <div>
+          <h3 style={styles.actionTitle}>{title}</h3>
+          <p style={styles.actionDesc}>{desc}</p>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+// ==================== STYLES ====================
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    padding: theme.spacing[10],
+    padding: '40px',
     background: theme.colors.background.main,
     minHeight: '100vh',
-    color: theme.colors.text.primary,
     fontFamily: theme.fontFamilies.sans,
   },
+  header: { marginBottom: '48px' },
+  badge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '4px 12px',
+    background: `${theme.colors.primary}15`,
+    color: theme.colors.primary,
+    borderRadius: '99px',
+    fontSize: '11px',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: '1px',
+    marginBottom: '16px',
+  },
   title: {
-    fontSize: theme.fontSizes['4xl'],
-    fontWeight: theme.fontWeights.bold,
-    marginBottom: theme.spacing[2],
+    fontSize: '40px',
+    fontWeight: '900',
     background: theme.gradients.title,
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
+    letterSpacing: '-1.5px',
+    margin: 0,
   },
   subtitle: {
-    fontSize: theme.fontSizes.base,
+    fontSize: '16px',
     color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[8],
+    marginTop: '4px',
   },
   statsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: theme.spacing[6],
-    marginBottom: theme.spacing[12],
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '24px',
+    marginBottom: '64px',
   },
   statCard: {
     background: theme.colors.background.card,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[6],
+    borderRadius: '24px',
+    padding: '32px',
     border: `1px solid ${theme.colors.border.light}`,
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[4],
-    transition: 'transform 0.2s ease, box-shadow 0.2s ease', // no :hover, but element will still transform if we add JS hover? We'll omit hover to avoid inline pseudo.
+    gap: '20px',
     cursor: 'pointer',
+    position: 'relative',
+  },
+  iconBox: {
+    width: '56px',
+    height: '56px',
+    borderRadius: '16px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   statContent: { flex: 1 },
   statValue: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
+    fontSize: '32px',
+    fontWeight: '800',
     display: 'block',
-    color: theme.colors.text.primary,
+    color: '#fff',
+    lineHeight: 1,
+    marginBottom: '4px',
   },
   statLabel: {
-    fontSize: theme.fontSizes.sm,
+    fontSize: '14px',
     color: theme.colors.text.muted,
+    fontWeight: '500',
   },
-  arrow: { color: theme.colors.text.muted },
+  arrow: { color: theme.colors.border.medium },
+  sectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px',
+    marginBottom: '32px',
+  },
   sectionTitle: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.semibold,
-    marginBottom: theme.spacing[6],
-    color: theme.colors.text.primary,
+    fontSize: '20px',
+    fontWeight: '700',
+    color: '#fff',
+    whiteSpace: 'nowrap',
+  },
+  divider: {
+    height: '1px',
+    background: theme.colors.border.light,
+    width: '100%',
   },
   actionGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-    gap: theme.spacing[4],
+    gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+    gap: '16px',
   },
   actionCard: {
-    background: theme.colors.background.card,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[4],
+    background: '#0f172a80',
+    borderRadius: '16px',
+    padding: '20px',
     border: `1px solid ${theme.colors.border.light}`,
     display: 'flex',
     alignItems: 'center',
-    gap: theme.spacing[4],
-    transition: 'background 0.2s ease',
-    cursor: 'pointer',
+    gap: '16px',
+    transition: 'all 0.2s ease',
+  },
+  actionIconWrapper: {
+    background: '#1e293b',
+    padding: '12px',
+    borderRadius: '12px',
+  },
+  actionTitle: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#f8fafc',
+    margin: 0,
+  },
+  actionDesc: {
+    fontSize: '13px',
+    color: '#64748b',
+    margin: '2px 0 0 0',
   },
   errorContainer: {
-    padding: theme.spacing[10],
-    background: theme.colors.background.main,
-    minHeight: '100vh',
+    height: '100vh',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     textAlign: 'center',
-    color: theme.colors.text.primary,
-    gap: theme.spacing[4],
+    background: theme.colors.background.main,
+    gap: '16px',
   },
 };
