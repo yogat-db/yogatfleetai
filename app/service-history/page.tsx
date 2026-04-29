@@ -85,14 +85,20 @@ export default function ServiceHistoryPage() {
     }
   };
 
-  if (loading) return <div style={styles.centered}><Loader2 size={40} className="spin" /><p>Loading...</p></div>;
-  if (error) return <div style={styles.centered}>Error: {error}</div>;
+  if (loading) {
+    return <div style={styles.centered}><Loader2 size={40} className="spin" /><p>Loading...</p></div>;
+  }
+  if (error) {
+    return <div style={styles.centered}>Error: {error}</div>;
+  }
 
   return (
     <div style={styles.page}>
       <div style={styles.header}>
         <h1 style={styles.title}>Service History</h1>
-        <Link href="/service-history/add" style={styles.addButton}><PlusCircle size={18} /> Add Record</Link>
+        <Link href="/service-history/add" style={styles.addButton}>
+          <PlusCircle size={18} /> Add Record
+        </Link>
       </div>
       {records.length === 0 ? (
         <div style={styles.empty}>No service records yet.</div>
@@ -125,13 +131,13 @@ export default function ServiceHistoryPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { padding: '20px', background: theme.colors.background.main, minHeight: '100vh', color: '#fff' },
+  page: { padding: 'clamp(16px, 4vw, 32px)', background: theme.colors.background.main, minHeight: '100vh', color: '#fff' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap' },
-  title: { fontSize: '28px', fontWeight: 800, background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  title: { fontSize: 'clamp(24px, 6vw, 32px)', fontWeight: 800, background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
   addButton: { background: theme.colors.primary, color: '#000', padding: '8px 16px', borderRadius: '40px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '8px' },
   list: { display: 'flex', flexDirection: 'column', gap: '16px' },
   card: { background: theme.colors.background.card, borderRadius: '16px', padding: '16px', border: `1px solid ${theme.colors.border.light}` },
-  cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' },
+  cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' },
   deleteBtn: { background: 'transparent', border: `1px solid ${theme.colors.status.critical}40`, borderRadius: '8px', padding: '6px', cursor: 'pointer', color: theme.colors.status.critical },
   details: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px,1fr))', gap: '12px', fontSize: '13px', color: theme.colors.text.secondary },
   empty: { textAlign: 'center', padding: '60px', color: theme.colors.text.muted },

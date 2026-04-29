@@ -1,294 +1,330 @@
+// app/jobs/post/page.tsx
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { AnimatePresence, motion } from 'framer-motion';
-import {
-  AlertCircle,
-  ArrowRight,
-  Briefcase,
-  Calendar,
-  Car,
-  MapPin,
-  PoundSterling,
-} from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Briefcase, MapPin, PoundSterling, Car, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import theme from '@/app/theme';
+import toast from 'react-hot-toast';
 
-type JobVehicle = {
-  make: string | null;
-  model: string | null;
-  license_plate: string | null;
-};
-
-interface Job {
+interface Vehicle {
   id: string;
-  title: string;
-  description: string | null;
-  budget: number | null;
-  status: string;
-  location: string | null;
-  user_id: string;
-  created_at: string;
-  vehicle: JobVehicle | null;
+  make: string;
+  model: string;
+  license_plate: string;
+  year: number | null;
 }
 
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(date));
-}
-
-function formatBudget(budget: number | null) {
-  if (budget == null || Number.isNaN(Number(budget))) return 'TBD';
-
-  return new Intl.NumberFormat('en-GB', {
-    style: 'currency',
-    currency: 'GBP',
-    maximumFractionDigits: 0,
-  }).format(budget);
-}
-
-function truncate(text: string | null | undefined, length = 140) {
-  if (!text) return 'No description provided.';
-  return text.length > length ? `${text.slice(0, length).trim()}…` : text;
-}
-
-export default function JobsPage() {
+export default function PostJobPage() {
   const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [budget, setBudget] = useState('');
+  const [location, setLocation] = useState('');
+  const [vehicleId, setVehicleId] = useState('');
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [fetchingVehicles, setFetchingVehicles] = useState(true);
 
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isMechanic, setIsMechanic] = useState<boolean | null>(null);
+  useEffect(() => {
+    async function loadVehicles() {
+      setFetchingVehicles(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase
+          .from('vehicles')
+          .select('id, make, model, license_plate, year')
+          .eq('user_id', user.id);
+        if (data) setVehicles(data);
+      }
+      setFetchingVehicles(false);
+    }
+    loadVehicles();
+  }, []);
 
-  const fetchData = useCallback(async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setError('Title is required');
+      return;
+    }
+    if (!vehicleId) {
+      setError('Please select a vehicle');
+      return;
+    }
     setLoading(true);
-
+    setError(null);
     try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError) {
-        throw sessionError;
-      }
-
-      if (!session?.user?.id) {
-        router.replace('/login');
-        return;
-      }
-
-      const [mechanicResponse, jobsResponse] = await Promise.all([
-        supabase
-          .from('mechanics')
-          .select('id, verified')
-          .eq('user_id', session.user.id)
-          .maybeSingle(),
-        supabase
-          .from('jobs')
-          .select(
-            'id, title, description, budget, status, location, user_id, created_at, vehicle:vehicles(make, model, license_plate)'
-          )
-          .eq('status', 'open')
-          .neq('user_id', session.user.id)
-          .order('created_at', { ascending: false }),
-      ]);
-
-      if (mechanicResponse.error) {
-        throw mechanicResponse.error;
-      }
-
-      if (jobsResponse.error) {
-        throw jobsResponse.error;
-      }
-
-      if (!mechanicResponse.data) {
-        setIsMechanic(false);
-        setJobs([]);
-        return;
-      }
-
-      setIsMechanic(true);
-      setJobs((jobsResponse.data ?? []) as unknown as Job[]);
-    } catch (err) {
-      console.error('Error fetching jobs:', err);
-      setIsMechanic(false);
-      setJobs([]);
+      const response = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim() || null,
+          budget: budget ? parseFloat(budget) : null,
+          location: location.trim() || null,
+          vehicle_id: vehicleId,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to post job');
+      toast.success('Job posted successfully!');
+      router.push('/marketplace/jobs');
+    } catch (err: any) {
+      setError(err.message);
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  };
 
-  useEffect(() => {
-    void fetchData();
-  }, [fetchData]);
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      style={styles.container}
+    >
+      <div style={styles.card}>
+        <h1 style={styles.title}>Post a Repair Job</h1>
+        <p style={styles.subtitle}>Describe the issue and get quotes from trusted mechanics</p>
 
-  if (loading) {
-    return <LoadingSkeleton />;
-  }
-
-  if (isMechanic === false) {
-    return (
-      <div className="mx-auto flex min-h-[70vh] max-w-2xl items-center justify-center px-4 py-10">
-        <div className="w-full rounded-3xl border border-white/10 bg-slate-950 p-8 text-center shadow-xl">
-          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-400">
-            <AlertCircle size={28} />
+        <form onSubmit={handleSubmit} style={styles.form}>
+          <div style={styles.field}>
+            <label style={styles.label}>Job Title *</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g., Engine won't start, Brake pad replacement"
+              style={styles.input}
+              disabled={loading}
+            />
           </div>
 
-          <h2 className="text-2xl font-semibold tracking-tight text-white">
-            Mechanic access required
-          </h2>
+          <div style={styles.field}>
+            <label style={styles.label}>Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              placeholder="Provide details about the issue, your car, etc."
+              style={styles.textarea}
+              disabled={loading}
+            />
+          </div>
 
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            To view and apply for repair jobs, you need to register your business as a mechanic first.
-          </p>
+          <div style={styles.row}>
+            <div style={styles.field}>
+              <label style={styles.label}><PoundSterling size={14} /> Budget (£)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+                placeholder="e.g., 150"
+                style={styles.input}
+                disabled={loading}
+              />
+            </div>
+            <div style={styles.field}>
+              <label style={styles.label}><MapPin size={14} /> Location</label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g., London, SW1A 1AA"
+                style={styles.input}
+                disabled={loading}
+              />
+            </div>
+          </div>
+
+          <div style={styles.field}>
+            <label style={styles.label}><Car size={14} /> Select Vehicle *</label>
+            {fetchingVehicles ? (
+              <div style={styles.helper}>Loading your vehicles...</div>
+            ) : vehicles.length === 0 ? (
+              <div style={styles.warningBox}>
+                <AlertCircle size={16} />
+                <span>No vehicles found. Please <button type="button" onClick={() => router.push('/vehicles/add')} style={styles.linkButton}>add a vehicle</button> first.</span>
+              </div>
+            ) : (
+              <select
+                value={vehicleId}
+                onChange={(e) => setVehicleId(e.target.value)}
+                style={styles.select}
+                disabled={loading}
+              >
+                <option value="">-- Choose a vehicle --</option>
+                {vehicles.map(v => (
+                  <option key={v.id} value={v.id}>
+                    {v.make} {v.model} ({v.license_plate}) {v.year ? `- ${v.year}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {error && (
+            <div style={styles.errorBox}>
+              <AlertCircle size={16} />
+              <span>{error}</span>
+            </div>
+          )}
 
           <button
-            type="button"
-            onClick={() => router.push('/marketplace/mechanics/register')}
-            className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 active:scale-[0.98]"
+            type="submit"
+            disabled={loading || fetchingVehicles || vehicles.length === 0}
+            style={{
+              ...styles.button,
+              opacity: (loading || fetchingVehicles || vehicles.length === 0) ? 0.6 : 1,
+              cursor: (loading || fetchingVehicles || vehicles.length === 0) ? 'not-allowed' : 'pointer',
+            }}
           >
-            Start mechanic registration
+            {loading ? <Loader2 size={18} className="animate-spin" /> : <Briefcase size={18} />}
+            {loading ? 'Posting...' : 'Post Job'}
           </button>
-        </div>
+        </form>
       </div>
-    );
-  }
-
-  return (
-    <div className="mx-auto min-h-screen max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <header className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-          Available jobs
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">
-          Find repair opportunities in your area and grow your business.
-        </p>
-      </header>
-
-      <AnimatePresence mode="wait">
-        {jobs.length === 0 ? (
-          <motion.div
-            key="empty"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="flex min-h-[40vh] flex-col items-center justify-center rounded-3xl border border-white/10 bg-slate-950 px-6 py-14 text-center"
-          >
-            <Briefcase size={44} className="mb-4 text-slate-500" />
-            <h2 className="text-xl font-semibold text-white">No open jobs right now</h2>
-            <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">
-              Check back soon — new repair opportunities appear throughout the day.
-            </p>
-          </motion.div>
-        ) : (
-          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-            {jobs.map((job, index) => (
-              <motion.article
-                key={job.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.04, duration: 0.22 }}
-                className="group flex h-full flex-col rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-xl shadow-black/10 transition hover:border-white/20 hover:bg-slate-900"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-300">
-                    <Briefcase size={18} />
-                  </div>
-
-                  <div className="min-w-0">
-                    <h2 className="truncate text-lg font-semibold tracking-tight text-white">
-                      {job.title}
-                    </h2>
-
-                    <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-400">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Calendar size={12} />
-                        {formatDate(job.created_at)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <p className="mt-4 text-sm leading-6 text-slate-300">
-                  {truncate(job.description)}
-                </p>
-
-                <div className="mt-5 grid gap-3 text-sm text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <PoundSterling size={14} className="text-emerald-300" />
-                    <span>Est. {formatBudget(job.budget)}</span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <MapPin size={14} className="text-emerald-300" />
-                    <span>{job.location || 'Remote / TBD'}</span>
-                  </div>
-
-                  {job.vehicle ? (
-                    <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-xs text-slate-300">
-                      <Car size={14} className="text-emerald-300" />
-                      <span className="truncate">
-                        {job.vehicle.make || 'Vehicle'} {job.vehicle.model || ''}
-                        {job.vehicle.license_plate ? ` • ${job.vehicle.license_plate}` : ''}
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="mt-auto pt-6">
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/marketplace/jobs/${job.id}/apply`)}
-                    className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 active:scale-[0.98]"
-                  >
-                    View and apply
-                    <ArrowRight size={16} />
-                  </button>
-                </div>
-              </motion.article>
-            ))}
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
+      <style>{`
+        .animate-spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
+    </motion.div>
   );
 }
 
-function LoadingSkeleton() {
-  return (
-    <div className="mx-auto min-h-screen max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <div className="h-10 w-64 animate-pulse rounded-xl bg-white/10" />
-        <div className="mt-3 h-5 w-96 max-w-full animate-pulse rounded-xl bg-white/5" />
-      </div>
-
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className="rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-xl shadow-black/10"
-          >
-            <div className="flex items-start gap-3">
-              <div className="h-11 w-11 rounded-2xl bg-white/10" />
-              <div className="flex-1">
-                <div className="h-5 w-2/3 animate-pulse rounded bg-white/10" />
-                <div className="mt-3 h-4 w-1/3 animate-pulse rounded bg-white/5" />
-              </div>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              <div className="h-4 w-full animate-pulse rounded bg-white/5" />
-              <div className="h-4 w-11/12 animate-pulse rounded bg-white/5" />
-              <div className="h-4 w-10/12 animate-pulse rounded bg-white/5" />
-            </div>
-
-            <div className="mt-6 h-11 w-full animate-pulse rounded-xl bg-white/10" />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+const styles: Record<string, React.CSSProperties> = {
+  container: {
+    maxWidth: '800px',
+    margin: '0 auto',
+    padding: 'clamp(16px, 4vw, 40px)',
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+  },
+  card: {
+    background: theme.colors.background.card,
+    borderRadius: theme.borderRadius.xl,
+    border: `1px solid ${theme.colors.border.light}`,
+    padding: 'clamp(20px, 5vw, 40px)',
+  },
+  title: {
+    fontSize: 'clamp(24px, 6vw, 32px)',
+    fontWeight: 800,
+    marginBottom: theme.spacing[2],
+    color: theme.colors.text.primary,
+  },
+  subtitle: {
+    fontSize: 'clamp(12px, 4vw, 14px)',
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[6],
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[5],
+  },
+  field: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[2],
+  },
+  row: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: theme.spacing[4],
+  },
+  label: {
+    fontSize: theme.fontSizes.sm,
+    fontWeight: 600,
+    color: theme.colors.text.secondary,
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[1],
+  },
+  input: {
+    background: theme.colors.background.subtle,
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.text.primary,
+    fontSize: theme.fontSizes.base,
+    outline: 'none',
+    transition: 'border-color 0.2s',
+  },
+  textarea: {
+    background: theme.colors.background.subtle,
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.text.primary,
+    fontSize: theme.fontSizes.base,
+    resize: 'vertical',
+    outline: 'none',
+  },
+  select: {
+    background: theme.colors.background.subtle,
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    color: theme.colors.text.primary,
+    fontSize: theme.fontSizes.base,
+    outline: 'none',
+    cursor: 'pointer',
+  },
+  helper: {
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.text.muted,
+    padding: theme.spacing[2],
+  },
+  warningBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    background: `${theme.colors.status.warning}15`,
+    border: `1px solid ${theme.colors.status.warning}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.status.warning,
+  },
+  linkButton: {
+    background: 'none',
+    border: 'none',
+    color: theme.colors.primary,
+    textDecoration: 'underline',
+    cursor: 'pointer',
+    padding: 0,
+    fontSize: 'inherit',
+  },
+  errorBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    background: `${theme.colors.status.critical}15`,
+    border: `1px solid ${theme.colors.status.critical}`,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[3],
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.status.critical,
+  },
+  button: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+    background: theme.colors.primary,
+    border: 'none',
+    borderRadius: theme.borderRadius.full,
+    padding: theme.spacing[4],
+    fontSize: theme.fontSizes.base,
+    fontWeight: theme.fontWeights.semibold,
+    color: theme.colors.background.main,
+    transition: 'opacity 0.2s',
+    marginTop: theme.spacing[2],
+  },
+};

@@ -7,8 +7,8 @@ export async function GET() {
       {
         id: 'basic',
         name: 'Basic',
-        price: 18.00,                     // Updated to £18
-        priceId: process.env.STRIPE_PRICE_BASIC,
+        price: 18.00,
+        priceId: process.env.STRIPE_BASIC_PRICE_ID,
         features: [
           'Apply to up to 10 jobs per month',
           'Basic profile listing',
@@ -18,8 +18,8 @@ export async function GET() {
       {
         id: 'pro',
         name: 'Professional',
-        price: 35.00,                     // Updated to £35
-        priceId: process.env.STRIPE_PRICE_PRO,
+        price: 35.00,
+        priceId: process.env.STRIPE_PRO_PRICE_ID,
         features: [
           'Unlimited job applications',
           'Verified badge',
@@ -29,22 +29,18 @@ export async function GET() {
       },
     ];
 
-    // Validate that all price IDs are configured
     const missing = plans.filter(p => !p.priceId);
     if (missing.length) {
-      console.error('Missing Stripe price IDs for plans:', missing.map(p => p.id));
+      console.error('Missing Stripe price IDs for:', missing.map(p => p.id));
       return NextResponse.json(
-        { error: 'Server configuration error: missing price IDs for ' + missing.map(p => p.id).join(', ') },
+        { error: 'Subscription plans not configured. Please contact support.' },
         { status: 500 }
       );
     }
 
     return NextResponse.json(plans);
-  } catch (err: any) {
+  } catch (err) {
     console.error('Failed to fetch subscription plans:', err);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

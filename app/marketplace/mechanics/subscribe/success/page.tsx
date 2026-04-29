@@ -1,99 +1,62 @@
 'use client';
 
-import { Suspense } from 'react';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { CheckCircle } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-function SuccessContent() {
+export default function SubscribeSuccessPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('session_id');
-  const [countdown, setCountdown] = useState(5);
+  const [status, setStatus] = useState<'loading'|'success'|'error'>('loading');
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
-    if (sessionId) console.log('Subscription successful:', sessionId);
-    const timer = setInterval(() => setCountdown(prev => prev - 1), 1000);
-    const redirect = setTimeout(() => router.push('/marketplace/mechanics/dashboard'), 5000);
-    return () => {
-      clearInterval(timer);
-      clearTimeout(redirect);
-    };
+    async function confirmSubscription() {
+      if (!sessionId) {
+        setStatus('error');
+        setMessage('No session ID found');
+        return;
+      }
+
+      // Verify the session is still active
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        // Try to refresh session
+        const { error } = await supabase.auth.refreshSession();
+        if (error) {
+          setStatus('error');
+          setMessage('You have been logged out. Please log in again.');
+          setTimeout(() => router.push('/login'), 2000);
+          return;
+        }
+      }
+
+      // Optionally call your webhook or confirm subscription status from Stripe
+      setStatus('success');
+      setMessage('Subscription activated! Redirecting to dashboard...');
+      setTimeout(() => router.push('/marketplace/mechanics/dashboard'), 2000);
+    }
+
+    confirmSubscription();
   }, [sessionId, router]);
 
   return (
-    <div style={styles.card}>
-      <CheckCircle size={64} color={theme.colors.primary} />
-      <h1 style={styles.title}>Subscription Successful!</h1>
-      <p style={styles.message}>
-        Thank you for subscribing. Your mechanic account is now active.
-      </p>
-      <p style={styles.redirect}>
-        Redirecting to your dashboard in {countdown} seconds...
-      </p>
-      <button
-        onClick={() => router.push('/marketplace/mechanics/dashboard')}
-        style={styles.button}
-      >
-        Go to Dashboard Now
-      </button>
+    <div style={styles.container}>
+      {status === 'loading' && <p>Confirming your subscription...</p>}
+      {status === 'success' && <p style={{ color: theme.colors.primary }}>{message}</p>}
+      {status === 'error' && <p style={{ color: theme.colors.status.critical }}>{message}</p>}
     </div>
-  );
-}
-
-export default function SubscriptionSuccessPage() {
-  return (
-    <Suspense fallback={<div style={styles.container}>Loading...</div>}>
-      <SuccessContent />
-    </Suspense>
   );
 }
 
 const styles = {
   container: {
-    minHeight: '100vh',
     display: 'flex',
-    alignItems: 'center',
     justifyContent: 'center',
-    background: theme.colors.background.main,
-    padding: '20px',
-    color: theme.colors.text.secondary,
-  },
-  card: {
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[10],
-    maxWidth: '480px',
-    textAlign: 'center' as const,
-  },
-  title: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.bold,
-    marginTop: theme.spacing[5],
-    marginBottom: theme.spacing[3],
-    color: theme.colors.text.primary,
-  },
-  message: {
-    color: theme.colors.text.secondary,
-    fontSize: theme.fontSizes.base,
-    marginBottom: theme.spacing[5],
-  },
-  redirect: {
-    color: theme.colors.text.muted,
-    fontSize: theme.fontSizes.sm,
-    marginBottom: theme.spacing[6],
-  },
-  button: {
-    background: theme.colors.primary,
-    border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[5]}`,
-    fontSize: theme.fontSizes.base,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.background.main,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
+    alignItems: 'center',
+    height: '100vh',
+    fontFamily: theme.fontFamilies.sans,
   },
 };

@@ -119,14 +119,13 @@ export default function MechanicMarketplaceDashboard() {
         .maybeSingle();
 
       if (profileError) throw profileError;
-
       if (!mechanicProfile) {
         router.push('/marketplace/mechanics/register');
         return;
       }
       setProfile(mechanicProfile);
 
-      // 2. Applications (bids) with job details
+      // 2. Applications with job details
       const { data: appsData, error: appsError } = await supabase
         .from('applications')
         .select(`
@@ -139,11 +138,8 @@ export default function MechanicMarketplaceDashboard() {
         .eq('mechanic_id', mechanicProfile.id)
         .order('created_at', { ascending: false });
 
-      if (!appsError && appsData) {
-        setApplications(appsData as Application[]);
-      } else {
-        setApplications([]);
-      }
+      if (!appsError && appsData) setApplications(appsData as Application[]);
+      else setApplications([]);
 
       // 3. Earnings
       const { data: earningsData, error: earningsError } = await supabase
@@ -153,13 +149,10 @@ export default function MechanicMarketplaceDashboard() {
         .order('created_at', { ascending: false })
         .limit(5);
 
-      if (!earningsError && earningsData) {
-        setEarnings(earningsData);
-      } else {
-        setEarnings([]);
-      }
+      if (!earningsError && earningsData) setEarnings(earningsData);
+      else setEarnings([]);
 
-      // 4. Vehicles (fleet) – include year and mileage for table display
+      // 4. Vehicles (fleet)
       const { data: vehiclesData, error: vehiclesError } = await supabase
         .from('vehicles')
         .select('id, make, model, license_plate, health_score, year, mileage')
@@ -167,11 +160,8 @@ export default function MechanicMarketplaceDashboard() {
         .order('created_at', { ascending: false })
         .limit(5);
 
-      if (!vehiclesError && vehiclesData) {
-        setVehicles(vehiclesData);
-      } else {
-        setVehicles([]);
-      }
+      if (!vehiclesError && vehiclesData) setVehicles(vehiclesData);
+      else setVehicles([]);
 
       // 5. Available open jobs
       const { data: jobsData, error: jobsError } = await supabase
@@ -216,7 +206,6 @@ export default function MechanicMarketplaceDashboard() {
     fetchData();
   }, [fetchData]);
 
-  // Health score updater
   const refreshHealthScores = async () => {
     setUpdatingScores(true);
     try {
@@ -224,7 +213,7 @@ export default function MechanicMarketplaceDashboard() {
       const data = await res.json();
       if (res.ok) {
         alert(`Updated health scores for ${data.updated} vehicles`);
-        fetchData(); // refresh dashboard
+        fetchData();
       } else {
         alert(data.error || 'Failed to update scores');
       }
@@ -235,7 +224,6 @@ export default function MechanicMarketplaceDashboard() {
     }
   };
 
-  // Derived stats
   const totalApplications = applications.length;
   const acceptedApplications = applications.filter(a => a.status === 'accepted').length;
   const totalEarnings = earnings.reduce((sum, e) => sum + (e.status === 'paid' ? e.amount : 0), 0);
@@ -271,7 +259,7 @@ export default function MechanicMarketplaceDashboard() {
   if (error && !refreshing) {
     return (
       <div style={styles.centered}>
-        <p style={{ color: getThemeValue('colors.error', '#ef4444') }}>Error: {error}</p>
+        <p style={{ color: getThemeValue('colors.status.critical', '#ef4444') }}>Error: {error}</p>
         <button onClick={handleRefresh} style={styles.retryButton}>Retry</button>
       </div>
     );
@@ -299,7 +287,7 @@ export default function MechanicMarketplaceDashboard() {
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <button onClick={handleRefresh} style={styles.refreshButton} disabled={refreshing}>
-            {refreshing ? <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+            {refreshing ? <RefreshCw size={16} className="spin" /> : <RefreshCw size={16} />}
             {refreshing ? ' Refreshing...' : ' Refresh'}
           </button>
           <button onClick={refreshHealthScores} disabled={updatingScores} style={styles.refreshButton}>
@@ -308,10 +296,10 @@ export default function MechanicMarketplaceDashboard() {
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* Stats Grid – responsive */}
       <div style={styles.statsGrid}>
         <div style={styles.statCard}>
-          <Briefcase size={24} color={getThemeValue('colors.info', '#3b82f6')} />
+          <Briefcase size={24} color={getThemeValue('colors.status.info', '#3b82f6')} />
           <div><span style={styles.statValue}>{totalApplications}</span><span style={styles.statLabel}>Applications</span></div>
         </div>
         <div style={styles.statCard}>
@@ -320,23 +308,23 @@ export default function MechanicMarketplaceDashboard() {
         </div>
         <div style={styles.statCard}>
           <DollarSign size={24} color={getThemeValue('colors.primary', '#22c55e')} />
-          <div><span style={styles.statValue}>£{totalEarnings}</span><span style={styles.statLabel}>Total Earnings</span></div>
+          <div><span style={styles.statValue}>£{totalEarnings}</span><span style={styles.statLabel}>Earnings</span></div>
         </div>
         <div style={styles.statCard}>
-          <Car size={24} color={getThemeValue('colors.warning', '#f59e0b')} />
-          <div><span style={styles.statValue}>{vehicles.length}</span><span style={styles.statLabel}>Fleet Vehicles</span></div>
+          <Car size={24} color={getThemeValue('colors.status.warning', '#f59e0b')} />
+          <div><span style={styles.statValue}>{vehicles.length}</span><span style={styles.statLabel}>Fleet</span></div>
         </div>
       </div>
 
       {/* Two‑column layout */}
       <div style={styles.twoColumn}>
-        {/* Left column: Recent Applications */}
+        {/* Recent Applications */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
             <Briefcase size={20} color={getThemeValue('colors.primary', '#22c55e')} />
             <h2 style={styles.cardTitle}>Recent Applications</h2>
             <button onClick={() => router.push('/marketplace/jobs')} style={styles.linkButton}>
-              Browse more jobs →
+              Browse more →
             </button>
           </div>
           {applications.length === 0 ? (
@@ -345,7 +333,7 @@ export default function MechanicMarketplaceDashboard() {
               <button onClick={() => router.push('/marketplace/jobs')} style={styles.smallButton}>
                 <PlusCircle size={16} /> Browse Jobs
               </button>
-            </div>
+          </div>
           ) : (
             <div>
               {applications.slice(0, 5).map(app => (
@@ -373,14 +361,14 @@ export default function MechanicMarketplaceDashboard() {
               ))}
               {totalApplications > 5 && (
                 <button onClick={() => router.push('/mechanics/applications')} style={styles.linkButton}>
-                  View all {totalApplications} applications
+                  View all {totalApplications}
                 </button>
               )}
             </div>
           )}
         </div>
 
-        {/* Right column: Recent Earnings & Subscription */}
+        {/* Earnings & Subscription */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
             <DollarSign size={20} color={getThemeValue('colors.primary', '#22c55e')} />
@@ -416,7 +404,6 @@ export default function MechanicMarketplaceDashboard() {
           )}
 
           <div style={styles.divider} />
-
           <div style={styles.cardHeader}>
             <CreditCard size={20} color={getThemeValue('colors.primary', '#22c55e')} />
             <h2 style={styles.cardTitle}>Subscription</h2>
@@ -433,7 +420,7 @@ export default function MechanicMarketplaceDashboard() {
         </div>
       </div>
 
-      {/* Available Jobs Section */}
+      {/* Available Jobs */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>
           <TrendingUp size={20} color={getThemeValue('colors.primary', '#22c55e')} />
@@ -465,7 +452,7 @@ export default function MechanicMarketplaceDashboard() {
         )}
       </div>
 
-      {/* Fleet Overview – Table format */}
+      {/* Fleet Overview Table */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>
           <Car size={20} color={getThemeValue('colors.primary', '#22c55e')} />
@@ -496,11 +483,7 @@ export default function MechanicMarketplaceDashboard() {
                   <tr key={vehicle.id}>
                     <td>{vehicle.make} {vehicle.model}</td>
                     <td>{vehicle.license_plate}</td>
-                    <td>
-                      <span style={getHealthBadgeStyle(vehicle.health_score)}>
-                        {vehicle.health_score ?? '—'}%
-                      </span>
-                    </td>
+                    <td><span style={getHealthBadgeStyle(vehicle.health_score)}>{vehicle.health_score ?? '—'}%</span></td>
                     <td>{vehicle.year ?? '—'}</td>
                     <td>{vehicle.mileage?.toLocaleString() ?? '—'} mi</td>
                     <td>
@@ -516,21 +499,39 @@ export default function MechanicMarketplaceDashboard() {
         )}
       </div>
 
-      {/* Profile Completion Reminder */}
+      {/* Profile completion reminder */}
       {(!profile?.address || !profile?.phone) && (
         <div style={styles.warningCard}>
-          <AlertCircle size={20} color={getThemeValue('colors.warning', '#f59e0b')} />
+          <AlertCircle size={20} color={getThemeValue('colors.status.warning', '#f59e0b')} />
           <span>Your profile is incomplete. <button onClick={() => router.push('/marketplace/mechanics/register')} style={styles.linkButton}>Update now</button></span>
         </div>
       )}
+
+      <style>{`
+        .spinner {
+          border: 3px solid ${getThemeValue('colors.border.medium', '#334155')};
+          border-top: 3px solid ${getThemeValue('colors.primary', '#22c55e')};
+          border-radius: 50%;
+          width: 40px;
+          height: 40px;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
+        }
+        .spin {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </motion.div>
   );
 }
 
-// ==================== STYLES ====================
-const styles: Record<string, any> = {
+// ==================== RESPONSIVE STYLES (theme‑aware) ====================
+const styles: Record<string, React.CSSProperties> = {
   page: {
-    padding: getThemeValue('spacing.8', '32px'),
+    padding: 'clamp(16px, 4vw, 32px)',
     background: getThemeValue('colors.background.main', '#020617'),
     minHeight: '100vh',
     color: getThemeValue('colors.text.primary', '#f1f5f9'),
@@ -540,20 +541,20 @@ const styles: Record<string, any> = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: getThemeValue('spacing.6', '24px'),
+    marginBottom: 'clamp(20px, 5vw, 32px)',
     flexWrap: 'wrap',
-    gap: getThemeValue('spacing.4', '16px'),
+    gap: '16px',
   },
   title: {
-    fontSize: getThemeValue('fontSizes.3xl', '32px'),
+    fontSize: 'clamp(24px, 6vw, 32px)',
     fontWeight: getThemeValue('fontWeights.bold', '700'),
-    marginBottom: getThemeValue('spacing.1', '4px'),
+    marginBottom: '4px',
     background: getThemeValue('gradients.title', 'linear-gradient(135deg, #94a3b8, #f1f5f9)'),
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
   },
   subtitle: {
-    fontSize: getThemeValue('fontSizes.base', '16px'),
+    fontSize: 'clamp(12px, 4vw, 16px)',
     color: getThemeValue('colors.text.secondary', '#94a3b8'),
     display: 'flex',
     alignItems: 'center',
@@ -576,7 +577,7 @@ const styles: Record<string, any> = {
     gap: '6px',
   },
   refreshButton: {
-    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
+    padding: '8px 16px',
     background: getThemeValue('colors.background.card', '#0f172a'),
     border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
     borderRadius: getThemeValue('borderRadius.lg', '12px'),
@@ -584,55 +585,55 @@ const styles: Record<string, any> = {
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
-    gap: getThemeValue('spacing.2', '8px'),
+    gap: '8px',
   },
   statsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: getThemeValue('spacing.4', '16px'),
-    marginBottom: getThemeValue('spacing.6', '24px'),
+    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+    gap: '16px',
+    marginBottom: '24px',
   },
   statCard: {
     background: getThemeValue('colors.background.card', '#0f172a'),
     border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
     borderRadius: getThemeValue('borderRadius.lg', '12px'),
-    padding: getThemeValue('spacing.4', '16px'),
+    padding: '16px',
     display: 'flex',
     alignItems: 'center',
-    gap: getThemeValue('spacing.3', '12px'),
+    gap: '12px',
   },
   statValue: {
-    fontSize: getThemeValue('fontSizes.2xl', '24px'),
+    fontSize: 'clamp(20px, 5vw, 24px)',
     fontWeight: getThemeValue('fontWeights.bold', '700'),
     display: 'block',
     color: getThemeValue('colors.text.primary', '#f1f5f9'),
   },
   statLabel: {
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
+    fontSize: 'clamp(10px, 3vw, 14px)',
     color: getThemeValue('colors.text.muted', '#64748b'),
   },
   twoColumn: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-    gap: getThemeValue('spacing.6', '24px'),
-    marginBottom: getThemeValue('spacing.6', '24px'),
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: '24px',
+    marginBottom: '24px',
   },
   card: {
     background: getThemeValue('colors.background.card', '#0f172a'),
     border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
     borderRadius: getThemeValue('borderRadius.xl', '16px'),
-    padding: getThemeValue('spacing.5', '20px'),
-    marginBottom: getThemeValue('spacing.6', '24px'),
+    padding: '20px',
+    marginBottom: '24px',
   },
   cardHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: getThemeValue('spacing.2', '8px'),
-    marginBottom: getThemeValue('spacing.4', '16px'),
+    gap: '8px',
+    marginBottom: '16px',
     flexWrap: 'wrap',
   },
   cardTitle: {
-    fontSize: getThemeValue('fontSizes.lg', '18px'),
+    fontSize: 'clamp(16px, 4vw, 18px)',
     fontWeight: getThemeValue('fontWeights.semibold', '600'),
     color: getThemeValue('colors.text.primary', '#f1f5f9'),
     flex: 1,
@@ -642,53 +643,53 @@ const styles: Record<string, any> = {
     border: 'none',
     color: getThemeValue('colors.primary', '#22c55e'),
     cursor: 'pointer',
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
+    fontSize: '13px',
     textDecoration: 'underline',
   },
   smallButton: {
-    padding: `${getThemeValue('spacing.1', '4px')} ${getThemeValue('spacing.3', '12px')}`,
+    padding: '4px 12px',
     background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
     borderRadius: getThemeValue('borderRadius.lg', '12px'),
     color: getThemeValue('colors.background.main', '#020617'),
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
+    fontSize: '13px',
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: getThemeValue('spacing.1', '4px'),
+    gap: '4px',
   },
   primaryButton: {
-    marginTop: getThemeValue('spacing.3', '12px'),
-    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
+    marginTop: '12px',
+    padding: '8px 16px',
     background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
     borderRadius: getThemeValue('borderRadius.lg', '12px'),
     color: getThemeValue('colors.background.main', '#020617'),
-    fontWeight: getThemeValue('fontWeights.medium', '500'),
+    fontWeight: 500,
     cursor: 'pointer',
   },
   emptyState: {
     textAlign: 'center',
-    padding: getThemeValue('spacing.6', '24px'),
+    padding: '24px',
     color: getThemeValue('colors.text.muted', '#64748b'),
   },
   applicationItem: {
-    marginBottom: getThemeValue('spacing.3', '12px'),
-    paddingBottom: getThemeValue('spacing.2', '8px'),
+    marginBottom: '12px',
+    paddingBottom: '8px',
     borderBottom: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
   },
   applicationHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: getThemeValue('spacing.1', '4px'),
+    marginBottom: '4px',
   },
   applicationDetails: {
     display: 'flex',
-    gap: getThemeValue('spacing.3', '12px'),
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    gap: '12px',
+    fontSize: '12px',
     color: getThemeValue('colors.text.muted', '#64748b'),
-    marginBottom: getThemeValue('spacing.1', '4px'),
+    marginBottom: '4px',
   },
   statusBadge: {
     display: 'inline-block',
@@ -704,68 +705,68 @@ const styles: Record<string, any> = {
     borderRadius: getThemeValue('borderRadius.md', '8px'),
     padding: '4px 12px',
     color: getThemeValue('colors.primary', '#22c55e'),
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    fontSize: '11px',
     cursor: 'pointer',
-    marginTop: getThemeValue('spacing.1', '4px'),
+    marginTop: '4px',
   },
   earningItem: {
-    marginBottom: getThemeValue('spacing.3', '12px'),
-    paddingBottom: getThemeValue('spacing.2', '8px'),
+    marginBottom: '12px',
+    paddingBottom: '8px',
     borderBottom: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
   },
   earningHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: getThemeValue('spacing.1', '4px'),
+    marginBottom: '4px',
   },
   earningDetails: {
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    fontSize: '12px',
     color: getThemeValue('colors.text.muted', '#64748b'),
   },
   divider: {
-    margin: `${getThemeValue('spacing.4', '16px')} 0`,
+    margin: '16px 0',
     borderTop: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
   },
   subscriptionInfo: {
-    padding: getThemeValue('spacing.2', '8px'),
+    padding: '8px',
   },
   jobsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-    gap: getThemeValue('spacing.4', '16px'),
+    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+    gap: '16px',
   },
   jobCard: {
-    background: getThemeValue('colors.background.elevated', '#1e293b'),
+    background: getThemeValue('colors.background.subtle', '#1e293b'),
     borderRadius: getThemeValue('borderRadius.lg', '12px'),
-    padding: getThemeValue('spacing.4', '16px'),
+    padding: '16px',
     border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
   },
   jobTitle: {
-    fontSize: getThemeValue('fontSizes.base', '16px'),
+    fontSize: 'clamp(14px, 4vw, 16px)',
     fontWeight: getThemeValue('fontWeights.semibold', '600'),
-    marginBottom: getThemeValue('spacing.2', '8px'),
+    marginBottom: '8px',
   },
   jobDescription: {
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    fontSize: '12px',
     color: getThemeValue('colors.text.secondary', '#94a3b8'),
-    marginBottom: getThemeValue('spacing.2', '8px'),
+    marginBottom: '8px',
   },
   jobMeta: {
     display: 'flex',
-    gap: getThemeValue('spacing.2', '8px'),
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
+    gap: '8px',
+    fontSize: '12px',
     color: getThemeValue('colors.text.muted', '#64748b'),
-    marginBottom: getThemeValue('spacing.3', '12px'),
+    marginBottom: '12px',
   },
   applyButton: {
     width: '100%',
     background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
     borderRadius: getThemeValue('borderRadius.md', '8px'),
-    padding: getThemeValue('spacing.2', '8px'),
+    padding: '8px',
     color: getThemeValue('colors.background.main', '#020617'),
-    fontWeight: getThemeValue('fontWeights.semibold', '600'),
+    fontWeight: 600,
     cursor: 'pointer',
   },
   tableWrapper: {
@@ -774,24 +775,24 @@ const styles: Record<string, any> = {
   table: {
     width: '100%',
     borderCollapse: 'collapse',
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
+    fontSize: '13px',
   },
   iconButton: {
     background: 'transparent',
     border: 'none',
     color: getThemeValue('colors.primary', '#22c55e'),
     cursor: 'pointer',
-    padding: getThemeValue('spacing.1', '4px'),
+    padding: '4px',
   },
   warningCard: {
     display: 'flex',
     alignItems: 'center',
-    gap: getThemeValue('spacing.3', '12px'),
-    background: `${getThemeValue('colors.warning', '#f59e0b')}20`,
-    border: `1px solid ${getThemeValue('colors.warning', '#f59e0b')}`,
+    gap: '12px',
+    background: `${getThemeValue('colors.status.warning', '#f59e0b')}20`,
+    border: `1px solid ${getThemeValue('colors.status.warning', '#f59e0b')}`,
     borderRadius: getThemeValue('borderRadius.lg', '12px'),
-    padding: getThemeValue('spacing.4', '16px'),
-    marginTop: getThemeValue('spacing.4', '16px'),
+    padding: '16px',
+    marginTop: '16px',
   },
   centered: {
     minHeight: '100vh',
@@ -802,8 +803,8 @@ const styles: Record<string, any> = {
     color: getThemeValue('colors.text.secondary', '#94a3b8'),
   },
   retryButton: {
-    marginTop: getThemeValue('spacing.4', '16px'),
-    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
+    marginTop: '16px',
+    padding: '8px 16px',
     background: getThemeValue('colors.primary', '#22c55e'),
     border: 'none',
     borderRadius: getThemeValue('borderRadius.lg', '12px'),

@@ -1,4 +1,3 @@
-// app/api/stripe/webhook/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@/lib/supabase/server';
@@ -28,26 +27,44 @@ export async function POST(req: NextRequest) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
         const mechanicId = session.metadata?.mechanicId;
-        const userId = session.metadata?.userId;
+        const plan = session.metadata?.plan; // 'basic' or 'pro'
+        const customerId = session.customer as string;
 
-        if (mechanicId && userId) {
-          const supabase = await createClient();
-          // Update mechanic subscription status
-          await supabase
-            .from('mechanics')
-            .update({
-              subscription_status: 'active',
-              stripe_customer_id: session.customer as string,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', mechanicId)
-            .eq('user_id', userId);
+        if (!mechanicId) {
+          console.error('Webhook: missing mechanicId in metadata');
+          break;
+        }
+
+        const supabase = await createClient();
+
+        // Update mechanic subscription
+        const { error } = await supabase
+          .from('mechanics')
+          .update({
+            subscription_status: 'active',
+            plan: plan,
+            stripe_customer_id: customerId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', mechanicId);
+
+        if (error) {
+          console.error('Webhook failed to update mechanic:', error);
+        } else {
+          console.log(`Webhook: activated subscription for mechanic ${mechanicId} (${plan})`);
         }
         break;
       }
 
       case 'customer.subscription.deleted': {
-        // Optional: set subscription_status to 'cancelled'
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
+        const supabase = await createClient();
+        // Find mechanic by stripe_customer_id and set status to cancelled
+        await supabase
+          .from('mechanics')
+          .update({ subscription_status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('stripe_customer_id', customerId);
         break;
       }
 

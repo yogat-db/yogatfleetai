@@ -1,97 +1,82 @@
-import { NextResponse } from 'next/server';
+// app/api/stripe/create-checkout-session/route.ts
+import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { supabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2025-02-24.acacia',
 });
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
-    // 1. Authenticate – await the server client
-    const supabase = await createClient();
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const body = await req.json();
+    const { planId, mechanicId, successUrl, cancelUrl } = body;
+
+    if (!planId || !mechanicId || !successUrl || !cancelUrl) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    // 1. Authenticate – try Authorization header first, then fallback to cookie
+    const authHeader = req.headers.get('authorization');
+    let supabase = await createClient();
+    let { data: { user }, error: userError } = await supabase.auth.getUser();
+
+    // If cookie auth fails but we have a bearer token, try that
+    if ((userError || !user) && authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.slice(7);
+      supabase = await createClient();
+      const { data: { user: tokenUser }, error: tokenError } = await supabase.auth.getUser(token);
+      if (!tokenError && tokenUser) {
+        user = tokenUser;
+        userError = null;
+      }
+    }
 
     if (userError || !user) {
-      console.error('Auth error:', userError);
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      console.error('Auth error:', userError?.message);
+      return NextResponse.json({ error: 'Unauthorized – please log in again' }, { status: 401 });
     }
 
-    // 2. Fetch the mechanic profile
-    const { data: mechanic, error: mechanicError } = await supabaseAdmin
+    // 2. Verify mechanic belongs to this user
+    const { data: mechanic, error: mechError } = await supabase
       .from('mechanics')
-      .select('id, stripe_account_id')
+      .select('id')
+      .eq('id', mechanicId)
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
-    if (mechanicError || !mechanic) {
-      return NextResponse.json({ error: 'Mechanic profile not found' }, { status: 404 });
+    if (mechError || !mechanic) {
+      console.error('Mechanic validation error:', mechError);
+      return NextResponse.json({ error: 'Invalid mechanic profile' }, { status: 403 });
     }
 
-    // 3. If the mechanic already has a Stripe account, return an onboarding link
-    if (mechanic.stripe_account_id) {
-      const accountLink = await stripe.accountLinks.create({
-        account: mechanic.stripe_account_id,
-        refresh_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?refresh=true`,
-        return_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?onboarding=complete`,
-        type: 'account_onboarding',
-      });
-      return NextResponse.json({
-        accountId: mechanic.stripe_account_id,
-        onboardingUrl: accountLink.url,
-        existing: true,
-      });
-    }
+    // 3. Map plan to price ID
+    let priceId: string | undefined;
+    if (planId === 'basic') priceId = process.env.STRIPE_BASIC_PRICE_ID;
+    else if (planId === 'pro') priceId = process.env.STRIPE_PRO_PRICE_ID;
+    else return NextResponse.json({ error: 'Invalid plan' }, { status: 400 });
 
-    // 4. Create a new Stripe Express account
-    const account = await stripe.accounts.create({
-      type: 'express',
-      country: 'GB',
-      email: user.email,
-      capabilities: {
-        transfers: { requested: true },
-      },
-      business_type: 'individual',
-      business_profile: {
-        mcc: '7538', // Automotive repair and maintenance
-        url: process.env.NEXT_PUBLIC_APP_URL,
-      },
-    });
-
-    // 5. Store the account ID
-    const { error: updateError } = await supabaseAdmin
-      .from('mechanics')
-      .update({ stripe_account_id: account.id })
-      .eq('id', mechanic.id);
-
-    if (updateError) {
-      console.error('Failed to save Stripe account ID:', updateError);
-      // Clean up Stripe account
-      await stripe.accounts.del(account.id);
+    if (!priceId) {
+      console.error(`Missing Stripe price ID for plan: ${planId}`);
       return NextResponse.json(
-        { error: 'Failed to save account information' },
+        { error: 'Subscription not configured. Please contact support.' },
         { status: 500 }
       );
     }
 
-    // 6. Generate account onboarding link
-    const accountLink = await stripe.accountLinks.create({
-      account: account.id,
-      refresh_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?refresh=true`,
-      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/marketplace/mechanics/dashboard?onboarding=complete`,
-      type: 'account_onboarding',
+    // 4. Create Stripe checkout session
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: { userId: user.id, mechanicId, plan: planId },
     });
 
-    return NextResponse.json({
-      accountId: account.id,
-      onboardingUrl: accountLink.url,
-    });
+    return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    console.error('Stripe Connect account creation error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Failed to create Stripe account' },
-      { status: 500 }
-    );
+    console.error('Stripe checkout error:', err);
+    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
   }
 }

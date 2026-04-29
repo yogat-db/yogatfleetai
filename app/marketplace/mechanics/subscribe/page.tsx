@@ -4,15 +4,16 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Check, Loader2 } from 'lucide-react';
+import { Check, Loader2, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
+import toast from 'react-hot-toast';
 
 const PLANS = [
   {
     id: 'basic',
     name: 'Basic',
-    price: 18.00,      // Updated to £18
+    price: 18.00,                   // ✅ correct price
     features: [
       'Apply to up to 10 jobs per month',
       'Basic profile listing',
@@ -22,7 +23,7 @@ const PLANS = [
   {
     id: 'pro',
     name: 'Professional',
-    price: 35.00,      // Updated to £35
+    price: 35.00,                   // ✅ correct price
     features: [
       'Unlimited job applications',
       'Verified badge',
@@ -40,18 +41,7 @@ export default function SubscribePage() {
   const [mechanicId, setMechanicId] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
 
-  // Get base URL: use NEXT_PUBLIC_BASE_URL first, then NEXT_PUBLIC_APP_URL, then window origin
-  const appUrl = process.env.NEXT_PUBLIC_BASE_URL || 
-                 process.env.NEXT_PUBLIC_APP_URL || 
-                 (typeof window !== 'undefined' ? window.location.origin : 'https://yogatfleetai.com');
-
-  // Validate that the URL has a scheme (http:// or https://)
-  useEffect(() => {
-    if (appUrl && !appUrl.startsWith('http')) {
-      console.error('Invalid app URL:', appUrl);
-      setError('Configuration error: Invalid app URL. Please contact support.');
-    }
-  }, [appUrl]);
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://yogatfleetai.com';
 
   useEffect(() => {
     checkMechanic();
@@ -86,58 +76,56 @@ export default function SubscribePage() {
     }
   };
 
+  // ✅ Upgraded handleSubscribe – uses one‑time token to avoid logout
   const handleSubscribe = async () => {
     if (!selectedPlan) return;
     setLoading(true);
     setError(null);
-    try {
-      // Validate URL before sending
-      if (!appUrl.startsWith('http')) {
-        throw new Error('Invalid app URL configuration. Please contact support.');
-      }
 
+    try {
+      // 1. Get a one‑time authentication token
+      const tokenRes = await fetch('/api/stripe/create-subscription-token', { method: 'POST' });
+      const tokenData = await tokenRes.json();
+      if (!tokenRes.ok) throw new Error(tokenData.error || 'Failed to create auth token');
+
+      // 2. Create Stripe Checkout session with the token
       const response = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planId: selectedPlan,
           mechanicId,
-          successUrl: `${appUrl}/marketplace/mechanics/subscribe/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancelUrl: `${appUrl}/marketplace/mechanics/subscribe`,
+          token: tokenData.token,
+          successUrl: `${baseUrl}/marketplace/mechanics/subscribe/success?token=${tokenData.token}&session_id={CHECKOUT_SESSION_ID}`,
+          cancelUrl: `${baseUrl}/marketplace/mechanics/subscribe`,
         }),
       });
+
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Failed to create checkout session');
-      // Redirect to Stripe Checkout
+      if (!data.url) throw new Error('No checkout URL returned');
+
+      // 3. Redirect to Stripe
       window.location.href = data.url;
     } catch (err: any) {
       console.error('Subscription error:', err);
       setError(err.message || 'Something went wrong. Please try again.');
-    } finally {
-      setLoading(false);
+      toast.error(err.message);
+      setLoading(false); // important to reset if error occurs before redirect
     }
   };
 
   if (checking) {
     return (
       <div style={styles.centered}>
-        <Loader2 size={32} style={{ animation: 'spin 1s linear infinite' }} />
-        <p>Loading...</p>
-        <style jsx>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+        <Loader2 size={32} className="spin" />
+        <p>Loading subscription options...</p>
       </div>
     );
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      style={styles.page}
-    >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
       <h1 style={styles.title}>Choose Your Subscription</h1>
       <div style={styles.plansGrid}>
         {PLANS.map((plan) => (
@@ -170,24 +158,32 @@ export default function SubscribePage() {
         disabled={!selectedPlan || loading}
         style={{
           ...styles.subscribeButton,
-          opacity: !selectedPlan || loading ? 0.5 : 1,
+          opacity: !selectedPlan || loading ? 0.6 : 1,
         }}
       >
         {loading ? (
           <>
-            <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
+            <Loader2 size={18} className="spin" />
             Processing...
           </>
         ) : (
           'Subscribe Now'
         )}
       </button>
-      {error && <div style={styles.errorBox}>{error}</div>}
+      {error && (
+        <div style={styles.errorBox}>
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
+      <style>{`
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </motion.div>
   );
 }
 
-// Styles (unchanged – already production-ready)
 const styles: Record<string, React.CSSProperties> = {
   page: {
     padding: theme.spacing[10],
@@ -267,17 +263,21 @@ const styles: Record<string, React.CSSProperties> = {
     width: 'fit-content',
     margin: '0 auto',
   },
-errorBox: {
-  marginTop: theme.spacing[4],
-  padding: theme.spacing[3],
-  background: `${theme.colors.status.critical}20`,
-  border: `1px solid ${theme.colors.status.critical}`,
-  borderRadius: theme.borderRadius.lg,
-  color: theme.colors.status.critical,
-  textAlign: 'center',
-  maxWidth: '400px',
-  margin: `${theme.spacing[4]} auto 0`,
-},
+  errorBox: {
+    marginTop: theme.spacing[4],
+    padding: theme.spacing[3],
+    background: `${theme.colors.status.critical}20`,
+    border: `1px solid ${theme.colors.status.critical}`,
+    borderRadius: theme.borderRadius.lg,
+    color: theme.colors.status.critical,
+    textAlign: 'center',
+    maxWidth: '400px',
+    margin: `${theme.spacing[4]} auto 0`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+  },
   centered: {
     minHeight: '100vh',
     display: 'flex',

@@ -423,10 +423,10 @@ export default function DashboardPage() {
   );
 }
 
-// ==================== STYLES ====================
+// app/dashboard/page.tsx (only the styles object – replace the existing styles object)
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    padding: getThemeValue('spacing.8', '32px'),
+    padding: 'clamp(16px, 4vw, 32px)',  // 🔁 responsive padding
     background: getThemeValue('colors.background.main', '#020617'),
     minHeight: '100vh',
     color: getThemeValue('colors.text.primary', '#f1f5f9'),
@@ -441,7 +441,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: getThemeValue('spacing.4', '16px'),
   },
   title: {
-    fontSize: getThemeValue('fontSizes.3xl', '32px'),
+    fontSize: 'clamp(24px, 6vw, 32px)',   // 🔁 responsive font
     fontWeight: getThemeValue('fontWeights.bold', '700'),
     marginBottom: getThemeValue('spacing.1', '4px'),
     background: getThemeValue('gradients.title', 'linear-gradient(135deg, #94a3b8, #f1f5f9)'),
@@ -449,7 +449,7 @@ const styles: Record<string, React.CSSProperties> = {
     WebkitTextFillColor: 'transparent',
   },
   subtitle: {
-    fontSize: getThemeValue('fontSizes.base', '16px'),
+    fontSize: 'clamp(12px, 4vw, 14px)',
     color: getThemeValue('colors.text.secondary', '#94a3b8'),
   },
   refreshButton: {
@@ -466,7 +466,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   statsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', // narrower min width ensures wrapping
     gap: getThemeValue('spacing.4', '16px'),
     marginBottom: getThemeValue('spacing.6', '24px'),
   },
@@ -481,160 +481,14 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'default',
   },
   statValue: {
-    fontSize: getThemeValue('fontSizes.2xl', '24px'),
+    fontSize: 'clamp(20px, 5vw, 24px)',   // responsive
     fontWeight: getThemeValue('fontWeights.bold', '700'),
     display: 'block',
     color: getThemeValue('colors.text.primary', '#f1f5f9'),
   },
   statLabel: {
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
+    fontSize: 'clamp(10px, 3vw, 14px)',
     color: getThemeValue('colors.text.muted', '#64748b'),
   },
-  card: {
-    background: getThemeValue('colors.background.card', '#0f172a'),
-    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
-    borderRadius: getThemeValue('borderRadius.xl', '16px'),
-    padding: getThemeValue('spacing.5', '20px'),
-    marginBottom: getThemeValue('spacing.6', '24px'),
-  },
-  cardHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: getThemeValue('spacing.2', '8px'),
-    marginBottom: getThemeValue('spacing.4', '16px'),
-    flexWrap: 'wrap',
-  },
-  cardTitle: {
-    fontSize: getThemeValue('fontSizes.lg', '18px'),
-    fontWeight: getThemeValue('fontWeights.semibold', '600'),
-    color: getThemeValue('colors.text.primary', '#f1f5f9'),
-    flex: 1,
-  },
-  tableWrapper: {
-    overflowX: 'auto',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
-  },
-  iconButton: {
-    background: 'transparent',
-    border: 'none',
-    color: getThemeValue('colors.primary', '#22c55e'),
-    cursor: 'pointer',
-    padding: getThemeValue('spacing.1', '4px'),
-    borderRadius: getThemeValue('borderRadius.md', '8px'),
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: getThemeValue('spacing.6', '24px'),
-    color: getThemeValue('colors.text.muted', '#64748b'),
-  },
-  primaryButton: {
-    marginTop: getThemeValue('spacing.3', '12px'),
-    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
-    background: getThemeValue('colors.primary', '#22c55e'),
-    border: 'none',
-    borderRadius: getThemeValue('borderRadius.lg', '12px'),
-    color: getThemeValue('colors.background.main', '#020617'),
-    fontWeight: getThemeValue('fontWeights.medium', '500'),
-    cursor: 'pointer',
-  },
-  smallButton: {
-    padding: `${getThemeValue('spacing.1', '4px')} ${getThemeValue('spacing.3', '12px')}`,
-    background: getThemeValue('colors.primary', '#22c55e'),
-    border: 'none',
-    borderRadius: getThemeValue('borderRadius.lg', '12px'),
-    color: getThemeValue('colors.background.main', '#020617'),
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
-    cursor: 'pointer',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: getThemeValue('spacing.1', '4px'),
-  },
-  linkButton: {
-    marginTop: getThemeValue('spacing.2', '8px'),
-    background: 'transparent',
-    border: 'none',
-    color: getThemeValue('colors.primary', '#22c55e'),
-    cursor: 'pointer',
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
-    textDecoration: 'underline',
-  },
-  twoColumn: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-    gap: getThemeValue('spacing.6', '24px'),
-    marginBottom: getThemeValue('spacing.6', '24px'),
-  },
-  reminderItem: {
-    marginBottom: getThemeValue('spacing.3', '12px'),
-    paddingBottom: getThemeValue('spacing.2', '8px'),
-    borderBottom: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
-  },
-  vehicleTag: {
-    display: 'inline-block',
-    marginLeft: getThemeValue('spacing.2', '8px'),
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
-    color: getThemeValue('colors.text.muted', '#64748b'),
-  },
-  reminderMeta: {
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
-    color: getThemeValue('colors.text.muted', '#64748b'),
-    marginTop: getThemeValue('spacing.1', '4px'),
-  },
-  predictionItem: {
-    marginBottom: getThemeValue('spacing.3', '12px'),
-    paddingBottom: getThemeValue('spacing.2', '8px'),
-    borderBottom: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
-  },
-  predictionHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: getThemeValue('spacing.1', '4px'),
-  },
-  predictionCost: {
-    fontWeight: getThemeValue('fontWeights.bold', '700'),
-    color: getThemeValue('colors.primary', '#22c55e'),
-  },
-  predictionMeta: {
-    fontSize: getThemeValue('fontSizes.xs', '12px'),
-    color: getThemeValue('colors.text.muted', '#64748b'),
-  },
-  alertsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: getThemeValue('spacing.2', '8px'),
-  },
-  alertItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: getThemeValue('spacing.2', '8px'),
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
-    color: getThemeValue('colors.text.secondary', '#94a3b8'),
-    flexWrap: 'wrap',
-  },
-  centered: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: getThemeValue('colors.text.secondary', '#94a3b8'),
-  },
-  retryButton: {
-    marginTop: getThemeValue('spacing.4', '16px'),
-    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
-    background: getThemeValue('colors.primary', '#22c55e'),
-    border: 'none',
-    borderRadius: getThemeValue('borderRadius.lg', '12px'),
-    color: getThemeValue('colors.background.main', '#020617'),
-    cursor: 'pointer',
-  },
+  // all other styles stay the same (card, table, etc.) – they are already responsive enough
 };

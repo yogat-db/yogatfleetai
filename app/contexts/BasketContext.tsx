@@ -1,67 +1,71 @@
-// contexts/BasketContext.tsx
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-export type BasketItem = {
-  id: string;
+export interface CartItem {
+  id: string;               // affiliate_product_id
+  external_id: string;      // ebay:123 or channel3:456
+  platform: 'ebay' | 'channel3';
   name: string;
   price: number;
-  image_url: string;
-  platform: string;
-  affiliate_link: string;
+  image_url: string | null;
   quantity: number;
-};
+}
 
-type BasketContextType = {
-  items: BasketItem[];
-  addItem: (item: Omit<BasketItem, 'quantity'>) => void;
-  removeItem: (id: string) => void;
+interface BasketContextType {
+  items: CartItem[];
+  addToCart: (item: Omit<CartItem, 'quantity'>) => void;
+  removeFromCart: (id: string) => void;
   updateQuantity: (id: string, quantity: number) => void;
-  clearBasket: () => void;
+  clearCart: () => void;
   totalItems: number;
   totalPrice: number;
-};
+  checkout: () => Promise<void>;
+  isCheckingOut: boolean;
+}
 
 const BasketContext = createContext<BasketContextType | undefined>(undefined);
 
 export function BasketProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<BasketItem[]>([]);
+  const [items, setItems] = useState<CartItem[]>([]);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
 
-  // Load from localStorage on mount
+  // Load cart from localStorage on mount
   useEffect(() => {
-    const saved = localStorage.getItem('affiliate_basket');
+    const saved = localStorage.getItem('affiliate_cart');
     if (saved) {
       try {
         setItems(JSON.parse(saved));
-      } catch (e) {}
+      } catch (e) {
+        console.error('Failed to parse cart', e);
+      }
     }
   }, []);
 
-  // Save to localStorage whenever items change
+  // Save cart to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem('affiliate_basket', JSON.stringify(items));
+    localStorage.setItem('affiliate_cart', JSON.stringify(items));
   }, [items]);
 
-  const addItem = (product: Omit<BasketItem, 'quantity'>) => {
+  const addToCart = (newItem: Omit<CartItem, 'quantity'>) => {
     setItems(prev => {
-      const existing = prev.find(i => i.id === product.id);
+      const existing = prev.find(i => i.id === newItem.id);
       if (existing) {
         return prev.map(i =>
-          i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i
+          i.id === newItem.id ? { ...i, quantity: i.quantity + 1 } : i
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...newItem, quantity: 1 }];
     });
   };
 
-  const removeItem = (id: string) => {
+  const removeFromCart = (id: string) => {
     setItems(prev => prev.filter(i => i.id !== id));
   };
 
   const updateQuantity = (id: string, quantity: number) => {
     if (quantity <= 0) {
-      removeItem(id);
+      removeFromCart(id);
       return;
     }
     setItems(prev =>
@@ -69,21 +73,64 @@ export function BasketProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const clearBasket = () => setItems([]);
+  const clearCart = () => {
+    setItems([]);
+  };
 
   const totalItems = items.reduce((sum, i) => sum + i.quantity, 0);
   const totalPrice = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
+  const checkout = async () => {
+    if (items.length === 0) {
+      alert('Your cart is empty');
+      return;
+    }
+
+    setIsCheckingOut(true);
+    try {
+      const response = await fetch('/api/stripe/affiliate-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: items.map(({ id, name, price, image_url, platform, external_id, quantity }) => ({
+            id,
+            name,
+            price,
+            image_url,
+            platform,
+            external_id,
+            quantity,
+          })),
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Checkout failed');
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('No checkout URL returned');
+      }
+    } catch (err: any) {
+      console.error('Checkout error:', err);
+      alert(err.message);
+    } finally {
+      setIsCheckingOut(false);
+    }
+  };
 
   return (
     <BasketContext.Provider
       value={{
         items,
-        addItem,
-        removeItem,
+        addToCart,
+        removeFromCart,
         updateQuantity,
-        clearBasket,
+        clearCart,
         totalItems,
         totalPrice,
+        checkout,
+        isCheckingOut,
       }}
     >
       {children}
