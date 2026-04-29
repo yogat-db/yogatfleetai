@@ -1,69 +1,117 @@
 // app/api/ebay/search/route.ts
 import { NextResponse } from 'next/server';
 
+const EPN_MKRID = '710-53481-19255-0';
+const TOOLID = '10001';
+
+function buildEpnLink(viewUrl: string, campaignId: string) {
+  const url = new URL(viewUrl);
+  url.searchParams.set('mkevt', '1');
+  url.searchParams.set('mkcid', '1');
+  url.searchParams.set('mkrid', EPN_MKRID);
+  url.searchParams.set('campid', campaignId);
+  url.searchParams.set('toolid', TOOLID);
+  return url.toString();
+}
+
+// Get OAuth token using client credentials (Client ID + Client Secret)
+async function getEbayAccessToken() {
+  const clientId = process.env.EBAY_CLIENT_ID;
+  const clientSecret = process.env.EBAY_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('EBAY_CLIENT_ID or EBAY_CLIENT_SECRET missing');
+  }
+
+  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+  const response = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      scope: 'https://api.ebay.com/oauth/api_scope',
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`eBay token error: ${response.status} ${error}`);
+  }
+
+  const data = await response.json();
+  return data.access_token;
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const query = searchParams.get('q');
+  const query = (searchParams.get('q') || '').trim();
 
   if (!query) {
     return NextResponse.json({ error: 'Missing search query' }, { status: 400 });
   }
 
-  const appId = process.env.EBAY_APP_ID;
-  const token = process.env.EBAY_API_TOKEN;
   const campaignId = process.env.EBAY_CAMPAIGN_ID;
 
-  if (!appId || !token || !campaignId) {
-    console.error('eBay credentials missing:', { appId: !!appId, token: !!token, campaignId: !!campaignId });
-    return NextResponse.json({ error: 'eBay API not configured' }, { status: 500 });
+  if (!campaignId) {
+    return NextResponse.json({ error: 'EBAY_CAMPAIGN_ID missing' }, { status: 500 });
   }
 
-  // eBay Finding API endpoint
-  const url = `https://svcs.ebay.com/services/search/FindingService/v1?OPERATION-NAME=findItemsByKeywords&SERVICE-VERSION=1.0.0&SECURITY-APPNAME=${appId}&RESPONSE-DATA-FORMAT=JSON&REST-PAYLOAD&keywords=${encodeURIComponent(query)}&paginationInput.entriesPerPage=12`;
-
   try {
-    const response = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${token}` },
+    const accessToken = await getEbayAccessToken();
+
+    // eBay Buy API (modern) – item search
+    const url = new URL('https://api.ebay.com/buy/browse/v1/item_summary/search');
+    url.searchParams.set('q', query);
+    url.searchParams.set('limit', '12');
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB', // UK marketplace
+      },
+      cache: 'no-store',
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('eBay API error:', response.status, errorText);
-      return NextResponse.json({ error: `eBay API returned ${response.status}` }, { status: response.status });
+      return NextResponse.json(
+        { error: `eBay API returned ${response.status}`, items: [] },
+        { status: response.status }
+      );
     }
 
     const data = await response.json();
+    const items = data?.itemSummaries || [];
 
-    // Extract items from eBay's nested response
-    const items = data.findItemsByKeywordsResponse?.[0]?.searchResult?.[0]?.item || [];
-
-    if (items.length === 0) {
-      return NextResponse.json({ items: [] });
-    }
-
-    const products = items.map((item: any) => {
-      const itemId = item.itemId?.[0];
-      const viewItemUrl = item.viewItemURL?.[0];
-      if (!itemId || !viewItemUrl) return null;
-
-      const affiliateLink = `https://rover.ebay.com/rover/1/710-53481-19255-0/1?mpre=${encodeURIComponent(viewItemUrl)}&campid=${campaignId}&toolid=10001`;
+    const products = items.map((item: any, idx: number) => {
+      const itemId = item.itemId || `ebay-${idx}`;
+      const viewItemUrl = item.itemWebUrl;
+      if (!viewItemUrl) return null;
 
       return {
-        id: itemId,
-        name: item.title?.[0] || 'eBay Item',
-        description: `Condition: ${item.condition?.[0]?.conditionDisplayName?.[0] || 'New'}`,
-        price: parseFloat(item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__) || 0,
-        image_url: item.galleryURL?.[0] || '/placeholder-car.png',
+        id: String(itemId),
+        name: String(item.title || 'eBay Item'),
+        description: `Condition: ${item.condition || 'New'}`,
+        price: parseFloat(item.price?.value) || 0,
+        image_url: item.image?.imageUrl || '/placeholder-car.png',
         platform: 'ebay',
-        affiliate_link: affiliateLink,
+        affiliate_link: buildEpnLink(viewItemUrl, campaignId),
         category: 'eBay Search',
         rating: 4.5,
       };
     }).filter(Boolean);
 
-    return NextResponse.json({ items: products });
-  } catch (err: any) {
-    console.error('eBay search error:', err.message);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json(
+      { items: products },
+      { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=1800' } }
+    );
+  } catch (err) {
+    console.error('eBay search error:', err);
+    return NextResponse.json({ error: 'Internal server error', items: [] }, { status: 500 });
   }
 }

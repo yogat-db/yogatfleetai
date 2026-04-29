@@ -6,8 +6,8 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   Briefcase, DollarSign, CheckCircle, AlertCircle,
-  TrendingUp, Users, Calendar, CreditCard, Car,
-  PlusCircle, Eye, RefreshCw, Star, MapPin
+  TrendingUp, CreditCard, Car,
+  PlusCircle, Eye, RefreshCw, MapPin
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';

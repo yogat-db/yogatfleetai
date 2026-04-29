@@ -13,10 +13,6 @@ export async function GET() {
       .from("vehicles")
       .select("*")
 
-    const { data: services } = await supabase
-      .from("services")
-      .select("*")
-
     const fleetHealth =
       vehicles?.reduce((sum, v) => sum + (v.health_score || 70), 0) /
       (vehicles?.length || 1)

@@ -1,36 +1,31 @@
-import { 
-  LayoutDashboard, Car, ShoppingBag, Truck, 
-  Wrench, Settings, ShieldCheck, Zap, Lock 
-} from 'lucide-react';
-
-export const NAV_GROUPS = (isMechanic: boolean, isAdmin: boolean) => [
-  {
-    label: 'Operations',
-    links: [
-      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/fleet', label: 'My Fleet', icon: Car },
-    ]
-  },
-  {
-    label: 'Marketplace',
-    links: [
-      { href: '/marketplace', label: 'Marketplace', icon: ShoppingBag },
-      { href: '/marketplace/affiliate', label: 'Car Accessories', icon: Truck },
-    ]
-  },
-  {
-    label: 'Technical',
-    links: [
-      { href: '/diagnostics', label: 'Diagnostics', icon: Zap },
-      { href: '/service-history', label: 'Service History', icon: Wrench },
-      { href: '/marketplace/jobs', label: 'Mechanic Hub', icon: ShieldCheck, show: isMechanic },
-    ]
-  },
-  {
-    label: 'System',
-    links: [
-      { href: '/control-center', label: 'Control Center', icon: Settings },
-      { href: '/privacy', label: 'Privacy Policy', icon: Lock },
-    ]
-  }
-];
+// lib/navigation.ts
+export function NAV_GROUPS(isMechanic: boolean, isAdmin: boolean) {
+  return [
+    {
+      name: 'Main',
+      links: [
+        { label: 'Dashboard', href: '/dashboard', icon: null, show: true },
+        { label: 'Fleet', href: '/fleet', icon: null, show: true },
+        { label: 'Marketplace', href: '/marketplace', icon: null, show: true },
+        { label: 'Diagnostics', href: '/diagnostics', icon: null, show: true },
+        { label: 'Service History', href: '/service-history', icon: null, show: true },
+        { label: 'Control Center', href: '/control-center', icon: null, show: true },
+      ],
+    },
+    ...(isMechanic ? [{
+      name: 'Mechanic',
+      links: [
+        { label: 'Mechanic Dashboard', href: '/marketplace/mechanics/dashboard', icon: null, show: true },
+      ],
+    }] : []),
+    ...(isAdmin ? [{
+      name: 'Admin',
+      links: [
+        { label: 'Admin Dashboard', href: '/admin', icon: null, show: true },
+        { label: 'Admin Jobs', href: '/admin/jobs', icon: null, show: true },
+        { label: 'Admin Mechanics', href: '/admin/mechanics', icon: null, show: true },
+        { label: 'Admin Users', href: '/admin/users', icon: null, show: true },
+      ],
+    }] : []),
+  ];
+}

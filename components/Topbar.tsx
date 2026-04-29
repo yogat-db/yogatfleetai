@@ -4,12 +4,13 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
-import { Cpu, Power, Search, ShieldCheck, Loader2, ChevronDown, User, Settings, Lock, Bell } from 'lucide-react';
+import { motion, useScroll, useTransform } from 'framer-motion';
+import { Cpu, Power, Search, ShieldCheck, Loader2, ChevronDown, User, Settings, Lock } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { NAV_GROUPS } from '@/lib/navigation';
 import theme from '@/app/theme';
 
+// Helper to check admin role (no 406)
 async function checkAdmin(userId: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('profiles')
@@ -28,12 +29,11 @@ export default function Topbar() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const { scrollY } = useScroll();
-  const bgOpacity = useTransform(scrollY, [0, 40], [0, 0.9]);
-  const backdropBlur = useTransform(scrollY, [0, 40], [0, 12]);
+  const bgOpacity = useTransform(scrollY, [0, 40], [0, 0.95]);
+  const backdropBlur = useTransform(scrollY, [0, 40], [0, 16]);
   const borderOpacity = useTransform(scrollY, [0, 40], [0, 1]);
 
   useEffect(() => {
@@ -56,12 +56,6 @@ export default function Topbar() {
         .eq('user_id', session.user.id)
         .maybeSingle();
       setIsMechanic(!!mech);
-      const { count } = await supabase
-        .from('notifications')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', session.user.id)
-        .eq('read', false);
-      setUnreadCount(count || 0);
       setIsLoading(false);
     };
     fetchUserAndRoles();
@@ -91,11 +85,11 @@ export default function Topbar() {
   };
 
   const navLinks = useMemo(() => {
-    const groups = NAV_GROUPS(isMechanic, isAdmin);
-    return groups.flatMap(g => g.links).filter(l => l.show !== false);
-  }, [isMechanic, isAdmin]);
+  const groups = NAV_GROUPS(isMechanic, isAdmin);
+  return groups.flatMap(g => g.links).filter(l => l.show !== false);
+}, [isMechanic, isAdmin]);
 
-  const publicPaths = ['/login', '/register', '/forgot-password', '/update-password'];
+  const publicPaths = ['/login', '/register', '/forgot-password', '/update-password', '/terms', '/privacy'];
   if (publicPaths.includes(pathname)) return null;
 
   return (
@@ -158,18 +152,12 @@ export default function Topbar() {
 
         {/* Right Actions */}
         <div style={styles.rightActions}>
+          {/* Search */}
           <button style={styles.iconButton} aria-label="Search">
             <Search size={16} />
           </button>
-          <button style={styles.iconButton} aria-label="Notifications">
-            <div style={{ position: 'relative' }}>
-              <Bell size={16} />
-              {unreadCount > 0 && (
-                <span style={styles.badge}>{unreadCount > 9 ? '9+' : unreadCount}</span>
-              )}
-            </div>
-          </button>
 
+          {/* Admin badge */}
           {!isLoading && isAdmin && (
             <div style={styles.adminBadge}>
               <ShieldCheck size={12} color={theme.colors.primary} />
@@ -177,6 +165,7 @@ export default function Topbar() {
             </div>
           )}
 
+          {/* User Dropdown */}
           {!isLoading && user ? (
             <div style={styles.dropdownContainer} ref={dropdownRef}>
               <button
@@ -189,29 +178,21 @@ export default function Topbar() {
                 </div>
                 <ChevronDown size={12} />
               </button>
-              <AnimatePresence>
-                {isUserDropdownOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                    transition={{ duration: 0.15 }}
-                    style={styles.dropdown}
-                  >
-                    <Link href="/settings" style={styles.dropdownItem} onClick={() => setIsUserDropdownOpen(false)}>
-                      <Settings size={14} /> Settings
-                    </Link>
-                    <Link href="/privacy" style={styles.dropdownItem} onClick={() => setIsUserDropdownOpen(false)}>
-                      <Lock size={14} /> Privacy
-                    </Link>
-                    <div style={styles.dropdownDivider} />
-                    <button onClick={handleLogout} disabled={isLoggingOut} style={styles.logoutDropdown}>
-                      {isLoggingOut ? <Loader2 size={14} className="spin" /> : <Power size={14} />}
-                      {isLoggingOut ? ' Signing out...' : ' Sign out'}
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              {isUserDropdownOpen && (
+                <div style={styles.dropdown}>
+                  <Link href="/settings" style={styles.dropdownItem} onClick={() => setIsUserDropdownOpen(false)}>
+                    <Settings size={14} /> Settings
+                  </Link>
+                  <Link href="/privacy" style={styles.dropdownItem} onClick={() => setIsUserDropdownOpen(false)}>
+                    <Lock size={14} /> Privacy
+                  </Link>
+                  <div style={styles.dropdownDivider} />
+                  <button onClick={handleLogout} disabled={isLoggingOut} style={styles.logoutDropdown}>
+                    {isLoggingOut ? <Loader2 size={14} className="spin" /> : <Power size={14} />}
+                    {isLoggingOut ? ' Signing out...' : ' Sign out'}
+                  </button>
+                </div>
+              )}
             </div>
           ) : !isLoading && !user ? (
             <Link href="/login" style={styles.loginLink}>Init Session</Link>
@@ -224,25 +205,18 @@ export default function Topbar() {
       </div>
 
       <style>{`
-        /* Responsive classes */
-        @media (min-width: 480px) {
-          .brand-text {
-            display: block !important;
-          }
-        }
-        @media (max-width: 479px) {
-          .brand-text {
-            display: none !important;
-          }
-        }
         @media (max-width: 1023px) {
-          .desktop-nav {
-            display: none !important;
-          }
+          .desktop-nav { display: none !important; }
         }
         @media (min-width: 1024px) {
-          .desktop-nav {
-            display: flex !important;
+          .desktop-nav { display: flex !important; }
+        }
+        .brand-text {
+          display: block;
+        }
+        @media (max-width: 480px) {
+          .brand-text {
+            display: none !important;
           }
         }
         .spin {
@@ -252,18 +226,12 @@ export default function Topbar() {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        button {
-          transition: all 0.2s ease;
-        }
-        button:hover {
-          transform: translateY(-1px);
-        }
       `}</style>
     </motion.header>
   );
 }
 
-// ==================== Styles (no inline @media) ====================
+// ==================== Styles (no inline media queries) ====================
 const styles: Record<string, React.CSSProperties> = {
   container: {
     maxWidth: '1440px',
@@ -295,7 +263,6 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: '0.3em',
     textTransform: 'uppercase',
     color: '#fff',
-    // display is handled by CSS class and media queries
   },
   desktopNav: {
     display: 'flex',
@@ -330,23 +297,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: theme.colors.text.secondary,
     cursor: 'pointer',
     transition: 'all 0.2s',
-  },
-  badge: {
-    position: 'absolute',
-    top: '-4px',
-    right: '-4px',
-    background: theme.colors.status.critical,
-    color: '#fff',
-    fontSize: '9px',
-    fontWeight: 'bold',
-    borderRadius: '10px',
-    minWidth: '16px',
-    height: '16px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '0 4px',
-    lineHeight: 1,
   },
   adminBadge: {
     display: 'flex',

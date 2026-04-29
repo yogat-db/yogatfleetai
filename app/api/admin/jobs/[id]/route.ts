@@ -1,73 +1,71 @@
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+// app/api/admin/jobs/[id]/route.ts
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
-/**
- * ADMIN JOB DELETION
- * Force deletes a job and its associated dependencies.
- */
+// Helper to verify admin access
+async function verifyAdmin() {
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll(); },
+        setAll() { /* no writes needed */ },
+      },
+    }
+  );
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
 
+  const { data: profile } = await supabaseAdmin
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle();
+  return profile?.role === 'admin' ? user : null;
+}
+
+// DELETE /api/admin/jobs/[id] – delete a job (admin only)
 export async function DELETE(
-  request: Request,
+  _request: Request,  // prefixed with underscore to indicate unused
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-    const cookieStore = await cookies();
-
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!, // Required for Admin overrides
-      {
-        cookies: {
-          getAll() { return cookieStore.getAll() },
-        },
-        global: {
-          fetch: (url: string | Request | URL, options: RequestInit | undefined) => {
-            return fetch(url, {
-              ...options,
-              headers: {
-                ...options?.headers,
-                'Accept-Encoding': 'identity', // Mac stability fix
-              },
-            });
-          },
-        },
-      }
-    );
-
-    // 1. Verify Requesting User is an Admin
-    const { data: { user } } = await supabase.auth.getUser();
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user?.id)
-      .single();
-
-    if (profile?.role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 403 });
+    const adminUser = await verifyAdmin();
+    if (!adminUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 2. Clean up dependencies manually (If Cascade is not set in DB)
-    // Delete applications first
-    await supabase.from('applications').delete().eq('job_id', id);
-    // Delete messages
-    await supabase.from('messages').delete().eq('job_id', id);
-    // Delete reviews
-    await supabase.from('reviews').delete().eq('job_id', id);
+    const { id } = await params;
+    if (!id) {
+      return NextResponse.json({ error: 'Missing job ID' }, { status: 400 });
+    }
 
-    // 3. Delete the Job
-    const { error: jobError } = await supabase
+    // First delete related applications (if foreign key doesn't cascade)
+    const { error: appError } = await supabaseAdmin
+      .from('applications')
+      .delete()
+      .eq('job_id', id);
+    if (appError) {
+      console.error('Failed to delete applications:', appError);
+      // Continue anyway – the job deletion might still work
+    }
+
+    // Delete the job itself
+    const { error: jobError } = await supabaseAdmin
       .from('jobs')
       .delete()
       .eq('id', id);
+    if (jobError) {
+      return NextResponse.json({ error: jobError.message }, { status: 500 });
+    }
 
-    if (jobError) throw jobError;
-
-    return NextResponse.json({ success: true, message: 'Job and related data purged.' });
-
+    return NextResponse.json({ success: true });
   } catch (err: any) {
-    console.error('ADMIN_DELETE_ERROR:', err.message);
+    console.error('DELETE /api/admin/jobs/[id] error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

@@ -5,13 +5,6 @@ import { createClient } from '@/lib/supabase/server';
 import { MapPin, Star, CheckCircle, AlertCircle } from 'lucide-react';
 import theme from '@/app/theme';
 
-interface Mechanic {
-  id: string;
-  business_name: string;
-  address: string | null;
-  verified: boolean;
-  subscription_status: string;
-}
 
 // Loading skeleton component
 function MechanicsGridSkeleton() {

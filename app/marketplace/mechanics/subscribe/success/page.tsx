@@ -3,7 +3,6 @@
 import { Suspense } from 'react';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { motion } from 'framer-motion';
 import { CheckCircle } from 'lucide-react';
 import theme from '@/app/theme';
 

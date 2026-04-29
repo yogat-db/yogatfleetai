@@ -23,7 +23,7 @@ export async function GET(request: Request) {
 
     const url = new URL(request.url)
     const status = url.searchParams.get('status') // open, assigned, completed
-    const mechanicId = url.searchParams.get('mechanicId')
+    // mechanicId is not used in this endpoint – removed to fix TypeScript error
     const limit = url.searchParams.get('limit') ? parseInt(url.searchParams.get('limit')!) : 50
     const offset = url.searchParams.get('offset') ? parseInt(url.searchParams.get('offset')!) : 0
 
@@ -42,8 +42,6 @@ export async function GET(request: Request) {
       query = query.eq('status', status)
     }
 
-    // If user is a mechanic, show jobs they've applied to or all open jobs
-    // For simplicity, we'll just return jobs based on user role later
     const { data, error, count } = await query
 
     if (error) {
@@ -90,7 +88,6 @@ export async function POST(request: Request) {
       budget,
     } = body
 
-    // Validation
     if (!title) {
       return NextResponse.json({ error: 'Title is required' }, { status: 400 })
     }
@@ -127,4 +124,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
-

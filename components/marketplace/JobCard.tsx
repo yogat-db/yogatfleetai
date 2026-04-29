@@ -2,15 +2,7 @@
 
 import { motion } from 'framer-motion'
 import { MapPin, Calendar, DollarSign } from 'lucide-react'
-import theme from '@/app/theme'
 
-const MyComponent = () => (
-  <div style={{ background: theme.colors.background.main, color: theme.colors.text.primary }}>
-    <h1 style={{ background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-      Hello
-    </h1>
-  </div>
-)
 interface JobCardProps {
   id: string
   title: string

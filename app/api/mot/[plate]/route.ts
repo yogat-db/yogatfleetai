@@ -1,11 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 /**
  * Production DVLA/MOT Lookup
  * Handles API-specific errors to prevent generic 500 crashes
  */
 export async function GET(
-  request: NextRequest,
   { params }: { params: Promise<{ plate: string }> }
 ) {
   const { plate } = await params;

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MapPin, Phone, Building, AlertCircle, CheckCircle, ArrowLeft,
-  Wrench, Zap, TrendingUp, Shield, FileCheck, Users, Award
+ TrendingUp, Shield, FileCheck, Users, Award
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
@@ -189,7 +189,7 @@ export default function MechanicRegisterPage() {
       if (userError || !user) throw new Error('You must be logged in to register');
 
       // Check if mechanic profile already exists
-      const { data: existing, error: checkError } = await supabase
+      const { data: existing } = await supabase
         .from('mechanics')
         .select('id')
         .eq('user_id', user.id)

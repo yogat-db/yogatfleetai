@@ -1,52 +1,70 @@
-// app/layout.tsx
-'use client'; // Required for Framer Motion + usePathname
-
-import { Inter } from 'next/font/google';
-import { usePathname } from 'next/navigation';
-import { AnimatePresence, motion } from 'framer-motion';
+import type { Metadata } from 'next';
 import { Toaster } from 'react-hot-toast';
 import AppShell from '@/components/AppShell';
 import ParticlesBackground from '@/components/ParticlesBackground';
 import NotificationBell from '@/components/NotificationBell';
+import { BasketProvider } from '@/lib/contexts/BasketContext';
 import './globals.css';
 
-const inter = Inter({ subsets: ['latin'] });
+export const metadata: Metadata = {
+  title: 'Yogat Fleet AI',
+  description: 'Fleet management and garage marketplace platform',
+};
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-
-  // Page transition variants
-  const pageVariants = {
-    initial: { opacity: 0, y: 8 },
-    animate: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: -8 },
-  };
-
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={inter.className} style={styles.body} suppressHydrationWarning>
+      <head>
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body
+        style={{
+          margin: 0,
+          padding: 0,
+          minHeight: '100vh',
+          position: 'relative',
+          overflowX: 'hidden',
+          fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        }}
+        suppressHydrationWarning
+      >
         <ParticlesBackground />
 
-        {/* Floating UI (notification bell) */}
-        <div style={styles.notificationWrapper}>
+        <div
+          style={{
+            position: 'fixed',
+            top: '1.25rem',
+            right: '1.5rem',
+            zIndex: 1100,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+          }}
+        >
           <NotificationBell />
         </div>
 
-        <AppShell>
-          <AnimatePresence mode="wait">
-            <motion.main
-              key={pathname}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              variants={pageVariants}
-              transition={{ duration: 0.2, ease: 'easeInOut' }}
-              style={styles.mainContent}
+        <BasketProvider>
+          <AppShell>
+            <main
+              style={{
+                position: 'relative',
+                zIndex: 1,
+                width: '100%',
+              }}
+              className="page-fade-in"
             >
               {children}
-            </motion.main>
-          </AnimatePresence>
-        </AppShell>
+            </main>
+          </AppShell>
+        </BasketProvider>
 
         <Toaster
           position="top-right"
@@ -65,27 +83,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  body: {
-    margin: 0,
-    padding: 0,
-    minHeight: '100vh',
-    position: 'relative',
-    overflowX: 'hidden',
-  },
-  notificationWrapper: {
-    position: 'fixed',
-    top: '1.25rem',
-    right: '1.5rem',
-    zIndex: 1100,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  mainContent: {
-    position: 'relative',
-    zIndex: 1,
-    width: '100%',
-  },
-};

@@ -80,7 +80,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     fetchRoles();
 
     // 4. Real-time Auth Synchronization
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         setState({
           isMechanic: false,

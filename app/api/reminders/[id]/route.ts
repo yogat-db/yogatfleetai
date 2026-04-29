@@ -103,7 +103,6 @@ export async function PUT(
 
 // DELETE: Remove a reminder
 export async function DELETE(
-  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {

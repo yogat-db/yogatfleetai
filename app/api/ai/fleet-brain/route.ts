@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { computeFleetBrain } from '@/lib/ai'
-import type { Vehicle } from '@/app/types/fleet'
+
 
 export async function GET(request: Request) {
   try {

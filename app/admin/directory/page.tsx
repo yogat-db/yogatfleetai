@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { 
-  ShieldCheck, Mail, MapPin, Phone, 
+  ShieldCheck, Mail, MapPin, 
   Search, Loader2, UserCog, Activity 
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';

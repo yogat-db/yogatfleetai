@@ -7,7 +7,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
-import { Trash2, Loader2, ChevronRight, Clock, DollarSign, BarChart3, Car, AlertTriangle, Gauge, TrendingUp, Cpu, RefreshCw } from 'lucide-react';
+import { Trash2, Loader2, ChevronRight, Clock, DollarSign, BarChart3, Car, AlertTriangle, Gauge, TrendingUp, RefreshCw } from 'lucide-react';
 import { computeFleetBrain } from '@/lib/ai';
 import { supabase } from '@/lib/supabase/client';
 import type { Vehicle } from '@/app/types/fleet';
@@ -24,11 +24,10 @@ const computeFleetStats = (vehicles: Vehicle[], vehiclesWithAI: any[]) => {
     0
   );
   const highRiskCount = vehiclesWithAI.filter(v => v.risk === 'high').length;
-
   return { totalMileage, avgHealth, predictedMaintenanceCost, highRiskCount };
 };
 
-// Delete button component (inline to avoid import issues)
+// Delete button component with proper theme handling
 function DeleteVehicleButton({ vehicleId, onDeleted }: { vehicleId: string; onDeleted?: () => void }) {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +54,8 @@ function DeleteVehicleButton({ vehicleId, onDeleted }: { vehicleId: string; onDe
         disabled={isPending}
         style={{
           background: 'transparent',
-          border: `1px solid ${theme.colors.error}`,
-          color: theme.colors.error,
+          border: `1px solid ${theme.colors.status.critical}`,  // ✅ fixed
+          color: theme.colors.status.critical,                   // ✅ fixed
           padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
           borderRadius: theme.borderRadius.lg,
           cursor: 'pointer',
@@ -66,10 +65,10 @@ function DeleteVehicleButton({ vehicleId, onDeleted }: { vehicleId: string; onDe
           fontSize: '12px',
         }}
       >
-        {isPending ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={14} />}
+        {isPending ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
         {isPending ? 'Deleting' : 'Delete'}
       </button>
-      {error && <div style={{ color: theme.colors.error, fontSize: '10px', marginTop: '4px' }}>{error}</div>}
+      {error && <div style={{ color: theme.colors.status.critical, fontSize: '10px', marginTop: '4px' }}>{error}</div>}
     </div>
   );
 }
@@ -89,13 +88,11 @@ export default function ControlCenterPage() {
       setRefreshing(true);
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) throw new Error('Not logged in');
-
       const { data, error } = await supabase
         .from('vehicles')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
-
       if (error) throw error;
       setVehicles(data || []);
     } catch (err: any) {
@@ -110,7 +107,6 @@ export default function ControlCenterPage() {
     fetchVehicles();
   }, []);
 
-  // Enrich with AI predictions
   const vehiclesWithAI = useMemo(() => computeFleetBrain(vehicles), [vehicles]);
 
   const stats = {
@@ -146,7 +142,7 @@ export default function ControlCenterPage() {
       const data = await res.json();
       if (res.ok) {
         alert(`Updated health scores for ${data.updated} vehicles`);
-        await fetchVehicles(); // refresh the list
+        await fetchVehicles();
       } else {
         alert(data.error || 'Failed to update scores');
       }
@@ -172,19 +168,16 @@ export default function ControlCenterPage() {
       <div style={styles.header}>
         <h1 style={styles.title}>Control Center</h1>
         <div style={styles.headerActions}>
-          <button
-            onClick={() => setChartView(chartView === 'pie' ? 'bar' : 'pie')}
-            style={styles.toggleButton}
-          >
+          <button onClick={() => setChartView(chartView === 'pie' ? 'bar' : 'pie')} style={styles.toggleButton}>
             <BarChart3 size={16} />
             Switch to {chartView === 'pie' ? 'Bar' : 'Pie'} Chart
           </button>
           <button onClick={refreshHealthScores} disabled={updatingScores} style={styles.toggleButton}>
-            {updatingScores ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+            {updatingScores ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
             {updatingScores ? 'Updating...' : 'Refresh Health Scores'}
           </button>
           <button onClick={fetchVehicles} disabled={refreshing} style={styles.toggleButton}>
-            {refreshing ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+            {refreshing ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
             Refresh
           </button>
         </div>
@@ -193,8 +186,8 @@ export default function ControlCenterPage() {
       {/* KPI Cards */}
       <div style={styles.kpiGrid}>
         <motion.div whileHover={{ y: -5 }} style={styles.kpiCard}>
-          <div style={{ ...styles.kpiIcon, background: `${theme.colors.info}20` }}>
-            <Car size={24} color={theme.colors.info} />
+          <div style={{ ...styles.kpiIcon, background: `${theme.colors.status.info}20` }}>
+            <Car size={24} color={theme.colors.status.info} />
           </div>
           <div style={styles.kpiLabel}>Total Fleet</div>
           <div style={styles.kpiValue}>{stats.total}</div>
@@ -207,8 +200,8 @@ export default function ControlCenterPage() {
           <div style={styles.kpiValue}>{fleetStats.avgHealth.toFixed(0)}%</div>
         </motion.div>
         <motion.div whileHover={{ y: -5 }} style={styles.kpiCard}>
-          <div style={{ ...styles.kpiIcon, background: `${theme.colors.warning}20` }}>
-            <TrendingUp size={24} color={theme.colors.warning} />
+          <div style={{ ...styles.kpiIcon, background: `${theme.colors.status.warning}20` }}>
+            <TrendingUp size={24} color={theme.colors.status.warning} />
           </div>
           <div style={styles.kpiLabel}>Predicted Maintenance</div>
           <div style={styles.kpiValue}>£{fleetStats.predictedMaintenanceCost.toFixed(0)}</div>
@@ -238,7 +231,7 @@ export default function ControlCenterPage() {
                     outerRadius={100}
                     paddingAngle={2}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} {(percent * 100).toFixed(0)}%`}
+                    label={({ name }) => `${name} {(percent * 100).toFixed(0)}%`}
                     labelLine={{ stroke: theme.colors.text.muted, strokeWidth: 1 }}
                   >
                     {chartData.map((entry, index) => (
@@ -307,10 +300,7 @@ export default function ControlCenterPage() {
                     </div>
                   </div>
                   <div style={styles.listItemFooter}>
-                    <button
-                      onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)}
-                      style={styles.viewButton}
-                    >
+                    <button onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)} style={styles.viewButton}>
                       View Details <ChevronRight size={14} />
                     </button>
                   </div>
@@ -371,10 +361,7 @@ export default function ControlCenterPage() {
                     )}
                   </div>
                   <div style={styles.listItemFooter}>
-                    <button
-                      onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)}
-                      style={styles.viewButton}
-                    >
+                    <button onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)} style={styles.viewButton}>
                       View Details <ChevronRight size={14} />
                     </button>
                   </div>
@@ -416,16 +403,15 @@ export default function ControlCenterPage() {
         </div>
       </div>
 
-      <style jsx>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+      <style>{`
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
     </motion.div>
   );
 }
 
-// ==================== STYLES (inline, production-ready) ====================
+// ==================== STYLES (production-ready, theme‑aware) ====================
 const styles: Record<string, React.CSSProperties> = {
   page: {
     padding: theme.spacing[10],
@@ -521,8 +507,8 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: theme.spacing[4],
   },
   badge: {
-    background: theme.colors.background.elevated,
-    padding: `${theme.spacing[0.5]} ${theme.spacing[2]}`,
+    background: theme.colors.background.subtle,
+    padding: `${theme.spacing[0]} ${theme.spacing[2]}`,
     borderRadius: theme.borderRadius.full,
     fontSize: theme.fontSizes.xs,
     color: theme.colors.text.secondary,
@@ -560,7 +546,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   riskBadge: {
     display: 'inline-block',
-    padding: `${theme.spacing[0.5]} ${theme.spacing[2]}`,
+    padding: `${theme.spacing[0]} ${theme.spacing[2]}`,
     borderRadius: theme.borderRadius.full,
     fontSize: theme.fontSizes.xs,
     fontWeight: theme.fontWeights.medium,

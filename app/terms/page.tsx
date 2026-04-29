@@ -1,222 +1,233 @@
 // app/terms/page.tsx
-import { Metadata } from 'next';
+'use client';
+
+import { motion } from 'framer-motion';
+import { useRouter } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
 import theme from '@/app/theme';
 
-export const metadata: Metadata = {
-  title: 'Terms of Service | Yogat Fleet AI',
-  description: 'Terms and conditions for using Yogat Fleet AI platform.',
-};
-
 export default function TermsPage() {
-  const lastUpdated = 'April 9, 2026';
+  const router = useRouter();
 
   return (
-    <div style={styles.container}>
-      <div style={styles.content}>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.4 }}
+      style={styles.page}
+    >
+      <div style={styles.glassCard}>
+        <button onClick={() => router.back()} style={styles.backButton}>
+          <ArrowLeft size={18} /> Back
+        </button>
+
+        <div style={styles.logoContainer}>
+          <div style={styles.logoIcon}>Y</div>
+          <span style={styles.logoText}>Yogat Fleet AI</span>
+        </div>
+
         <h1 style={styles.title}>Terms of Service</h1>
-        <p style={styles.lastUpdated}>Last updated: {lastUpdated}</p>
+        <p style={styles.lastUpdated}>Last updated: April 28, 2026</p>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>1. Acceptance of Terms</h2>
-          <p style={styles.text}>
-            By accessing or using Yogat Fleet AI (“we”, “us”, “our”), you agree to be bound by these Terms of Service
-            and our Privacy Policy. If you do not agree, please do not use our platform.
-          </p>
-        </div>
+        <div style={styles.content}>
+          <section style={styles.section}>
+            <h2>1. Acceptance of Terms</h2>
+            <p>
+              By accessing or using Yogat Fleet AI ("we", "our", "us"), you agree to be bound by these Terms of Service.
+              If you do not agree, please do not use our platform.
+            </p>
+          </section>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>2. Description of Service</h2>
-          <p style={styles.text}>
-            Yogat Fleet AI provides a fleet management platform that allows vehicle owners, fleet managers, and
-            mechanics to manage vehicles, schedule maintenance, post repair jobs, receive AI‑powered diagnostics,
-            and communicate. All services are provided “as is” and we reserve the right to modify or discontinue
-            features at any time.
-          </p>
-        </div>
+          <section style={styles.section}>
+            <h2>2. Description of Service</h2>
+            <p>
+              Yogat Fleet AI provides fleet management tools, a marketplace for vehicle repairs, affiliate links to
+              car parts, and diagnostic insights. We may modify or discontinue any part of the service at any time.
+            </p>
+          </section>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>3. User Accounts</h2>
-          <p style={styles.text}>
-            You are responsible for maintaining the confidentiality of your login credentials and for all activities
-            that occur under your account. You agree to provide accurate, current, and complete information during
-            registration and to update it as needed.
-          </p>
-        </div>
+          <section style={styles.section}>
+            <h2>3. User Accounts</h2>
+            <p>
+              You are responsible for maintaining the confidentiality of your login credentials. You agree to accept
+              responsibility for all activities that occur under your account. You must be at least 18 years old to
+              use our services.
+            </p>
+          </section>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>4. Acceptable Use</h2>
-          <p style={styles.text}>You agree not to:</p>
-          <ul style={styles.list}>
-            <li style={styles.listItem}>Use the service for any illegal purpose or in violation of any laws.</li>
-            <li style={styles.listItem}>Interfere with or disrupt the integrity or performance of the platform.</li>
-            <li style={styles.listItem}>Attempt to gain unauthorised access to any user accounts or data.</li>
-            <li style={styles.listItem}>Post false, misleading, or malicious content.</li>
-            <li style={styles.listItem}>Use automated scripts or bots to interact with the platform.</li>
-          </ul>
-        </div>
+          <section style={styles.section}>
+            <h2>4. Affiliate Links & Third‑Party Transactions</h2>
+            <p>
+              Our marketplace contains affiliate links (eBay, Channel3, etc.). We earn commissions on qualifying
+              purchases, but we are not responsible for the products, services, or content of third‑party sites.
+              Transactions are solely between you and the third‑party merchant.
+            </p>
+          </section>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>5. Payments and Subscriptions</h2>
-          <p style={styles.text}>
-            Some features may require payment (e.g., mechanic subscriptions, premium diagnostics). All payments are
-            processed by Stripe. You agree to pay all fees associated with your chosen plan. Fees are non‑refundable
-            unless required by law. We may change pricing with 30 days’ notice.
-          </p>
-        </div>
+          <section style={styles.section}>
+            <h2>5. User Conduct</h2>
+            <p>
+              You agree not to misuse our services, including but not limited to: violating any laws, uploading
+              malicious code, scraping data, or interfering with other users’ access. We reserve the right to
+              terminate accounts that violate these terms.
+            </p>
+          </section>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>6. Cancellation and Termination</h2>
-          <p style={styles.text}>
-            You may cancel your account at any time via the settings page. We may suspend or terminate your account
-            if you violate these terms. Upon termination, your access to the platform will cease, and we may delete
-            your data in accordance with our Privacy Policy.
-          </p>
-        </div>
+          <section style={styles.section}>
+            <h2>6. Intellectual Property</h2>
+            <p>
+              All content, logos, and software on Yogat Fleet AI are our property or licensed to us. You may not
+              copy, modify, or distribute any part of the platform without written permission.
+            </p>
+          </section>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>7. Intellectual Property</h2>
-          <p style={styles.text}>
-            All content, features, and functionality of the platform (including but not limited to software,
-            algorithms, logos, and design) are owned by Yogat Fleet AI or its licensors. You may not copy, modify,
-            or reverse‑engineer any part of the service without our prior written consent.
-          </p>
-        </div>
+          <section style={styles.section}>
+            <h2>7. Disclaimers & Limitation of Liability</h2>
+            <p>
+              Our services are provided "as is" without warranties of any kind. We are not liable for any indirect,
+              incidental, or consequential damages arising from your use of the platform. Your sole remedy is to
+              stop using the service.
+            </p>
+          </section>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>8. Disclaimer of Warranties</h2>
-          <p style={styles.text}>
-            The platform is provided “as is” and “as available” without warranties of any kind, either express or
-            implied. We do not guarantee that the service will be uninterrupted, error‑free, or secure. AI‑generated
-            insights are for informational purposes only; always consult a qualified mechanic.
-          </p>
-        </div>
+          <section style={styles.section}>
+            <h2>8. Changes to Terms</h2>
+            <p>
+              We may update these Terms from time to time. Continued use after changes constitutes acceptance of the
+              new terms.
+            </p>
+          </section>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>9. Limitation of Liability</h2>
-          <p style={styles.text}>
-            To the maximum extent permitted by law, Yogat Fleet AI shall not be liable for any indirect, incidental,
-            special, consequential, or punitive damages arising out of or related to your use of the platform.
-            Our total liability shall not exceed the amount you paid us in the preceding 12 months.
-          </p>
-        </div>
+          <section style={styles.section}>
+            <h2>9. Governing Law</h2>
+            <p>
+              These Terms shall be governed by the laws of the United Kingdom, without regard to its conflict of law
+              provisions.
+            </p>
+          </section>
 
-        <div style={styles.section}>
-          <h2 style={styles.heading}>10. Governing Law</h2>
-          <p style={styles.text}>
-            These terms shall be governed by and construed in accordance with the laws of England and Wales,
-            without regard to its conflict of law provisions. Any disputes shall be resolved in the courts of London.
-          </p>
-        </div>
-
-        <div style={styles.section}>
-          <h2 style={styles.heading}>11. Changes to Terms</h2>
-          <p style={styles.text}>
-            We may update these terms from time to time. We will notify you of material changes via email or a
-            prominent notice on the platform. Your continued use after the effective date constitutes acceptance
-            of the revised terms.
-          </p>
-        </div>
-
-        <div style={styles.section}>
-          <h2 style={styles.heading}>12. Contact Us</h2>
-          <p style={styles.text}>
-            If you have any questions about these Terms, please contact us at{' '}
-            <a href="mailto:legal@yogat.com" style={styles.link}>legal@yogat.com</a>.
-          </p>
-        </div>
-
-        <div style={styles.footer}>
-          <p style={styles.footerText}>
-            By using Yogat Fleet AI, you acknowledge that you have read, understood, and agree to be bound by these
-            Terms of Service.
-          </p>
+          <section style={styles.section}>
+            <h2>10. Contact Us</h2>
+            <p>
+              If you have any questions, please contact us at: <strong>support@yogatfleetai.com</strong>
+            </p>
+          </section>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
-// ==================== STYLES ====================
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    background: getThemeValue('colors.background.main', '#020617'),
-    minHeight: '100vh',
-    padding: getThemeValue('spacing.10', '40px'),
-    fontFamily: getThemeValue('fontFamilies.sans', 'Inter, sans-serif'),
-  },
-  content: {
-    maxWidth: '800px',
-    margin: '0 auto',
-    background: getThemeValue('colors.background.card', '#0f172a'),
-    borderRadius: getThemeValue('borderRadius.xl', '16px'),
-    padding: getThemeValue('spacing.8', '32px'),
-    border: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
-  },
-  title: {
-    fontSize: getThemeValue('fontSizes.3xl', '32px'),
-    fontWeight: getThemeValue('fontWeights.bold', '700'),
-    marginBottom: getThemeValue('spacing.2', '8px'),
-    background: getThemeValue('gradients.title', 'linear-gradient(135deg, #94a3b8, #f1f5f9)'),
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  lastUpdated: {
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
-    color: getThemeValue('colors.text.muted', '#64748b'),
-    marginBottom: getThemeValue('spacing.6', '24px'),
-  },
-  section: {
-    marginBottom: getThemeValue('spacing.6', '24px'),
-  },
-  heading: {
-    fontSize: getThemeValue('fontSizes.xl', '20px'),
-    fontWeight: getThemeValue('fontWeights.semibold', '600'),
-    marginBottom: getThemeValue('spacing.3', '12px'),
-    color: getThemeValue('colors.text.primary', '#f1f5f9'),
-  },
-  text: {
-    fontSize: getThemeValue('fontSizes.base', '16px'),
-    lineHeight: 1.6,
-    color: getThemeValue('colors.text.secondary', '#94a3b8'),
-    marginBottom: getThemeValue('spacing.3', '12px'),
-  },
-  list: {
-    listStyleType: 'disc',
-    paddingLeft: getThemeValue('spacing.5', '20px'),
-    marginBottom: getThemeValue('spacing.3', '12px'),
-  },
-  listItem: {
-    fontSize: getThemeValue('fontSizes.base', '16px'),
-    lineHeight: 1.6,
-    color: getThemeValue('colors.text.secondary', '#94a3b8'),
-    marginBottom: getThemeValue('spacing.1', '4px'),
-  },
-  link: {
-    color: getThemeValue('colors.primary', '#22c55e'),
-    textDecoration: 'none',
-  },
-  footer: {
-    marginTop: getThemeValue('spacing.8', '32px'),
-    paddingTop: getThemeValue('spacing.4', '16px'),
-    borderTop: `1px solid ${getThemeValue('colors.border.light', '#1e293b')}`,
-  },
-  footerText: {
-    fontSize: getThemeValue('fontSizes.sm', '14px'),
-    color: getThemeValue('colors.text.muted', '#64748b'),
-    textAlign: 'center',
-  },
-};
-
-// Helper to safely access theme values
-function getThemeValue(path: string, fallback: any): any {
+const getThemeValue = (path: string, fallback: any) => {
   const parts = path.split('.');
   let current: any = theme;
   for (const part of parts) {
     if (current && typeof current === 'object' && part in current) {
       current = current[part];
-    } else {
-      return fallback;
-    }
+    } else return fallback;
   }
   return current;
-}
+};
+
+const primaryColor = getThemeValue('colors.primary', '#22c55e');
+const bgMain = getThemeValue('colors.background.main', '#020617');
+const textPrimary = getThemeValue('colors.text.primary', '#f1f5f9');
+const textSecondary = getThemeValue('colors.text.secondary', '#94a3b8');
+const borderMedium = getThemeValue('colors.border.medium', '#334155');
+const textMuted = getThemeValue('colors.text.muted', '#64748b');
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: '100vh',
+    background: bgMain,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '40px 24px',
+    fontFamily: getThemeValue('fontFamilies.sans', 'Inter, sans-serif'),
+  },
+  glassCard: {
+    maxWidth: '900px',
+    width: '100%',
+    background: `rgba(15, 23, 42, 0.8)`,
+    backdropFilter: 'blur(12px)',
+    borderRadius: '32px',
+    border: `1px solid rgba(255,255,255,0.08)`,
+    padding: '40px',
+    boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+  },
+  backButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: 'transparent',
+    border: `1px solid ${borderMedium}`,
+    borderRadius: '12px',
+    padding: '8px 16px',
+    color: textSecondary,
+    cursor: 'pointer',
+    fontSize: '13px',
+    marginBottom: '24px',
+  },
+  logoContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '10px',
+    marginBottom: '24px',
+  },
+  logoIcon: {
+    width: '40px',
+    height: '40px',
+    background: primaryColor,
+    borderRadius: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '22px',
+    fontWeight: 800,
+    color: bgMain,
+  },
+  logoText: {
+    fontSize: '20px',
+    fontWeight: 800,
+    letterSpacing: '0.5px',
+    color: textPrimary,
+  },
+  title: {
+    fontSize: '32px',
+    fontWeight: 800,
+    marginBottom: '4px',
+    background: getThemeValue('gradients.title', 'linear-gradient(135deg, #f8fafc, #94a3b8)'),
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    textAlign: 'center',
+  },
+  lastUpdated: {
+    textAlign: 'center',
+    color: textMuted,
+    fontSize: '13px',
+    marginBottom: '40px',
+  },
+  content: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '24px',
+  },
+  section: {
+    backgroundColor: 'rgba(2, 6, 23, 0.4)',
+    borderRadius: '20px',
+    padding: '20px',
+    border: `1px solid rgba(255,255,255,0.05)`,
+  },
+  // These will be used by the component styles, but define them to avoid errors
+};
+
+// Add missing styles inline
+styles.section = {
+  ...styles.section,
+  backgroundColor: 'rgba(2, 6, 23, 0.4)',
+  borderRadius: '20px',
+  padding: '20px',
+  border: `1px solid rgba(255,255,255,0.05)`,
+};

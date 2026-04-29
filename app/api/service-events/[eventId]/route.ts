@@ -47,7 +47,6 @@ async function getMacSafeClient(isAdmin = false) {
 
 // GET /api/service-events/:eventId
 export async function GET(
-  request: NextRequest,
   { params }: { params: Promise<{ eventId: string }> }
 ) {
   try {
@@ -102,7 +101,6 @@ export async function PATCH(
 
 // DELETE /api/service-events/:eventId
 export async function DELETE(
-  request: NextRequest,
   { params }: { params: Promise<{ eventId: string }> }
 ) {
   try {

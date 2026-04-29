@@ -50,7 +50,7 @@ export default function MechanicRegisterPage() {
       if (userError || !user) throw new Error('You must be logged in');
 
       // 3. Check if mechanic profile already exists
-      const { data: existing, error: checkError } = await supabase
+      const { data: existing } = await supabase
         .from('mechanics')
         .select('id')
         .eq('user_id', user.id)

@@ -16,10 +16,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<any>(null);
 
   // Memoize public routes for performance
-  const isPublicRoute = useMemo(() => {
-    const publicRoutes = ['/login', '/register', '/forgot-password', '/update-password'];
-    return publicRoutes.includes(pathname);
-  }, [pathname]);
+ const isPublicRoute = useMemo(() => {
+  const publicRoutes = [
+    '/login',
+    '/register',
+    '/forgot-password',
+    '/update-password',
+    '/terms',
+    '/privacy',
+    '/cookies',
+  ];
+  return publicRoutes.includes(pathname);
+}, [pathname]);
 
   useEffect(() => {
     const initializeAuth = async () => {

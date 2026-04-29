@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 export async function GET(
-  req: Request,
   { params }: { params: Promise<{ plate: string }> }
 ) {
   try {
@@ -37,7 +36,6 @@ export async function GET(
 }
 
 export async function DELETE(
-  req: Request,
   { params }: { params: Promise<{ plate: string }> }
 ) {
   try {
@@ -48,7 +46,6 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 1. Find the vehicle
     const { data: vehicle, error: findError } = await supabase
       .from('vehicles')
       .select('id')
@@ -64,17 +61,16 @@ export async function DELETE(
       return NextResponse.json({ error: 'Vehicle not found' }, { status: 404 });
     }
 
-    // 2. Delete dependent jobs (if foreign key does not have ON DELETE CASCADE)
+    // Delete dependent jobs
     const { error: jobsError } = await supabase
       .from('jobs')
       .delete()
       .eq('vehicle_id', vehicle.id);
     if (jobsError) {
       console.error('Failed to delete jobs:', jobsError);
-      // Continue – we still try to delete the vehicle
     }
 
-    // 3. Delete the vehicle
+    // Delete the vehicle
     const { error: deleteError } = await supabase
       .from('vehicles')
       .delete()

@@ -7,7 +7,6 @@ import { createClient } from '@/lib/supabase/server';
  */
 
 export async function GET(
-  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -74,7 +73,6 @@ export async function PATCH( // Changed from PUT to PATCH for partial updates
 }
 
 export async function DELETE(
-  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {

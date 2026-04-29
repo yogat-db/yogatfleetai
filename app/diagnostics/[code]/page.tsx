@@ -37,22 +37,8 @@ export default function DTCDetailPage() {
   if (loading) {
     return (
       <div style={styles.centered}>
-        <div className="spinner" />
-        <p>Loading diagnostic data...</p>
-        <style jsx>{`
-          .spinner {
-            border: 3px solid ${theme.colors.border.medium};
-            border-top: 3px solid ${theme.colors.primary};
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin-bottom: 16px;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+        <div style={styles.spinner} />
+        <p style={{ marginTop: 16, color: theme.colors.text.secondary }}>Loading diagnostic data...</p>
       </div>
     );
   }
@@ -60,7 +46,7 @@ export default function DTCDetailPage() {
   if (error) {
     return (
       <div style={styles.centered}>
-        <p style={{ color: theme.colors.error }}>{error}</p>
+        <p style={{ color: theme.colors.status.critical }}>{error}</p>
         <button onClick={() => router.back()} style={styles.backButton}>← Go Back</button>
       </div>
     );
@@ -88,6 +74,20 @@ export default function DTCDetailPage() {
           <p><strong>Estimated Cost:</strong> £{dtc.estimatedCost}</p>
         )}
       </div>
+
+      <style>{`
+        .spinner {
+          border: 3px solid ${theme.colors.border.medium};
+          border-top: 3px solid ${theme.colors.primary};
+          border-radius: 50%;
+          width: 40px;
+          height: 40px;
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </motion.div>
   );
 }
@@ -107,7 +107,6 @@ const getThemeValue = (path: string, fallback: any) => {
 };
 
 const primaryColor = getThemeValue('colors.primary', '#22c55e');
-const errorColor = getThemeValue('colors.error', '#ef4444');
 const bgCard = getThemeValue('colors.background.card', '#0f172a');
 const borderLight = getThemeValue('colors.border.light', '#1e293b');
 const borderMedium = getThemeValue('colors.border.medium', '#334155');
@@ -129,6 +128,14 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     color: textSecondary,
+  },
+  spinner: {
+    border: `3px solid ${borderMedium}`,
+    borderTop: `3px solid ${primaryColor}`,
+    borderRadius: '50%',
+    width: '40px',
+    height: '40px',
+    animation: 'spin 1s linear infinite',
   },
   backButton: {
     background: 'transparent',

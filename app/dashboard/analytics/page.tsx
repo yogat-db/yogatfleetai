@@ -2,19 +2,16 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer
 } from 'recharts';
 import { 
-  RefreshCw, Loader2, TrendingUp, ShieldCheck, 
+  RefreshCw, TrendingUp, ShieldCheck, 
   Wallet, Car, Activity, ArrowUpRight, Filter
 } from 'lucide-react';
-
-// Core Logic & Theme
 import { supabase } from '@/lib/supabase/client';
-import theme from '@/app/theme';
 
 // ==================== TYPES ====================
 interface Vehicle {
@@ -42,18 +39,6 @@ interface Transaction {
 
 type TimeRange = '3m' | '6m' | '1y' | 'all';
 
-// ==================== UTILS ====================
-const getThemeValue = (path: string, fallback: any): any => {
-  const parts = path.split('.');
-  let current: any = theme;
-  for (const part of parts) {
-    if (current && typeof current === 'object' && part in current) {
-      current = current[part];
-    } else return fallback;
-  }
-  return current;
-};
-
 const formatCurrency = (pence: number) => 
   new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(pence / 100);
 
@@ -61,13 +46,11 @@ const formatCurrency = (pence: number) =>
 export default function OwnerAnalyticsPage() {
   const router = useRouter();
   
-  // Data States
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [mechanics, setMechanics] = useState<Record<string, string>>({});
+  const [, setMechanics] = useState<Record<string, string>>({});
   
-  // UI States
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [timeRange, setTimeRange] = useState<TimeRange>('6m');
@@ -78,7 +61,6 @@ export default function OwnerAnalyticsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return router.push('/login');
 
-      // Concurrent fetching for production performance
       const [vRes, jRes, tRes] = await Promise.all([
         supabase.from('vehicles').select('id, license_plate, make, model, health_score').eq('user_id', user.id),
         supabase.from('jobs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
@@ -89,7 +71,6 @@ export default function OwnerAnalyticsPage() {
       setJobs(jRes.data || []);
       setTransactions(tRes.data || []);
 
-      // Resolve Mechanic Names
       const mechIds = [...new Set(tRes.data?.map(t => t.mechanic_id).filter(Boolean) || [])];
       if (mechIds.length) {
         const { data: mData } = await supabase.from('mechanics').select('id, business_name').in('id', mechIds);
@@ -97,6 +78,8 @@ export default function OwnerAnalyticsPage() {
         mData?.forEach(m => { mMap[m.id] = m.business_name || 'Independent'; });
         setMechanics(mMap);
       }
+    } catch (err) {
+      console.error('Analytics fetch error:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -115,12 +98,19 @@ export default function OwnerAnalyticsPage() {
     return completed.filter(t => new Date(t.created_at) >= cutoff);
   }, [transactions, timeRange]);
 
-  const kpis = useMemo(() => ({
-    totalSpent: filteredTx.reduce((sum, t) => sum + t.amount, 0),
-    avgHealth: Math.round(vehicles.reduce((a, b) => a + (b.health_score || 0), 0) / (vehicles.length || 1)),
-    activeAssets: vehicles.length,
-    efficiency: Math.round((jobs.filter(j => j.status === 'completed').length / (jobs.length || 1)) * 100)
-  }), [filteredTx, vehicles, jobs]);
+  const kpis = useMemo(() => {
+    const totalSpent = filteredTx.reduce((sum, t) => sum + t.amount, 0);
+    const avgHealth = vehicles.reduce((a, b) => a + (b.health_score || 0), 0) / (vehicles.length || 1);
+    const activeAssets = vehicles.length;
+    const completedJobs = jobs.filter(j => j.status === 'completed').length;
+    const efficiency = jobs.length ? Math.round((completedJobs / jobs.length) * 100) : 0;
+    return {
+      totalSpent,
+      avgHealth: Math.round(avgHealth),
+      activeAssets,
+      efficiency
+    };
+  }, [filteredTx, vehicles, jobs]);
 
   const spendingChart = useMemo(() => {
     const map: Record<string, number> = {};
@@ -131,11 +121,11 @@ export default function OwnerAnalyticsPage() {
     return Object.entries(map).map(([name, amount]) => ({ name, amount }));
   }, [filteredTx]);
 
-  if (loading && !refreshing) return <LoadingState />;
+  if (loading && !refreshing) return <LoadingSkeleton />;
 
   return (
     <div style={styles.page}>
-      {/* HEADER SECTION */}
+      {/* HEADER */}
       <header style={styles.header}>
         <div>
           <motion.h1 initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} style={styles.title}>
@@ -143,7 +133,6 @@ export default function OwnerAnalyticsPage() {
           </motion.h1>
           <p style={styles.subtitle}>Fleet expenditure and health telemetry</p>
         </div>
-        
         <div style={styles.controls}>
           <div style={styles.rangeBox}>
             <Filter size={14} color="#64748b" />
@@ -222,13 +211,26 @@ export default function OwnerAnalyticsPage() {
           </button>
         </div>
       </div>
+
+      <style>{`
+        .animate-spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
 
 // ==================== SUB-COMPONENTS ====================
 
-function KpiItem({ label, value, icon, trend, color }: any) {
+interface KpiItemProps {
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+  trend: string;
+  color: string;
+}
+
+function KpiItem({ label, value, icon, trend, color }: KpiItemProps) {
   return (
     <motion.div whileHover={{ scale: 1.02 }} style={styles.kpiCard}>
       <div style={{ ...styles.iconCircle, backgroundColor: `${color}15`, color }}>{icon}</div>
@@ -243,11 +245,20 @@ function KpiItem({ label, value, icon, trend, color }: any) {
   );
 }
 
-function LoadingState() {
+function LoadingSkeleton() {
   return (
-    <div style={styles.center}>
-      <Loader2 size={40} color="#22c55e" className="animate-spin" />
-      <p style={styles.loadingText}>Synthesizing Analytics...</p>
+    <div style={styles.page}>
+      <div style={styles.header}>
+        <div><div style={styles.skeletonTitle} /><div style={styles.skeletonSubtitle} /></div>
+        <div style={{ display: 'flex', gap: 12 }}><div style={styles.skeletonButton} /><div style={styles.skeletonButton} /></div>
+      </div>
+      <div style={styles.kpiGrid}>
+        {[1,2,3,4].map(i => <div key={i} style={styles.skeletonKpi} />)}
+      </div>
+      <div style={styles.bentoGrid}>
+        <div style={{ ...styles.card, gridColumn: 'span 2', height: 400 }} />
+        <div style={{ ...styles.card, height: 400 }} />
+      </div>
     </div>
   );
 }
@@ -265,7 +276,9 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '40px'
+    marginBottom: '40px',
+    flexWrap: 'wrap',
+    gap: '16px'
   },
   title: {
     fontSize: '32px',
@@ -308,7 +321,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   kpiGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
     gap: '24px',
     marginBottom: '32px'
   },
@@ -379,6 +392,9 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     gap: '8px'
   },
-  center: { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
-  loadingText: { marginTop: '16px', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px', color: '#64748b' }
+  // Skeleton styles
+  skeletonTitle: { width: 200, height: 32, background: '#1e293b', borderRadius: 8, marginBottom: 8 },
+  skeletonSubtitle: { width: 300, height: 16, background: '#1e293b', borderRadius: 4 },
+  skeletonButton: { width: 42, height: 42, background: '#1e293b', borderRadius: 12 },
+  skeletonKpi: { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 20, height: 100, flex: 1 }
 };

@@ -89,7 +89,7 @@ export default function VehiclesPage() {
   if (error) {
     return (
       <div style={styles.centered}>
-        <p style={{ color: theme.colors.error }}>Error: {error}</p>
+        <p style={{ color: theme.colors.status.critical }}>Error: {error}</p>
         <button onClick={fetchVehicles} style={styles.retryButton}>Retry</button>
       </div>
     );
@@ -248,24 +248,24 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     gap: theme.spacing[2],
   },
-  editButton: {
-    background: 'transparent',
-    border: 'none',
-    color: theme.colors.secondary,
-    cursor: 'pointer',
-    padding: theme.spacing[1],
-    borderRadius: theme.borderRadius.lg,
-    transition: 'background 0.2s ease',
-  },
-  deleteButton: {
-    background: 'transparent',
-    border: 'none',
-    color: theme.colors.error,
-    cursor: 'pointer',
-    padding: theme.spacing[1],
-    borderRadius: theme.borderRadius.lg,
-    transition: 'background 0.2s ease',
-  },
+ editButton: {
+  background: 'transparent',
+  border: 'none',
+  color: theme.colors.text.secondary,  // instead of theme.colors.secondary
+  cursor: 'pointer',
+  padding: theme.spacing[1],
+  borderRadius: theme.borderRadius.lg,
+  transition: 'background 0.2s ease',
+},
+deleteButton: {
+  background: 'transparent',
+  border: 'none',
+  color: theme.colors.status.critical, // instead of theme.colors.error
+  cursor: 'pointer',
+  padding: theme.spacing[1],
+  borderRadius: theme.borderRadius.lg,
+  transition: 'background 0.2s ease',
+},
   licensePlate: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.text.secondary,

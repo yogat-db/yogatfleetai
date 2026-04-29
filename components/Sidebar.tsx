@@ -15,12 +15,36 @@ import {
   Menu,
   X,
   LogOut,
-  ShieldCheck, // add this for admin icon
+  ShieldCheck,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-// ---------- User Role Hook (now includes admin) ----------
+// ---------- Helper to get current user role (admin & mechanic) ----------
+async function getUserRole(userId: string): Promise<{ isAdmin: boolean; isMechanic: boolean }> {
+  let isAdmin = false;
+  let isMechanic = false;
+
+  // Check admin via profiles table
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle();
+  if (profile?.role === 'admin') isAdmin = true;
+
+  // Check mechanic
+  const { data: mechanic } = await supabase
+    .from('mechanics')
+    .select('id')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (mechanic) isMechanic = true;
+
+  return { isAdmin, isMechanic };
+}
+
+// ---------- Custom hook for user role (with loading) ----------
 function useUserRole() {
   const [isMechanic, setIsMechanic] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -34,23 +58,11 @@ function useUserRole() {
           setLoading(false);
           return;
         }
-        // Check mechanic
-        const { data: mechanic } = await supabase
-          .from('mechanics')
-          .select('id')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        setIsMechanic(!!mechanic);
-
-        // Check admin via profiles (use maybeSingle to avoid 406)
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .maybeSingle();
-        setIsAdmin(profile?.role === 'admin');
+        const { isAdmin, isMechanic } = await getUserRole(user.id);
+        setIsAdmin(isAdmin);
+        setIsMechanic(isMechanic);
       } catch (error) {
-        console.error('Error fetching user role:', error);
+        console.error('Role fetch error:', error);
       } finally {
         setLoading(false);
       }
@@ -61,16 +73,14 @@ function useUserRole() {
   return { isMechanic, isAdmin, loading };
 }
 
-// ---------- Safe theme access ----------
+// ---------- Safe theme access (with fallbacks) ----------
 const getThemeValue = (path: string, fallback: any) => {
   const parts = path.split('.');
   let current: any = theme;
   for (const part of parts) {
     if (current && typeof current === 'object' && part in current) {
       current = current[part];
-    } else {
-      return fallback;
-    }
+    } else return fallback;
   }
   return current;
 };
@@ -93,6 +103,7 @@ export default function Sidebar() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
 
+  // Detect mobile
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
@@ -100,11 +111,12 @@ export default function Sidebar() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  // Close mobile drawer on route change
   useEffect(() => {
     setIsMobileOpen(false);
   }, [pathname]);
 
-  const publicPaths = ['/login', '/register', '/forgot-password', '/update-password'];
+  const publicPaths = ['/login', '/register', '/forgot-password', '/update-password', '/terms', '/privacy'];
   if (publicPaths.includes(pathname)) return null;
 
   const handleLogout = async () => {
@@ -120,8 +132,8 @@ export default function Sidebar() {
     }
   };
 
-  // Regular user menu items
-  const mainMenuItems = [
+  // Navigation items (main for all authenticated users)
+  const mainNavItems = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, exact: true },
     { name: 'Fleet', href: '/fleet', icon: Truck, exact: true },
     { name: 'Marketplace', href: '/marketplace', icon: ShoppingCart, exact: false },
@@ -130,11 +142,10 @@ export default function Sidebar() {
     { name: 'Control Center', href: '/control-center', icon: Settings, exact: true },
   ];
 
-  const mechanicItems = [
-    { name: 'Mechanic Dashboard', href: '/marketplace/mechanics/dashboard', icon: Briefcase, exact: false },
-  ];
+  // Mechanic specific
+  const mechanicItem = { name: 'Mechanic Dashboard', href: '/marketplace/mechanics/dashboard', icon: Briefcase, exact: false };
 
-  // Admin item – only shown if user is admin
+  // Admin specific (only shown if user has admin role)
   const adminItem = { name: 'Admin Dashboard', href: '/admin', icon: ShieldCheck, exact: false };
 
   const isActive = (href: string, exact = false) => {
@@ -142,62 +153,37 @@ export default function Sidebar() {
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
-  const renderNavItems = (items: typeof mainMenuItems) => (
-    <>
-      {items.map((item) => {
-        const active = isActive(item.href, item.exact);
-        return (
-          <div key={item.href} style={{ position: 'relative' }}>
-            <a onClick={() => router.push(item.href)} style={{ textDecoration: 'none', cursor: 'pointer' }}>
-              <motion.div
-                whileHover={{ x: 4 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                onMouseEnter={() => setHoveredItem(item.name)}
-                onMouseLeave={() => setHoveredItem(null)}
-                style={{
-                  ...styles.navItem,
-                  background: active ? activeBg : 'transparent',
-                  borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
-                }}
-              >
-                <item.icon size={20} color={active ? primaryColor : textSecondary} />
-                {!isCollapsed && <span style={{ marginLeft: '12px' }}>{item.name}</span>}
-              </motion.div>
-            </a>
-            {isCollapsed && hoveredItem === item.name && <div style={styles.tooltip}>{item.name}</div>}
-          </div>
-        );
-      })}
-    </>
-  );
+  const renderNavItem = (item: { name: string; href: string; icon: any; exact: boolean }) => {
+    const active = isActive(item.href, item.exact);
+    const Icon = item.icon;
+    return (
+      <div key={item.href} style={{ position: 'relative' }}>
+        <a onClick={() => router.push(item.href)} style={{ textDecoration: 'none', cursor: 'pointer' }}>
+          <motion.div
+            whileHover={{ x: 4 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+            onMouseEnter={() => setHoveredItem(item.name)}
+            onMouseLeave={() => setHoveredItem(null)}
+            style={{
+              ...styles.navItem,
+              background: active ? activeBg : 'transparent',
+              borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
+            }}
+          >
+            <Icon size={20} color={active ? primaryColor : textSecondary} />
+            {!isCollapsed && <span style={{ marginLeft: '12px' }}>{item.name}</span>}
+          </motion.div>
+        </a>
+        {isCollapsed && hoveredItem === item.name && <div style={styles.tooltip}>{item.name}</div>}
+      </div>
+    );
+  };
 
   const renderContent = () => (
     <>
-      {renderNavItems(mainMenuItems)}
-      {!loading && isMechanic && renderNavItems(mechanicItems)}
-      {/* 🔥 Admin link – only shown when user is admin */}
-      {!loading && isAdmin && (
-        <div style={{ position: 'relative' }}>
-          <a onClick={() => router.push(adminItem.href)} style={{ textDecoration: 'none', cursor: 'pointer' }}>
-            <motion.div
-              whileHover={{ x: 4 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              onMouseEnter={() => setHoveredItem(adminItem.name)}
-              onMouseLeave={() => setHoveredItem(null)}
-              style={{
-                ...styles.navItem,
-                background: isActive(adminItem.href, adminItem.exact) ? activeBg : 'transparent',
-                borderLeft: isActive(adminItem.href, adminItem.exact) ? `3px solid ${primaryColor}` : '3px solid transparent',
-              }}
-            >
-              <adminItem.icon size={20} color={isActive(adminItem.href, adminItem.exact) ? primaryColor : textSecondary} />
-              {!isCollapsed && <span style={{ marginLeft: '12px' }}>{adminItem.name}</span>}
-            </motion.div>
-          </a>
-          {isCollapsed && hoveredItem === adminItem.name && <div style={styles.tooltip}>{adminItem.name}</div>}
-        </div>
-      )}
-
+      {mainNavItems.map(renderNavItem)}
+      {!loading && isMechanic && renderNavItem(mechanicItem)}
+      {!loading && isAdmin && renderNavItem(adminItem)}
       <motion.button
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
@@ -215,13 +201,14 @@ export default function Sidebar() {
     </>
   );
 
+  // Mobile drawer
   const MobileDrawer = () => (
     <AnimatePresence>
       {isMobileOpen && (
         <motion.div
-          initial={{ x: -300 }}
+          initial={{ x: -280 }}
           animate={{ x: 0 }}
-          exit={{ x: -300 }}
+          exit={{ x: -280 }}
           transition={{ type: 'spring', damping: 25 }}
           style={styles.mobileDrawer}
         >
@@ -243,27 +230,27 @@ export default function Sidebar() {
 
   return (
     <>
+      {/* Mobile menu button (hamburger) */}
       {isMobile && (
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => setIsMobileOpen(true)}
           style={styles.menuButton}
+          aria-label="Open menu"
         >
           <Menu size={24} />
         </motion.button>
       )}
       <MobileDrawer />
 
+      {/* Desktop sidebar */}
       {!isMobile && (
         <motion.aside
           initial={{ x: -260 }}
           animate={{ x: 0 }}
           transition={{ type: 'spring', damping: 20, stiffness: 100 }}
-          style={{
-            ...styles.desktopSidebar,
-            width: isCollapsed ? 80 : 260,
-          }}
+          style={{ ...styles.desktopSidebar, width: isCollapsed ? 80 : 260 }}
         >
           <div style={styles.logoContainer}>
             <motion.h1
@@ -287,6 +274,7 @@ export default function Sidebar() {
         </motion.aside>
       )}
 
+      {/* Overlay for mobile drawer */}
       {isMobileOpen && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -300,7 +288,7 @@ export default function Sidebar() {
   );
 }
 
-// ==================== Styles (unchanged, same as before) ====================
+// ==================== STYLES (theme-aware, responsive) ====================
 const styles: Record<string, React.CSSProperties> = {
   desktopSidebar: {
     position: 'fixed',
@@ -325,7 +313,7 @@ const styles: Record<string, React.CSSProperties> = {
   logoText: {
     fontSize: '22px',
     fontWeight: 800,
-    background: 'linear-gradient(135deg, #f8fafc 0%, #22c55e 100%)',
+    background: 'linear-gradient(135deg, #f8fafc, #22c55e)',
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
     margin: 0,
@@ -365,7 +353,7 @@ const styles: Record<string, React.CSSProperties> = {
     top: '50%',
     transform: 'translateY(-50%)',
     marginLeft: '12px',
-    background: theme.colors.background.card,
+    background: bgCard,
     color: theme.colors.text.primary,
     padding: '4px 10px',
     borderRadius: '8px',

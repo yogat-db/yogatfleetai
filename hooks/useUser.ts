@@ -74,7 +74,7 @@ export function useUserRole() {
 
     // 3. React to Auth State Changes
     // Crucial: If the user logs out or signs in elsewhere, the UI must update
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         setState({
           isMechanic: false,

@@ -2,7 +2,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { CheckCircle2, XCircle, Trash2, ShieldCheck, MapPin, Phone, AlertCircle } from 'lucide-react';
+import { CheckCircle2, Trash2, ShieldCheck, MapPin, Phone, AlertCircle } from 'lucide-react';
 import theme from '@/app/theme';
 
 export const metadata = {

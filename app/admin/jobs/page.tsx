@@ -2,29 +2,13 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import Link from 'next/link';
 import { 
-  Briefcase, Eye, DollarSign, Calendar, Car, 
+  Briefcase, Eye, DollarSign,Car, 
   User, ShieldCheck, Search, Filter, 
-  AlertCircle, CheckCircle2, Clock, Loader2
+  AlertCircle, CheckCircle2, Clock, 
 } from 'lucide-react';
 import { deleteJob, releasePayment } from './actions';
 import DeleteJobButton from './DeleteJobButton';
 import theme from '@/app/theme';
-
-type Job = {
-  id: string;
-  title: string;
-  budget: number | null;
-  status: 'open' | 'in_progress' | 'completed' | 'cancelled';
-  payment_status: 'unpaid' | 'pending' | 'released' | 'refunded';
-  created_at: string;
-  user_id: string;
-  vehicle_id: string | null;
-  vehicles?: { 
-    license_plate: string; 
-    make: string; 
-    model: string 
-  } | null;
-};
 
 export const metadata = {
   title: 'HQ | Global Operations Registry',

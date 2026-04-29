@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -6,7 +6,6 @@ import { createClient } from '@/lib/supabase/server';
  * Includes relationship mapping for ratings and reviews
  */
 export async function GET(
-  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {

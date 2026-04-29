@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Briefcase, Wrench, ShoppingBag, Truck, ArrowUpRight } from 'lucide-react';
+import { Briefcase, Wrench, Truck, ArrowUpRight } from 'lucide-react';
 import theme from '@/app/theme';
 
 export default function MarketplacePage() {
@@ -46,7 +46,7 @@ export default function MarketplacePage() {
       </header>
 
       <div style={styles.grid}>
-        {marketplaceOptions.map((option, idx) => {
+        {marketplaceOptions.map((option) => {
           const Icon = option.icon;
           return (
             <motion.div

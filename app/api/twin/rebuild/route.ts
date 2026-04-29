@@ -8,7 +8,7 @@ import { computeFleetBrain } from '@/lib/ai'
  * Processes vehicle data through the AI engine to generate digital twins/insights.
  */
 
-export async function POST(request: Request) {
+export async function POST() {
   try {
     const cookieStore = await cookies()
     

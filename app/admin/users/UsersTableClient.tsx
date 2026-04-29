@@ -17,9 +17,7 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // On mobile, the sidebar is shown as an overlay when open.
-  // On desktop, it's always visible.
-  const showSidebar = !isMobile || sidebarOpen;
+
 
   return (
     <div style={styles.container}>

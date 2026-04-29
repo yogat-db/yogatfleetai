@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChevronLeft, Search, Save, Camera, 
-  Trash2, AlertCircle, CheckCircle, Loader2, Info 
+AlertCircle, CheckCircle, Loader2, 
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
@@ -324,7 +324,17 @@ const styles: Record<string, React.CSSProperties> = {
   
   lookupRow: { display: 'flex', gap: '12px' },
   plateInput: { flex: 1, background: '#facc15', color: '#000', border: 'none', borderRadius: '8px', padding: '12px', fontWeight: 800, fontSize: '18px', textAlign: 'center' },
-  lookupBtn: { background: theme.colors.background.elevated, color: '#fff', border: `1px solid ${theme.colors.border.light}`, padding: '0 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' },
+  lookupBtn: {
+  background: theme.colors.background.subtle, // or theme.colors.background.card
+  color: '#fff',
+  border: `1px solid ${theme.colors.border.light}`,
+  padding: '0 20px',
+  borderRadius: '12px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  cursor: 'pointer',
+},
 
   actionRow: { display: 'flex', justifyContent: 'flex-end', gap: '16px', marginTop: '20px' },
   cancelBtn: { background: 'none', border: `1px solid ${theme.colors.border.light}`, color: theme.colors.text.muted, padding: '12px 24px', borderRadius: '12px', cursor: 'pointer' },

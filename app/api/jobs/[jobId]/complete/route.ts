@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { stripe } from '@/lib/stripe/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
@@ -9,7 +9,6 @@ import { cookies } from 'next/headers';
  */
 
 export async function POST(
-  req: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
