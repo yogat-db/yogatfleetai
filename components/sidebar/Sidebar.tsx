@@ -1,65 +1,45 @@
-// components/sidebar/Sidebar.tsx
+// components/sidebar/Sidebar.tsx - with mechanic & admin dashboards
 'use client';
 
-import { useState, useEffect } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  LayoutDashboard,
-  Truck,
-  ShoppingCart,
-  Wrench,
-  History,
-  Settings,
-  Briefcase,
-  Menu,
-  X,
-  LogOut,
-  ShieldCheck,
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import theme from '@/app/theme';
+import { 
+  X, LayoutDashboard, Truck, ShoppingCart, Wrench, 
+  History, Settings, LogOut, Briefcase, ShieldCheck 
+} from 'lucide-react';
 
-// ---------- Helper to get user roles ----------
-async function getUserRoles(userId: string) {
-  let isAdmin = false;
-  let isMechanic = false;
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', userId)
-    .maybeSingle();
-  if (profile?.role === 'admin') isAdmin = true;
-
-  const { data: mechanic } = await supabase
-    .from('mechanics')
-    .select('id')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (mechanic) isMechanic = true;
-
-  return { isAdmin, isMechanic };
-}
-
-function useUserRole() {
+export default function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [isMechanic, setIsMechanic] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Fetch user roles
   useEffect(() => {
     const fetchRoles = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          setLoading(false);
-          return;
-        }
-        const { isAdmin, isMechanic } = await getUserRoles(user.id);
-        setIsAdmin(isAdmin);
-        setIsMechanic(isMechanic);
-      } catch (error) {
-        console.error('Role fetch error:', error);
+        if (!user) return;
+        
+        // Check admin (from profiles table)
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle();
+        setIsAdmin(profile?.role === 'admin');
+        
+        // Check mechanic (from mechanics table)
+        const { data: mechanic } = await supabase
+          .from('mechanics')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        setIsMechanic(!!mechanic);
+      } catch (err) {
+        console.error('Role fetch error:', err);
       } finally {
         setLoading(false);
       }
@@ -67,357 +47,135 @@ function useUserRole() {
     fetchRoles();
   }, []);
 
-  return { isMechanic, isAdmin, loading };
-}
-
-// ---------- Safe theme access ----------
-const getThemeValue = (path: string, fallback: any) => {
-  const parts = path.split('.');
-  let current: any = theme;
-  for (const part of parts) {
-    if (current && typeof current === 'object' && part in current) {
-      current = current[part];
-    } else return fallback;
-  }
-  return current;
-};
-
-const primaryColor = getThemeValue('colors.primary', '#22c55e');
-const textSecondary = getThemeValue('colors.text.secondary', '#94a3b8');
-const bgCard = getThemeValue('colors.background.card', '#0f172a');
-const borderLight = getThemeValue('colors.border.light', '#1e293b');
-const borderMedium = getThemeValue('colors.border.medium', '#334155');
-const activeBg = getThemeValue('colors.background.subtle', '#1e293b');
-
-export default function Sidebar() {
-  const pathname = usePathname();
-  const router = useRouter();
-  const { isMechanic, isAdmin, loading } = useUserRole();
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
-
-  // Detect mobile
+  // Close sidebar on route change (mobile)
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Close mobile drawer on route change
-  useEffect(() => {
-    setIsMobileOpen(false);
+    if (isOpen) onClose();
   }, [pathname]);
 
-  const publicPaths = ['/login', '/register', '/forgot-password', '/update-password', '/terms', '/privacy'];
-  if (publicPaths.includes(pathname)) return null;
-
-  const handleLogout = async () => {
-    if (!confirm('Are you sure you want to sign out?')) return;
-    setIsLoggingOut(true);
-    try {
-      await supabase.auth.signOut();
-      router.push('/login');
-    } catch (err) {
-      console.error('Logout error:', err);
-    } finally {
-      setIsLoggingOut(false);
-    }
-  };
-
-  const mainNavItems = [
-    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, exact: true },
-    { name: 'Fleet', href: '/fleet', icon: Truck, exact: true },
-    { name: 'Marketplace', href: '/marketplace', icon: ShoppingCart, exact: false },
-    { name: 'Diagnostics', href: '/diagnostics', icon: Wrench, exact: true },
-    { name: 'Service History', href: '/service-history', icon: History, exact: true },
-    { name: 'Control Center', href: '/control-center', icon: Settings, exact: true },
+  // Base navigation for all users
+  const baseNavItems = [
+    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Fleet', href: '/fleet', icon: Truck },
+    { name: 'Marketplace', href: '/marketplace', icon: ShoppingCart },
+    { name: 'Diagnostics', href: '/diagnostics', icon: Wrench },
+    { name: 'Service History', href: '/service-history', icon: History },
+    { name: 'Control Center', href: '/control-center', icon: Settings },
   ];
 
-  const mechanicItem = { name: 'Mechanic Dashboard', href: '/marketplace/mechanics/dashboard', icon: Briefcase, exact: false };
-  const adminItem = { name: 'Admin Dashboard', href: '/admin', icon: ShieldCheck, exact: false };
+  // Role-specific items
+  const mechanicItem = { name: 'Mechanic Dashboard', href: '/marketplace/mechanics/dashboard', icon: Briefcase };
+  const adminItem = { name: 'Admin Dashboard', href: '/admin', icon: ShieldCheck };
 
-  const isActive = (href: string, exact = false) => {
-    if (exact) return pathname === href;
-    return pathname === href || pathname.startsWith(`${href}/`);
+  // Build final nav items (only add if role is true and not loading)
+  let navItems = [...baseNavItems];
+  if (!loading && isMechanic) navItems.push(mechanicItem);
+  if (!loading && isAdmin) navItems.push(adminItem);
+
+  const handleNavigation = (href: string) => {
+    router.push(href);
+    onClose(); // close drawer after navigation
   };
 
-  const renderNavItem = (item: { name: string; href: string; icon: any; exact: boolean }) => {
-    const active = isActive(item.href, item.exact);
-    const Icon = item.icon;
-    return (
-      <div key={item.href} style={{ position: 'relative' }}>
-        <a onClick={() => router.push(item.href)} style={{ textDecoration: 'none', cursor: 'pointer' }}>
-          <motion.div
-            whileHover={{ x: 4 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            onMouseEnter={() => setHoveredItem(item.name)}
-            onMouseLeave={() => setHoveredItem(null)}
-            style={{
-              ...styles.navItem,
-              background: active ? activeBg : 'transparent',
-              borderLeft: active ? `3px solid ${primaryColor}` : '3px solid transparent',
-            }}
-          >
-            <Icon size={20} color={active ? primaryColor : textSecondary} />
-            {!isCollapsed && <span style={{ marginLeft: '12px' }}>{item.name}</span>}
-          </motion.div>
-        </a>
-        {isCollapsed && hoveredItem === item.name && <div style={styles.tooltip}>{item.name}</div>}
-      </div>
-    );
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
   };
 
-  const renderContent = () => (
-    <>
-      {mainNavItems.map(renderNavItem)}
-      {!loading && isMechanic && renderNavItem(mechanicItem)}
-      {!loading && isAdmin && renderNavItem(adminItem)}
-      <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
-        onClick={handleLogout}
-        disabled={isLoggingOut}
-        style={{
-          ...styles.logoutButton,
-          opacity: isLoggingOut ? 0.6 : 1,
-          cursor: isLoggingOut ? 'not-allowed' : 'pointer',
-        }}
-      >
-        <LogOut size={20} />
-        {!isCollapsed && <span style={{ marginLeft: '12px' }}>{isLoggingOut ? 'Signing out...' : 'Sign Out'}</span>}
-      </motion.button>
-    </>
-  );
-
-  // Mobile drawer (only opens/closes, no logout)
-  const MobileDrawer = () => (
-    <AnimatePresence>
-      {isMobileOpen && (
-        <motion.div
-          initial={{ x: -280 }}
-          animate={{ x: 0 }}
-          exit={{ x: -280 }}
-          transition={{ type: 'spring', damping: 25 }}
-          style={styles.mobileDrawer}
-        >
-          <div style={styles.drawerHeader}>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setIsMobileOpen(false)}
-              style={styles.closeButton}
-            >
-              <X size={24} />
-            </motion.button>
-          </div>
-          <div style={styles.drawerContent}>{renderContent()}</div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
+  if (!isOpen) return null;
 
   return (
     <>
-      {/* Mobile menu button – ONLY toggles the drawer, does NOT sign out */}
-      {isMobile && (
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setIsMobileOpen(true)}
-          style={styles.menuButton}
-          aria-label="Open menu"
+      {/* Backdrop overlay */}
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          zIndex: 1000,
+        }}
+      />
+      {/* Sidebar panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: '280px',
+          backgroundColor: '#0f172a',
+          zIndex: 1001,
+          padding: '20px',
+          display: 'flex',
+          flexDirection: 'column',
+          boxShadow: '2px 0 10px rgba(0,0,0,0.3)',
+        }}
+      >
+        <button
+          onClick={onClose}
+          style={{
+            alignSelf: 'flex-end',
+            background: 'none',
+            border: 'none',
+            color: '#94a3b8',
+            cursor: 'pointer',
+            marginBottom: '20px',
+          }}
         >
-          <Menu size={24} />
-        </motion.button>
-      )}
-      <MobileDrawer />
+          <X size={24} />
+        </button>
 
-      {/* Desktop sidebar */}
-      {!isMobile && (
-        <motion.aside
-          initial={{ x: -260 }}
-          animate={{ x: 0 }}
-          transition={{ type: 'spring', damping: 20, stiffness: 100 }}
-          style={{ ...styles.desktopSidebar, width: isCollapsed ? 80 : 260 }}
+        <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {navItems.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <button
+                key={item.href}
+                onClick={() => handleNavigation(item.href)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '12px',
+                  borderRadius: '12px',
+                  background: isActive ? '#1e293b' : 'transparent',
+                  color: isActive ? '#22c55e' : '#cbd5e1',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  width: '100%',
+                  textAlign: 'left',
+                }}
+              >
+                <item.icon size={20} />
+                {item.name}
+              </button>
+            );
+          })}
+        </nav>
+
+        <button
+          onClick={handleLogout}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '12px',
+            borderRadius: '12px',
+            background: 'transparent',
+            border: '1px solid #334155',
+            color: '#ef4444',
+            cursor: 'pointer',
+            marginTop: 'auto',
+          }}
         >
-          <div style={styles.logoContainer}>
-            <motion.h1
-              whileHover={{ scale: 1.02 }}
-              onClick={() => router.push('/dashboard')}
-              style={styles.logoText}
-            >
-              {!isCollapsed ? 'Yogat' : 'Y'}
-            </motion.h1>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setIsCollapsed(!isCollapsed)}
-              style={styles.collapseButton}
-              title={isCollapsed ? 'Expand' : 'Collapse'}
-            >
-              {isCollapsed ? '→' : '←'}
-            </motion.button>
-          </div>
-          <nav style={styles.nav}>{renderContent()}</nav>
-        </motion.aside>
-      )}
-
-      {/* Overlay for mobile drawer */}
-      {isMobileOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          style={styles.overlay}
-          onClick={() => setIsMobileOpen(false)}
-        />
-      )}
+          <LogOut size={20} />
+          Sign Out
+        </button>
+      </div>
     </>
   );
 }
-
-// ==================== STYLES ====================
-const styles: Record<string, React.CSSProperties> = {
-  desktopSidebar: {
-    position: 'fixed',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    background: bgCard,
-    borderRight: `1px solid ${borderLight}`,
-    display: 'flex',
-    flexDirection: 'column',
-    zIndex: 30,
-    overflowY: 'auto',
-    transition: 'width 0.2s ease',
-  },
-  logoContainer: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '20px 16px',
-    borderBottom: `1px solid ${borderLight}`,
-  },
-  logoText: {
-    fontSize: '22px',
-    fontWeight: 800,
-    background: 'linear-gradient(135deg, #f8fafc, #22c55e)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    margin: 0,
-    cursor: 'pointer',
-    letterSpacing: '-0.5px',
-  },
-  collapseButton: {
-    background: 'transparent',
-    border: `1px solid ${borderMedium}`,
-    color: textSecondary,
-    cursor: 'pointer',
-    fontSize: 18,
-    padding: '4px 8px',
-    borderRadius: '8px',
-    marginLeft: '8px',
-  },
-  nav: {
-    flex: 1,
-    padding: '20px 12px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  navItem: {
-    display: 'flex',
-    alignItems: 'center',
-    padding: '10px 12px',
-    borderRadius: '12px',
-    cursor: 'pointer',
-    transition: 'background 0.2s, border-left 0.2s',
-    color: getThemeValue('colors.text.primary', '#f1f5f9'),
-    position: 'relative',
-  },
-  tooltip: {
-    position: 'absolute',
-    left: '100%',
-    top: '50%',
-    transform: 'translateY(-50%)',
-    marginLeft: '12px',
-    background: bgCard,
-    color: theme.colors.text.primary,
-    padding: '4px 10px',
-    borderRadius: '8px',
-    fontSize: '12px',
-    whiteSpace: 'nowrap',
-    zIndex: 100,
-    boxShadow: `0 4px 12px rgba(0,0,0,0.3)`,
-    border: `1px solid ${borderLight}`,
-    pointerEvents: 'none',
-  },
-  logoutButton: {
-    display: 'flex',
-    alignItems: 'center',
-    background: 'transparent',
-    border: `1px solid ${borderMedium}`,
-    borderRadius: '12px',
-    padding: '10px 14px',
-    color: textSecondary,
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    marginTop: 'auto',
-    marginBottom: '20px',
-    width: 'calc(100% - 24px)',
-    marginLeft: '12px',
-    marginRight: '12px',
-  },
-  menuButton: {
-    position: 'fixed',
-    top: '16px',
-    left: '16px',
-    background: bgCard,
-    border: `1px solid ${borderLight}`,
-    borderRadius: '12px',
-    padding: '8px',
-    cursor: 'pointer',
-    zIndex: 40,
-  },
-  mobileDrawer: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    width: 280,
-    background: bgCard,
-    borderRight: `1px solid ${borderLight}`,
-    zIndex: 50,
-    overflowY: 'auto',
-  },
-  drawerHeader: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    padding: '16px',
-  },
-  closeButton: {
-    background: 'transparent',
-    border: 'none',
-    color: textSecondary,
-    cursor: 'pointer',
-  },
-  drawerContent: {
-    padding: '16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  overlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0,0,0,0.6)',
-    zIndex: 45,
-  },
-};

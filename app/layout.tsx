@@ -4,7 +4,6 @@ import { Toaster } from 'react-hot-toast';
 import AppShell from '@/components/AppShell';
 import ParticlesBackground from '@/components/ParticlesBackground';
 import { BasketProvider } from '@/lib/contexts/BasketContext';
-import NotificationBellWrapper from '@/components/NotificationBellWrapper';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -35,20 +34,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       >
         <ParticlesBackground />
 
-        <div
-          style={{
-            position: 'fixed',
-            top: '1.25rem',
-            right: '1.5rem',
-            zIndex: 1100,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-          }}
-        >
-          <NotificationBellWrapper />
-        </div>
-
         <BasketProvider>
           <AppShell>
             <main
@@ -56,6 +41,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 position: 'relative',
                 zIndex: 1,
                 width: '100%',
+                minHeight: 'calc(100vh - 56px)', // Account for topbar height
+                padding: '16px',                 // Extra breathing room
               }}
               className="page-fade-in"
             >

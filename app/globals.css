@@ -1,53 +1,69 @@
 @import 'mapbox-gl/dist/mapbox-gl.css';
 @import "leaflet/dist/leaflet.css";
 
+/* ---------- CSS Variables (Theme) ---------- */
 :root {
-  --primary: #0ea5e9;
-  --primary-glow: rgba(14, 165, 233, 0.4);
+  --primary: #22c55e;
+  --primary-glow: rgba(34, 197, 94, 0.4);
   --accent: #a855f7;
   --bg-dark: #020617;
   --card-glass: rgba(15, 23, 42, 0.6);
   --border-glass: rgba(255, 255, 255, 0.08);
+  --topbar-height: 56px;
 }
 
-/* Stunning Mesh Gradient Background */
+/* ---------- Base Styles ---------- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 body {
   background-color: var(--bg-dark);
   background-image: 
-    radial-gradient(at 0% 0%, rgba(14, 165, 233, 0.15) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(168, 85, 247, 0.15) 0px, transparent 50%),
-    radial-gradient(at 50% 100%, rgba(34, 211, 238, 0.1) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(34, 197, 94, 0.1) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(168, 85, 247, 0.1) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(34, 211, 238, 0.08) 0px, transparent 50%);
   background-attachment: fixed;
   color: #f8fafc;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
+  font-size: 16px;
+  line-height: 1.5;
 }
 
-/* Elite Glassmorphism Card */
+/* ---------- Responsive Base Font ---------- */
+@media (max-width: 768px) {
+  body {
+    font-size: 14px;
+  }
+}
+
+/* ---------- Glassmorphism Card ---------- */
 .glass-card {
   background: var(--card-glass);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-glass);
   border-radius: 24px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 .glass-card:hover {
   border-color: var(--primary);
-  transform: translateY(-5px) scale(1.01);
-  box-shadow: 0 0 30px var(--primary-glow);
+  transform: translateY(-3px);
+  box-shadow: 0 0 20px var(--primary-glow);
 }
 
-/* Animated Neon Button */
+/* ---------- Neon Button (optional) ---------- */
 .btn-neon {
   position: relative;
   overflow: hidden;
   background: var(--primary);
-  color: white;
+  color: #020617;
   border: none;
-  padding: 12px 24px;
+  padding: 10px 20px;
   border-radius: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -61,7 +77,7 @@ body {
   position: absolute;
   top: 0; left: -100%;
   width: 100%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
   transition: 0.5s;
 }
 
@@ -70,52 +86,103 @@ body {
 }
 
 .btn-neon:hover {
-  box-shadow: 0 0 20px var(--primary);
-  transform: scale(1.05);
+  box-shadow: 0 0 15px var(--primary);
+  transform: scale(1.02);
 }
 
-/* High-Tech Scrollbar */
-::-webkit-scrollbar { width: 5px; }
+/* ---------- Custom Scrollbar ---------- */
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
 ::-webkit-scrollbar-thumb {
   background: linear-gradient(to bottom, var(--primary), var(--accent));
   border-radius: 10px;
 }
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+
+/* ---------- Page Transition Animation ---------- */
+.page-fade-in {
+  animation: pageFadeIn 0.3s ease-out;
 }
-* {
-  box-sizing: border-box;
+
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-body {
-  overflow-x: hidden;
+
+/* ---------- Responsive Grid System ---------- */
+.responsive-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .responsive-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ---------- Table Horizontal Scroll (for fleet, etc) ---------- */
+.table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -16px;
+  padding: 0 16px;
+  width: calc(100% + 32px);
+}
+
+.table-responsive table {
+  min-width: 500px;
   width: 100%;
+  border-collapse: collapse;
 }
-img, video {
+
+/* ---------- Mobile Utilities ---------- */
+@media (max-width: 768px) {
+  .hide-on-mobile {
+    display: none;
+  }
+  .full-width-on-mobile {
+    width: 100%;
+    padding: 16px;
+  }
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+  }
+}
+
+/* ---------- Fix for fixed topbar – add padding to main content automatically (if not handled in layout) ---------- */
+main:first-of-type {
+  margin-top: var(--topbar-height);
+}
+
+/* ---------- Ensure images are responsive ---------- */
+img, video, iframe {
   max-width: 100%;
   height: auto;
 }
-@media (max-width: 768px) {
-  .hide-on-mobile { display: none; }
-  .full-width-on-mobile { width: 100%; padding: 16px; }
+
+/* ---------- Touch-friendly tap targets ---------- */
+button, a, [role="button"] {
+  touch-action: manipulation;
 }
-/* Responsive utilities */
-@media (max-width: 768px) {
-  body {
-    font-size: 14px;
-  }
-  .kpi-grid {
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
-  }
-}
-/* Responsive utilities */
-@media (max-width: 768px) {
-  body {
-    font-size: 14px;
-  }
-  .kpi-grid {
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
-  }
+
+/* ---------- Optional: Glow text effect for titles ---------- */
+.glow-text {
+  background: linear-gradient(135deg, #f8fafc 0%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }

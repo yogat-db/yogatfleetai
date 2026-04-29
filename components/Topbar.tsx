@@ -1,14 +1,12 @@
 // components/Topbar.tsx
 'use client';
 
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, useScroll, useTransform } from 'framer-motion';
-import { Cpu, Power, Search, ShieldCheck, Loader2, ChevronDown, User, Settings, Lock } from 'lucide-react';
+import { Cpu, Search, ShieldCheck, Loader2, ChevronDown, User, Settings, Lock, Menu } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { NAV_GROUPS, type NavLink } from '@/lib/navigation';
-import theme from '@/app/theme';
 
 async function checkAdmin(userId: string): Promise<boolean> {
   const { data, error } = await supabase
@@ -20,48 +18,45 @@ async function checkAdmin(userId: string): Promise<boolean> {
   return data.role === 'admin';
 }
 
-export default function Topbar() {
+export default function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const pathname = usePathname();
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isMechanic, setIsMechanic] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [isMobile, setIsMobile] = useState(false);
 
   const { scrollY } = useScroll();
   const bgOpacity = useTransform(scrollY, [0, 40], [0, 0.95]);
   const backdropBlur = useTransform(scrollY, [0, 40], [0, 16]);
-  const borderOpacity = useTransform(scrollY, [0, 40], [0, 1]);
 
-  // Fetch user and roles
   useEffect(() => {
-    const fetchUserAndRoles = async () => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  useEffect(() => {
+    const fetchUser = async () => {
       setIsLoading(true);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) {
         setUser(null);
         setIsAdmin(false);
-        setIsMechanic(false);
         setIsLoading(false);
         return;
       }
       setUser(session.user);
       const admin = await checkAdmin(session.user.id);
       setIsAdmin(admin);
-      const { data: mech } = await supabase
-        .from('mechanics')
-        .select('id')
-        .eq('user_id', session.user.id)
-        .maybeSingle();
-      setIsMechanic(!!mech);
       setIsLoading(false);
     };
-    fetchUserAndRoles();
+    fetchUser();
   }, []);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -73,23 +68,11 @@ export default function Topbar() {
   }, []);
 
   const handleLogout = async () => {
-    if (!confirm('Are you sure you want to sign out?')) return;
+    if (!confirm('Sign out?')) return;
     setIsLoggingOut(true);
-    try {
-      await supabase.auth.signOut();
-      window.location.href = '/login';
-    } catch (err) {
-      console.error('Logout error:', err);
-    } finally {
-      setIsLoggingOut(false);
-    }
+    await supabase.auth.signOut();
+    window.location.href = '/login';
   };
-
-  // Flatten navigation links, filter by show
-  const navLinks = useMemo(() => {
-    const groups = NAV_GROUPS(isMechanic, isAdmin);
-    return groups.flatMap(group => group.links.filter(link => link.show !== false));
-  }, [isMechanic, isAdmin]);
 
   const publicPaths = ['/login', '/register', '/forgot-password', '/update-password', '/terms', '/privacy'];
   if (publicPaths.includes(pathname)) return null;
@@ -102,272 +85,131 @@ export default function Topbar() {
         left: 0,
         right: 0,
         zIndex: 100,
-        borderBottom: `1px solid rgba(51, 65, 85, ${borderOpacity.get()})`,
         backgroundColor: `rgba(2, 6, 23, ${bgOpacity.get()})`,
         backdropFilter: `blur(${backdropBlur.get()}px)`,
-        transition: 'all 0.2s ease',
-        padding: '0 24px',
+        padding: '0 12px',
       }}
     >
-      <div style={styles.container}>
-        {/* Brand */}
-        <Link href="/" style={styles.brandLink}>
-          <div style={styles.logoIcon}>
-            <Cpu size={18} color={theme.colors.background.main} />
+      <div style={{ height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+        {/* Hamburger button */}
+        <button onClick={onMenuClick} style={styles.hamburger} aria-label="Menu">
+          <Menu size={20} />
+        </button>
+
+        <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}>
+          <div style={{ width: '28px', height: '28px', background: '#22c55e', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Cpu size={16} color="#fff" />
           </div>
-          <span className="brand-text" style={styles.brandText}>Yogat</span>
+          {!isMobile && <span style={{ fontSize: '14px', fontWeight: 800, letterSpacing: '0.2em', color: '#fff' }}>Yogat</span>}
         </Link>
 
-        {/* Desktop Navigation */}
-        <nav className="desktop-nav" style={styles.desktopNav}>
-          {navLinks.slice(0, 4).map((link: NavLink) => {
-            const isActive = pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href));
-            return (
-              <Link key={link.href} href={link.href}>
-                <div
-                  style={{
-                    ...styles.navLink,
-                    color: isActive ? theme.colors.primary : theme.colors.text.secondary,
-                  }}
-                >
-                  {link.label}
-                  {isActive && (
-                    <motion.div
-                      layoutId="top-nav-indicator"
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        borderRadius: '9999px',
-                        background: `${theme.colors.primary}15`,
-                        border: `1px solid ${theme.colors.primary}30`,
-                        zIndex: -1,
-                      }}
-                    />
-                  )}
-                </div>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Right Actions */}
-        <div style={styles.rightActions}>
-          <button style={styles.iconButton} aria-label="Search">
-            <Search size={16} />
-          </button>
-
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button style={styles.iconButton}><Search size={14} /></button>
           {!isLoading && isAdmin && (
-            <div style={styles.adminBadge}>
-              <ShieldCheck size={12} color={theme.colors.primary} />
-              <span style={styles.adminBadgeText}>Root</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '20px', background: '#22c55e20', border: '1px solid #22c55e30' }}>
+              <ShieldCheck size={10} color="#22c55e" />
+              <span style={{ fontSize: '9px', fontWeight: 'bold', color: '#22c55e' }}>Root</span>
             </div>
           )}
-
           {!isLoading && user ? (
-            <div style={styles.dropdownContainer} ref={dropdownRef}>
-              <button
-                onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)}
-                style={styles.userButton}
-                aria-label="User menu"
-              >
-                <div style={styles.avatar}><User size={14} /></div>
-                <ChevronDown size={12} />
+            <div style={{ position: 'relative' }} ref={dropdownRef}>
+              <button onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)} style={styles.userButton}>
+                <div style={{ width: '24px', height: '24px', background: '#22c55e20', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <User size={12} />
+                </div>
+                <ChevronDown size={10} />
               </button>
               {isUserDropdownOpen && (
                 <div style={styles.dropdown}>
-                  <Link href="/settings" style={styles.dropdownItem} onClick={() => setIsUserDropdownOpen(false)}>
-                    <Settings size={14} /> Settings
-                  </Link>
-                  <Link href="/privacy" style={styles.dropdownItem} onClick={() => setIsUserDropdownOpen(false)}>
-                    <Lock size={14} /> Privacy
-                  </Link>
-                  <div style={styles.dropdownDivider} />
+                  <Link href="/settings" style={styles.dropdownItem}><Settings size={14} /> Settings</Link>
+                  <Link href="/privacy" style={styles.dropdownItem}><Lock size={14} /> Privacy</Link>
+                  <div style={{ height: '1px', background: '#1e293b', margin: '4px 0' }} />
                   <button onClick={handleLogout} disabled={isLoggingOut} style={styles.logoutDropdown}>
-                    {isLoggingOut ? <Loader2 size={14} className="spin" /> : <Power size={14} />}
+                    {isLoggingOut ? <Loader2 size={14} className="spin" /> : <></>}
                     {isLoggingOut ? ' Signing out...' : ' Sign out'}
                   </button>
                 </div>
               )}
             </div>
           ) : !isLoading && !user ? (
-            <Link href="/login" style={styles.loginLink}>Init Session</Link>
+            <Link href="/login" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', color: '#22c55e', textDecoration: 'none' }}>Login</Link>
           ) : (
-            <div style={styles.loaderPlaceholder}>
-              <Loader2 size={16} className="spin" />
-            </div>
+            <Loader2 size={16} className="spin" />
           )}
         </div>
       </div>
-
       <style>{`
-        @media (max-width: 1023px) { .desktop-nav { display: none !important; } }
-        @media (min-width: 1024px) { .desktop-nav { display: flex !important; } }
-        .brand-text { display: block; }
-        @media (max-width: 480px) { .brand-text { display: none !important; } }
         .spin { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
     </motion.header>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    maxWidth: '1440px',
-    margin: '0 auto',
-    height: '64px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  brandLink: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    textDecoration: 'none',
-  },
-  logoIcon: {
-    width: '32px',
-    height: '32px',
-    background: theme.colors.primary,
+  hamburger: {
+    background: 'rgba(255,255,255,0.02)',
+    border: '1px solid #334155',
     borderRadius: '10px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: `0 0 12px ${theme.colors.primary}40`,
-  },
-  brandText: {
-    fontSize: '14px',
-    fontWeight: 800,
-    letterSpacing: '0.3em',
-    textTransform: 'uppercase',
-    color: '#fff',
-  },
-  desktopNav: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-  },
-  navLink: {
-    position: 'relative',
-    padding: '8px 18px',
-    fontSize: '12px',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.08em',
-    textDecoration: 'none',
-    borderRadius: '40px',
-    transition: 'color 0.2s',
-    cursor: 'pointer',
-  },
-  rightActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  iconButton: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
     width: '36px',
     height: '36px',
-    borderRadius: '10px',
-    border: `1px solid ${theme.colors.border.medium}`,
-    background: 'rgba(255,255,255,0.02)',
-    color: theme.colors.text.secondary,
-    cursor: 'pointer',
-  },
-  adminBadge: {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    padding: '4px 12px',
-    borderRadius: '40px',
-    backgroundColor: `${theme.colors.primary}15`,
-    border: `1px solid ${theme.colors.primary}30`,
-    whiteSpace: 'nowrap',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    color: '#fff',
   },
-  adminBadgeText: {
-    fontSize: '9px',
-    fontWeight: 900,
-    textTransform: 'uppercase',
-    color: theme.colors.primary,
+  iconButton: {
+    width: '34px',
+    height: '34px',
+    borderRadius: '10px',
+    border: '1px solid #334155',
+    background: 'rgba(255,255,255,0.02)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    color: '#94a3b8',
   },
-  dropdownContainer: { position: 'relative' },
   userButton: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '6px',
     background: 'rgba(255,255,255,0.02)',
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: '40px',
-    padding: '4px 12px 4px 8px',
-    cursor: 'pointer',
-    color: theme.colors.text.primary,
-  },
-  avatar: {
-    width: '28px',
-    height: '28px',
-    background: `${theme.colors.primary}20`,
+    border: '1px solid #334155',
     borderRadius: '30px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: '2px 8px 2px 6px',
+    cursor: 'pointer',
   },
   dropdown: {
     position: 'absolute',
     top: 'calc(100% + 8px)',
     right: 0,
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: '16px',
-    boxShadow: theme.shadows.lg,
-    minWidth: '180px',
+    background: '#0f172a',
+    border: '1px solid #1e293b',
+    borderRadius: '12px',
+    minWidth: '160px',
     zIndex: 200,
-    overflow: 'hidden',
-    backdropFilter: 'blur(8px)',
   },
   dropdownItem: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
-    padding: '10px 16px',
+    gap: '8px',
+    padding: '8px 12px',
     textDecoration: 'none',
-    fontSize: '13px',
-    color: theme.colors.text.primary,
-  },
-  dropdownDivider: {
-    height: '1px',
-    background: theme.colors.border.light,
-    margin: '4px 0',
+    fontSize: '12px',
+    color: '#f8fafc',
   },
   logoutDropdown: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
+    gap: '8px',
     width: '100%',
-    padding: '10px 16px',
+    padding: '8px 12px',
     background: 'transparent',
     border: 'none',
-    fontSize: '13px',
-    color: theme.colors.status.critical,
+    fontSize: '12px',
+    color: '#ef4444',
     cursor: 'pointer',
-    textAlign: 'left',
-  },
-  loginLink: {
-    fontSize: '11px',
-    fontWeight: 800,
-    letterSpacing: '0.1em',
-    textTransform: 'uppercase',
-    color: theme.colors.primary,
-    textDecoration: 'none',
-    whiteSpace: 'nowrap',
-  },
-  loaderPlaceholder: {
-    width: '36px',
-    height: '36px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 };

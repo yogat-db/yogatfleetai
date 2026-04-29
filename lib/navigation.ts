@@ -1,14 +1,41 @@
 // lib/navigation.ts
+import { 
+  LayoutDashboard, Truck, ShoppingCart, Wrench, History, 
+  Settings, Briefcase, ShieldCheck, Menu, 
+  type LucideIcon, 
+  Users
+} from 'lucide-react';
+
 export type NavLink = {
   label: string;
   href: string;
   show?: boolean;
+  icon?: LucideIcon; // optional, can be resolved in sidebar
 };
 
 export type NavGroup = {
   label: string;
   links: NavLink[];
 };
+
+// Helper: get icon component for a given link label
+export function getIconForLabel(label: string): LucideIcon {
+  const iconMap: Record<string, LucideIcon> = {
+    Dashboard: LayoutDashboard,
+    'My Fleet': Truck,
+    Marketplace: ShoppingCart,
+    'Car Accessories': ShoppingCart,
+    Diagnostics: Wrench,
+    'Service History': History,
+    'Control Center': Settings,
+    'Mechanic Hub': Briefcase,
+    'Admin Dashboard': ShieldCheck,
+    'Admin Jobs': Briefcase,
+    'Admin Mechanics': Wrench,
+    'Admin Users': Users,
+  };
+  return iconMap[label] || Menu;
+}
 
 export function NAV_GROUPS(isMechanic: boolean, isAdmin: boolean): NavGroup[] {
   const groups: NavGroup[] = [

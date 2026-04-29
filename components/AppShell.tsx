@@ -1,11 +1,12 @@
+// components/AppShell.tsx
 'use client';
 
 import { ReactNode, useEffect, useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
-import Sidebar from './sidebar/Sidebar';
-import Topbar from './Topbar';
+import Sidebar from './sidebar/Sidebar';      // your drawer sidebar
+import Topbar from './Topbar';                // your topbar with hamburger
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
@@ -14,76 +15,59 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // drawer state
 
-  // Memoize public routes for performance
- const isPublicRoute = useMemo(() => {
+  // Public routes (no auth required)
   const publicRoutes = [
-    '/login',
-    '/register',
-    '/forgot-password',
-    '/update-password',
-    '/terms',
-    '/privacy',
-    '/cookies',
+    '/login', '/register', '/forgot-password', '/update-password',
+    '/terms', '/privacy', '/cookies',
   ];
-  return publicRoutes.includes(pathname);
-}, [pathname]);
+  const isPublicRoute = useMemo(() => publicRoutes.includes(pathname), [pathname]);
 
   useEffect(() => {
     const initializeAuth = async () => {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       setSession(currentSession);
       setLoading(false);
-
-      if (!currentSession && !isPublicRoute) {
-        router.replace('/login');
-      }
+      if (!currentSession && !isPublicRoute) router.replace('/login');
     };
-
     initializeAuth();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
-      if (!newSession && !isPublicRoute) {
-        router.replace('/login');
-      }
+      if (!newSession && !isPublicRoute) router.replace('/login');
     });
-
     return () => authListener.subscription.unsubscribe();
   }, [router, isPublicRoute]);
 
-  // 1. Loading State (Branded)
+  // Loading state
   if (loading) {
     return (
       <div style={styles.loading}>
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-        >
+        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
           <Loader2 size={32} color={theme.colors.primary} />
         </motion.div>
       </div>
     );
   }
 
-  // 2. Public Route Layout (Auth Pages)
+  // Public route layout (login, register, etc.)
   if (isPublicRoute) {
-    return (
-      <div style={styles.publicContainer}>
-        {children}
-      </div>
-    );
+    return <div style={styles.publicContainer}>{children}</div>;
   }
 
-  // 3. Navigation Guard (Prevent flash of protected content)
+  // Protected: still loading session? prevent flash
   if (!session) return null;
 
-  // 4. Protected App Layout
+  // Protected layout with drawer sidebar
   return (
     <div style={styles.layout}>
-      <Sidebar />
+      {/* Slide-out drawer sidebar */}
+      <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
+      
+      {/* Main content area */}
       <div style={styles.mainWrapper}>
-        <Topbar />
+        <Topbar onMenuClick={() => setIsSidebarOpen(true)} />
         <main style={styles.content}>
           <AnimatePresence mode="wait">
             <motion.div
@@ -105,23 +89,22 @@ export default function AppShell({ children }: { children: ReactNode }) {
 // ==================== STYLES ====================
 const styles: Record<string, React.CSSProperties> = {
   layout: {
-    display: 'flex',
     minHeight: '100vh',
     background: theme.colors.background.main,
     overflowX: 'hidden',
   },
   mainWrapper: {
-    flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    // Ensures content doesn't hide behind fixed sidebar (assuming sidebar is 260px)
-    marginLeft: '260px', 
-    transition: 'margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-    minWidth: 0, // Flexbox fix for inner scrolling
+    minWidth: 0,
+    width: '100%',
   },
   content: {
-    padding: theme.spacing[8], // Increased padding for a more spacious, premium feel
+    padding: '16px',                // mobile‑friendly padding
     flex: 1,
+    marginTop: '56px',              // topbar height
+    maxWidth: '100%',
+    overflowX: 'hidden',
   },
   publicContainer: {
     minHeight: '100vh',
