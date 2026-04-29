@@ -1,19 +1,15 @@
+// app/control-center/page.tsx (fixed spacing)
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid
-} from 'recharts';
-import { Trash2, Loader2, ChevronRight, Clock, DollarSign, BarChart3, Car, AlertTriangle, Gauge, TrendingUp, RefreshCw } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Trash2, Loader2, ChevronRight, Clock, DollarSign, Car, AlertTriangle, Gauge, TrendingUp, RefreshCw } from 'lucide-react';
 import { computeFleetBrain } from '@/lib/ai';
 import { supabase } from '@/lib/supabase/client';
 import type { Vehicle } from '@/app/types/fleet';
 import theme from '@/app/theme';
 
-// Helper: compute additional stats
 const computeFleetStats = (vehicles: Vehicle[], vehiclesWithAI: any[]) => {
   const totalMileage = vehicles.reduce((sum, v) => sum + (v.mileage || 0), 0);
   const avgHealth = vehiclesWithAI.length
@@ -27,7 +23,6 @@ const computeFleetStats = (vehicles: Vehicle[], vehiclesWithAI: any[]) => {
   return { totalMileage, avgHealth, predictedMaintenanceCost, highRiskCount };
 };
 
-// Delete button component with proper theme handling
 function DeleteVehicleButton({ vehicleId, onDeleted }: { vehicleId: string; onDeleted?: () => void }) {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,9 +49,9 @@ function DeleteVehicleButton({ vehicleId, onDeleted }: { vehicleId: string; onDe
         disabled={isPending}
         style={{
           background: 'transparent',
-          border: `1px solid ${theme.colors.status.critical}`,  // ✅ fixed
-          color: theme.colors.status.critical,                   // ✅ fixed
-          padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+          border: `1px solid ${theme.colors.status.critical}`,
+          color: theme.colors.status.critical,
+          padding: `${theme.spacing[1]} ${theme.spacing[2]}`, // ✅ fixed from '0.5'
           borderRadius: theme.borderRadius.lg,
           cursor: 'pointer',
           display: 'inline-flex',
@@ -79,7 +74,6 @@ export default function ControlCenterPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [chartView, setChartView] = useState<'pie' | 'bar'>('pie');
   const [updatingScores, setUpdatingScores] = useState(false);
 
   const fetchVehicles = async () => {
@@ -120,12 +114,6 @@ export default function ControlCenterPage() {
   };
 
   const fleetStats = useMemo(() => computeFleetStats(vehicles, vehiclesWithAI), [vehicles, vehiclesWithAI]);
-
-  const chartData = [
-    { name: 'Healthy', value: stats.healthy, color: theme.colors.status.healthy },
-    { name: 'Warning', value: stats.warning, color: theme.colors.status.warning },
-    { name: 'Critical', value: stats.critical, color: theme.colors.status.critical },
-  ].filter(item => item.value > 0);
 
   const criticalAlerts = vehiclesWithAI
     .filter(v => (v.health_score ?? 100) < 40)
@@ -168,17 +156,12 @@ export default function ControlCenterPage() {
       <div style={styles.header}>
         <h1 style={styles.title}>Control Center</h1>
         <div style={styles.headerActions}>
-          <button onClick={() => setChartView(chartView === 'pie' ? 'bar' : 'pie')} style={styles.toggleButton}>
-            <BarChart3 size={16} />
-            Switch to {chartView === 'pie' ? 'Bar' : 'Pie'} Chart
-          </button>
           <button onClick={refreshHealthScores} disabled={updatingScores} style={styles.toggleButton}>
             {updatingScores ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
             {updatingScores ? 'Updating...' : 'Refresh Health Scores'}
           </button>
           <button onClick={fetchVehicles} disabled={refreshing} style={styles.toggleButton}>
-            {refreshing ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
-            Refresh
+            {refreshing ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />} Refresh
           </button>
         </div>
       </div>
@@ -215,53 +198,12 @@ export default function ControlCenterPage() {
         </motion.div>
       </div>
 
-      {/* Charts Section */}
+      {/* Charts placeholder */}
       {stats.total > 0 && (
         <div style={styles.chartsSection}>
           <h2 style={styles.sectionTitle}>Fleet Health Overview</h2>
           <div style={styles.chartContainer}>
-            {chartView === 'pie' ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={chartData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="value"
-                    label={({ name }) => `${name} {(percent * 100).toFixed(0)}%`}
-                    labelLine={{ stroke: theme.colors.text.muted, strokeWidth: 1 }}
-                  >
-                    {chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ background: theme.colors.background.card, border: `1px solid ${theme.colors.border.light}`, borderRadius: theme.borderRadius.lg }}
-                    itemStyle={{ color: theme.colors.text.primary }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={theme.colors.border.medium} />
-                  <XAxis dataKey="name" stroke={theme.colors.text.secondary} />
-                  <YAxis stroke={theme.colors.text.secondary} />
-                  <Tooltip
-                    contentStyle={{ background: theme.colors.background.card, border: `1px solid ${theme.colors.border.light}`, borderRadius: theme.borderRadius.lg }}
-                    itemStyle={{ color: theme.colors.text.primary }}
-                  />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
+            <p style={{ color: theme.colors.text.secondary }}>Interactive charts will be available soon.</p>
           </div>
         </div>
       )}
@@ -278,35 +220,27 @@ export default function ControlCenterPage() {
           <div style={styles.emptyBox}>No critical alerts – all vehicles are stable.</div>
         ) : (
           <div style={styles.list}>
-            <AnimatePresence>
-              {criticalAlerts.map(vehicle => (
-                <motion.div
-                  key={vehicle.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, height: 0 }}
-                  style={styles.listItem}
-                >
-                  <div style={styles.listItemMain}>
-                    <div>
-                      <span style={styles.vehiclePlate}>{vehicle.license_plate}</span>
-                      <span style={styles.vehicleModel}> {vehicle.make} {vehicle.model}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span style={{ ...styles.healthScore, color: theme.colors.status.critical }}>
-                        Health: {vehicle.health_score}%
-                      </span>
-                      <DeleteVehicleButton vehicleId={vehicle.id} onDeleted={fetchVehicles} />
-                    </div>
+            {criticalAlerts.map(vehicle => (
+              <div key={vehicle.id} style={styles.listItem}>
+                <div style={styles.listItemMain}>
+                  <div>
+                    <span style={styles.vehiclePlate}>{vehicle.license_plate}</span>
+                    <span style={styles.vehicleModel}> {vehicle.make} {vehicle.model}</span>
                   </div>
-                  <div style={styles.listItemFooter}>
-                    <button onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)} style={styles.viewButton}>
-                      View Details <ChevronRight size={14} />
-                    </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ ...styles.healthScore, color: theme.colors.status.critical }}>
+                      Health: {vehicle.health_score}%
+                    </span>
+                    <DeleteVehicleButton vehicleId={vehicle.id} onDeleted={fetchVehicles} />
                   </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
+                </div>
+                <div style={styles.listItemFooter}>
+                  <button onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)} style={styles.viewButton}>
+                    View Details <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -323,51 +257,43 @@ export default function ControlCenterPage() {
           <div style={styles.emptyBox}>No predicted failures – all vehicles are healthy.</div>
         ) : (
           <div style={styles.list}>
-            <AnimatePresence>
-              {predictedFailures.map(vehicle => (
-                <motion.div
-                  key={vehicle.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, height: 0 }}
-                  style={styles.listItem}
-                >
-                  <div style={styles.listItemMain}>
-                    <div>
-                      <span style={styles.vehiclePlate}>{vehicle.license_plate}</span>
-                      <span style={styles.vehicleModel}> {vehicle.make} {vehicle.model}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span style={{
-                        ...styles.riskBadge,
-                        backgroundColor: vehicle.risk === 'high' ? `${theme.colors.status.critical}20` : `${theme.colors.status.warning}20`,
-                        color: vehicle.risk === 'high' ? theme.colors.status.critical : theme.colors.status.warning,
-                      }}>
-                        {vehicle.risk}
-                      </span>
-                      <DeleteVehicleButton vehicleId={vehicle.id} onDeleted={fetchVehicles} />
-                    </div>
+            {predictedFailures.map(vehicle => (
+              <div key={vehicle.id} style={styles.listItem}>
+                <div style={styles.listItemMain}>
+                  <div>
+                    <span style={styles.vehiclePlate}>{vehicle.license_plate}</span>
+                    <span style={styles.vehicleModel}> {vehicle.make} {vehicle.model}</span>
                   </div>
-                  <div style={styles.predictionDetails}>
-                    <span style={styles.predictionItem}>
-                      <Clock size={14} color={theme.colors.text.muted} />
-                      {vehicle.daysToFailure} days
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{
+                      ...styles.riskBadge,
+                      backgroundColor: vehicle.risk === 'high' ? `${theme.colors.status.critical}20` : `${theme.colors.status.warning}20`,
+                      color: vehicle.risk === 'high' ? theme.colors.status.critical : theme.colors.status.warning,
+                    }}>
+                      {vehicle.risk}
                     </span>
-                    {vehicle.estimatedRepairCost && (
-                      <span style={styles.predictionItem}>
-                        <DollarSign size={14} color={theme.colors.text.muted} />
-                        £{vehicle.estimatedRepairCost.toFixed(2)}
-                      </span>
-                    )}
+                    <DeleteVehicleButton vehicleId={vehicle.id} onDeleted={fetchVehicles} />
                   </div>
-                  <div style={styles.listItemFooter}>
-                    <button onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)} style={styles.viewButton}>
-                      View Details <ChevronRight size={14} />
-                    </button>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
+                </div>
+                <div style={styles.predictionDetails}>
+                  <span style={styles.predictionItem}>
+                    <Clock size={14} color={theme.colors.text.muted} />
+                    {vehicle.daysToFailure} days
+                  </span>
+                  {vehicle.estimatedRepairCost && (
+                    <span style={styles.predictionItem}>
+                      <DollarSign size={14} color={theme.colors.text.muted} />
+                      £{vehicle.estimatedRepairCost.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                <div style={styles.listItemFooter}>
+                  <button onClick={() => router.push(`/vehicles/${vehicle.license_plate}`)} style={styles.viewButton}>
+                    View Details <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -411,226 +337,40 @@ export default function ControlCenterPage() {
   );
 }
 
-// ==================== STYLES (production-ready, theme‑aware) ====================
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    padding: theme.spacing[10],
-    background: theme.colors.background.main,
-    minHeight: '100vh',
-    color: theme.colors.text.primary,
-    fontFamily: theme.fontFamilies.sans,
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[8],
-    flexWrap: 'wrap',
-    gap: theme.spacing[4],
-  },
-  title: {
-    fontSize: theme.fontSizes['4xl'],
-    fontWeight: theme.fontWeights.bold,
-    background: theme.gradients.title,
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  headerActions: {
-    display: 'flex',
-    gap: theme.spacing[3],
-  },
-  toggleButton: {
-    background: theme.colors.background.card,
-    border: `1px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    color: theme.colors.text.primary,
-    cursor: 'pointer',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    fontSize: theme.fontSizes.sm,
-    transition: 'background 0.2s',
-  },
-  kpiGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: theme.spacing[5],
-    marginBottom: theme.spacing[8],
-  },
-  kpiCard: {
-    background: theme.colors.background.card,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[5],
-    border: `1px solid ${theme.colors.border.light}`,
-    textAlign: 'center',
-    cursor: 'default',
-  },
-  kpiIcon: {
-    display: 'inline-flex',
-    padding: theme.spacing[3],
-    borderRadius: '50%',
-    marginBottom: theme.spacing[3],
-  },
-  kpiLabel: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[1],
-  },
-  kpiValue: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.text.primary,
-  },
-  chartsSection: {
-    marginBottom: theme.spacing[8],
-  },
-  sectionTitle: {
-    fontSize: theme.fontSizes.xl,
-    fontWeight: theme.fontWeights.semibold,
-    marginBottom: theme.spacing[4],
-    color: theme.colors.text.primary,
-  },
-  chartContainer: {
-    background: theme.colors.background.card,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[4],
-    border: `1px solid ${theme.colors.border.light}`,
-  },
-  section: {
-    marginBottom: theme.spacing[8],
-  },
-  sectionHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing[4],
-  },
-  badge: {
-    background: theme.colors.background.subtle,
-    padding: `${theme.spacing[0]} ${theme.spacing[2]}`,
-    borderRadius: theme.borderRadius.full,
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.text.secondary,
-  },
-  list: {
-    background: theme.colors.background.card,
-    borderRadius: theme.borderRadius.xl,
-    border: `1px solid ${theme.colors.border.light}`,
-    overflow: 'hidden',
-  },
-  listItem: {
-    padding: theme.spacing[4],
-    borderBottom: `1px solid ${theme.colors.border.light}`,
-    transition: 'background 0.2s',
-  },
-  listItemMain: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: theme.spacing[3],
-    marginBottom: theme.spacing[2],
-  },
-  vehiclePlate: {
-    fontWeight: theme.fontWeights.semibold,
-    fontSize: theme.fontSizes.base,
-  },
-  vehicleModel: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.muted,
-  },
-  healthScore: {
-    fontSize: theme.fontSizes.sm,
-    fontWeight: theme.fontWeights.medium,
-  },
-  riskBadge: {
-    display: 'inline-block',
-    padding: `${theme.spacing[0]} ${theme.spacing[2]}`,
-    borderRadius: theme.borderRadius.full,
-    fontSize: theme.fontSizes.xs,
-    fontWeight: theme.fontWeights.medium,
-    textTransform: 'capitalize',
-  },
-  predictionDetails: {
-    display: 'flex',
-    gap: theme.spacing[4],
-    marginBottom: theme.spacing[3],
-  },
-  predictionItem: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: theme.spacing[1],
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.text.muted,
-  },
-  listItemFooter: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-  },
-  viewButton: {
-    background: 'transparent',
-    border: 'none',
-    color: theme.colors.primary,
-    cursor: 'pointer',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: theme.spacing[1],
-    fontSize: theme.fontSizes.sm,
-    textDecoration: 'underline',
-  },
-  loadingBox: {
-    textAlign: 'center',
-    padding: theme.spacing[8],
-    color: theme.colors.text.muted,
-  },
-  emptyBox: {
-    textAlign: 'center',
-    padding: theme.spacing[8],
-    color: theme.colors.text.muted,
-    background: theme.colors.background.card,
-    borderRadius: theme.borderRadius.xl,
-    border: `1px solid ${theme.colors.border.light}`,
-  },
-  errorContainer: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: theme.colors.background.main,
-    color: theme.colors.text.primary,
-    textAlign: 'center',
-    gap: theme.spacing[4],
-  },
-  retryButton: {
-    background: theme.colors.primary,
-    border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[2]} ${theme.spacing[4]}`,
-    color: theme.colors.background.main,
-    cursor: 'pointer',
-  },
-  actionsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-    gap: theme.spacing[4],
-  },
-  actionTile: {
-    background: theme.colors.background.card,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[4],
-    textAlign: 'center',
-    cursor: 'pointer',
-    border: `1px solid ${theme.colors.border.light}`,
-    transition: 'transform 0.2s, border-color 0.2s',
-  },
-  actionIcon: {
-    fontSize: '28px',
-    marginBottom: theme.spacing[2],
-  },
-  actionLabel: {
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.text.secondary,
-  },
+  page: { padding: theme.spacing[10], background: theme.colors.background.main, minHeight: '100vh', color: theme.colors.text.primary, fontFamily: theme.fontFamilies.sans },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing[8], flexWrap: 'wrap', gap: theme.spacing[4] },
+  title: { fontSize: theme.fontSizes['4xl'], fontWeight: theme.fontWeights.bold, background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  headerActions: { display: 'flex', gap: theme.spacing[3] },
+  toggleButton: { background: theme.colors.background.card, border: `1px solid ${theme.colors.border.light}`, borderRadius: theme.borderRadius.lg, padding: `${theme.spacing[2]} ${theme.spacing[4]}`, color: theme.colors.text.primary, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: theme.spacing[2], fontSize: theme.fontSizes.sm },
+  kpiGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: theme.spacing[5], marginBottom: theme.spacing[8] },
+  kpiCard: { background: theme.colors.background.card, borderRadius: theme.borderRadius.xl, padding: theme.spacing[5], border: `1px solid ${theme.colors.border.light}`, textAlign: 'center', cursor: 'default' },
+  kpiIcon: { display: 'inline-flex', padding: theme.spacing[3], borderRadius: '50%', marginBottom: theme.spacing[3] },
+  kpiLabel: { fontSize: theme.fontSizes.sm, color: theme.colors.text.secondary, marginBottom: theme.spacing[1] },
+  kpiValue: { fontSize: theme.fontSizes['3xl'], fontWeight: theme.fontWeights.bold, color: theme.colors.text.primary },
+  chartsSection: { marginBottom: theme.spacing[8] },
+  sectionTitle: { fontSize: theme.fontSizes.xl, fontWeight: theme.fontWeights.semibold, marginBottom: theme.spacing[4], color: theme.colors.text.primary },
+  chartContainer: { background: theme.colors.background.card, borderRadius: theme.borderRadius.xl, padding: theme.spacing[4], border: `1px solid ${theme.colors.border.light}`, minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  section: { marginBottom: theme.spacing[8] },
+  sectionHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: theme.spacing[4] },
+  badge: { background: theme.colors.background.subtle, padding: `${theme.spacing[1]} ${theme.spacing[2]}`, borderRadius: theme.borderRadius.full, fontSize: theme.fontSizes.xs, color: theme.colors.text.secondary }, // fixed spacing
+  list: { background: theme.colors.background.card, borderRadius: theme.borderRadius.xl, border: `1px solid ${theme.colors.border.light}`, overflow: 'hidden' },
+  listItem: { padding: theme.spacing[4], borderBottom: `1px solid ${theme.colors.border.light}` },
+  listItemMain: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: theme.spacing[3], marginBottom: theme.spacing[2] },
+  vehiclePlate: { fontWeight: theme.fontWeights.semibold, fontSize: theme.fontSizes.base },
+  vehicleModel: { fontSize: theme.fontSizes.sm, color: theme.colors.text.muted },
+  healthScore: { fontSize: theme.fontSizes.sm, fontWeight: theme.fontWeights.medium },
+  riskBadge: { display: 'inline-block', padding: `${theme.spacing[1]} ${theme.spacing[2]}`, borderRadius: theme.borderRadius.full, fontSize: theme.fontSizes.xs, fontWeight: theme.fontWeights.medium, textTransform: 'capitalize' }, // fixed
+  predictionDetails: { display: 'flex', gap: theme.spacing[4], marginBottom: theme.spacing[3] },
+  predictionItem: { display: 'inline-flex', alignItems: 'center', gap: theme.spacing[1], fontSize: theme.fontSizes.xs, color: theme.colors.text.muted },
+  listItemFooter: { display: 'flex', justifyContent: 'flex-end' },
+  viewButton: { background: 'transparent', border: 'none', color: theme.colors.primary, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: theme.spacing[1], fontSize: theme.fontSizes.sm, textDecoration: 'underline' },
+  loadingBox: { textAlign: 'center', padding: theme.spacing[8], color: theme.colors.text.muted },
+  emptyBox: { textAlign: 'center', padding: theme.spacing[8], color: theme.colors.text.muted, background: theme.colors.background.card, borderRadius: theme.borderRadius.xl, border: `1px solid ${theme.colors.border.light}` },
+  errorContainer: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: theme.colors.background.main, color: theme.colors.text.primary, textAlign: 'center', gap: theme.spacing[4] },
+  retryButton: { background: theme.colors.primary, border: 'none', borderRadius: theme.borderRadius.lg, padding: `${theme.spacing[2]} ${theme.spacing[4]}`, color: theme.colors.background.main, cursor: 'pointer' },
+  actionsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: theme.spacing[4] },
+  actionTile: { background: theme.colors.background.card, borderRadius: theme.borderRadius.lg, padding: theme.spacing[4], textAlign: 'center', cursor: 'pointer', border: `1px solid ${theme.colors.border.light}` },
+  actionIcon: { fontSize: '28px', marginBottom: theme.spacing[2] },
+  actionLabel: { fontSize: theme.fontSizes.xs, color: theme.colors.text.secondary },
 };

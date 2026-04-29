@@ -7,10 +7,9 @@ import { usePathname } from 'next/navigation';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import { Cpu, Power, Search, ShieldCheck, Loader2, ChevronDown, User, Settings, Lock } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { NAV_GROUPS } from '@/lib/navigation';
+import { NAV_GROUPS, type NavLink } from '@/lib/navigation';
 import theme from '@/app/theme';
 
-// Helper to check admin role (no 406)
 async function checkAdmin(userId: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('profiles')
@@ -36,6 +35,7 @@ export default function Topbar() {
   const backdropBlur = useTransform(scrollY, [0, 40], [0, 16]);
   const borderOpacity = useTransform(scrollY, [0, 40], [0, 1]);
 
+  // Fetch user and roles
   useEffect(() => {
     const fetchUserAndRoles = async () => {
       setIsLoading(true);
@@ -61,6 +61,7 @@ export default function Topbar() {
     fetchUserAndRoles();
   }, []);
 
+  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -84,10 +85,11 @@ export default function Topbar() {
     }
   };
 
+  // Flatten navigation links, filter by show
   const navLinks = useMemo(() => {
-  const groups = NAV_GROUPS(isMechanic, isAdmin);
-  return groups.flatMap(g => g.links).filter(l => l.show !== false);
-}, [isMechanic, isAdmin]);
+    const groups = NAV_GROUPS(isMechanic, isAdmin);
+    return groups.flatMap(group => group.links.filter(link => link.show !== false));
+  }, [isMechanic, isAdmin]);
 
   const publicPaths = ['/login', '/register', '/forgot-password', '/update-password', '/terms', '/privacy'];
   if (publicPaths.includes(pathname)) return null;
@@ -113,38 +115,36 @@ export default function Topbar() {
           <div style={styles.logoIcon}>
             <Cpu size={18} color={theme.colors.background.main} />
           </div>
-          <span className="brand-text" style={styles.brandText}>
-            Yogat
-          </span>
+          <span className="brand-text" style={styles.brandText}>Yogat</span>
         </Link>
 
         {/* Desktop Navigation */}
         <nav className="desktop-nav" style={styles.desktopNav}>
-          {navLinks.slice(0, 4).map((link) => {
+          {navLinks.slice(0, 4).map((link: NavLink) => {
             const isActive = pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href));
             return (
-              <Link
-                key={link.href}
-                href={link.href}
-                style={{
-                  ...styles.navLink,
-                  color: isActive ? theme.colors.primary : theme.colors.text.secondary,
-                }}
-              >
-                {link.label}
-                {isActive && (
-                  <motion.div
-                    layoutId="top-nav-indicator"
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      borderRadius: '9999px',
-                      background: `${theme.colors.primary}15`,
-                      border: `1px solid ${theme.colors.primary}30`,
-                      zIndex: -1,
-                    }}
-                  />
-                )}
+              <Link key={link.href} href={link.href}>
+                <div
+                  style={{
+                    ...styles.navLink,
+                    color: isActive ? theme.colors.primary : theme.colors.text.secondary,
+                  }}
+                >
+                  {link.label}
+                  {isActive && (
+                    <motion.div
+                      layoutId="top-nav-indicator"
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        borderRadius: '9999px',
+                        background: `${theme.colors.primary}15`,
+                        border: `1px solid ${theme.colors.primary}30`,
+                        zIndex: -1,
+                      }}
+                    />
+                  )}
+                </div>
               </Link>
             );
           })}
@@ -152,12 +152,10 @@ export default function Topbar() {
 
         {/* Right Actions */}
         <div style={styles.rightActions}>
-          {/* Search */}
           <button style={styles.iconButton} aria-label="Search">
             <Search size={16} />
           </button>
 
-          {/* Admin badge */}
           {!isLoading && isAdmin && (
             <div style={styles.adminBadge}>
               <ShieldCheck size={12} color={theme.colors.primary} />
@@ -165,7 +163,6 @@ export default function Topbar() {
             </div>
           )}
 
-          {/* User Dropdown */}
           {!isLoading && user ? (
             <div style={styles.dropdownContainer} ref={dropdownRef}>
               <button
@@ -173,9 +170,7 @@ export default function Topbar() {
                 style={styles.userButton}
                 aria-label="User menu"
               >
-                <div style={styles.avatar}>
-                  <User size={14} />
-                </div>
+                <div style={styles.avatar}><User size={14} /></div>
                 <ChevronDown size={12} />
               </button>
               {isUserDropdownOpen && (
@@ -205,33 +200,17 @@ export default function Topbar() {
       </div>
 
       <style>{`
-        @media (max-width: 1023px) {
-          .desktop-nav { display: none !important; }
-        }
-        @media (min-width: 1024px) {
-          .desktop-nav { display: flex !important; }
-        }
-        .brand-text {
-          display: block;
-        }
-        @media (max-width: 480px) {
-          .brand-text {
-            display: none !important;
-          }
-        }
-        .spin {
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
+        @media (max-width: 1023px) { .desktop-nav { display: none !important; } }
+        @media (min-width: 1024px) { .desktop-nav { display: flex !important; } }
+        .brand-text { display: block; }
+        @media (max-width: 480px) { .brand-text { display: none !important; } }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </motion.header>
   );
 }
 
-// ==================== Styles (no inline media queries) ====================
 const styles: Record<string, React.CSSProperties> = {
   container: {
     maxWidth: '1440px',
@@ -279,6 +258,7 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: 'none',
     borderRadius: '40px',
     transition: 'color 0.2s',
+    cursor: 'pointer',
   },
   rightActions: {
     display: 'flex',
@@ -296,7 +276,6 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(255,255,255,0.02)',
     color: theme.colors.text.secondary,
     cursor: 'pointer',
-    transition: 'all 0.2s',
   },
   adminBadge: {
     display: 'flex',
@@ -314,9 +293,7 @@ const styles: Record<string, React.CSSProperties> = {
     textTransform: 'uppercase',
     color: theme.colors.primary,
   },
-  dropdownContainer: {
-    position: 'relative',
-  },
+  dropdownContainer: { position: 'relative' },
   userButton: {
     display: 'flex',
     alignItems: 'center',
@@ -327,7 +304,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '4px 12px 4px 8px',
     cursor: 'pointer',
     color: theme.colors.text.primary,
-    transition: 'all 0.2s',
   },
   avatar: {
     width: '28px',
@@ -359,7 +335,6 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: 'none',
     fontSize: '13px',
     color: theme.colors.text.primary,
-    transition: 'background 0.2s',
   },
   dropdownDivider: {
     height: '1px',

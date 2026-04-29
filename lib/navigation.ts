@@ -1,31 +1,57 @@
 // lib/navigation.ts
-export function NAV_GROUPS(isMechanic: boolean, isAdmin: boolean) {
-  return [
+export type NavLink = {
+  label: string;
+  href: string;
+  show?: boolean;
+};
+
+export type NavGroup = {
+  label: string;
+  links: NavLink[];
+};
+
+export function NAV_GROUPS(isMechanic: boolean, isAdmin: boolean): NavGroup[] {
+  const groups: NavGroup[] = [
     {
-      name: 'Main',
+      label: 'Operations',
       links: [
-        { label: 'Dashboard', href: '/dashboard', icon: null, show: true },
-        { label: 'Fleet', href: '/fleet', icon: null, show: true },
-        { label: 'Marketplace', href: '/marketplace', icon: null, show: true },
-        { label: 'Diagnostics', href: '/diagnostics', icon: null, show: true },
-        { label: 'Service History', href: '/service-history', icon: null, show: true },
-        { label: 'Control Center', href: '/control-center', icon: null, show: true },
+        { href: '/dashboard', label: 'Dashboard' },
+        { href: '/fleet', label: 'My Fleet' },
       ],
     },
-    ...(isMechanic ? [{
-      name: 'Mechanic',
+    {
+      label: 'Marketplace',
       links: [
-        { label: 'Mechanic Dashboard', href: '/marketplace/mechanics/dashboard', icon: null, show: true },
+        { href: '/marketplace', label: 'Marketplace' },
+        { href: '/marketplace/affiliate', label: 'Car Accessories' },
       ],
-    }] : []),
-    ...(isAdmin ? [{
-      name: 'Admin',
+    },
+    {
+      label: 'Technical',
       links: [
-        { label: 'Admin Dashboard', href: '/admin', icon: null, show: true },
-        { label: 'Admin Jobs', href: '/admin/jobs', icon: null, show: true },
-        { label: 'Admin Mechanics', href: '/admin/mechanics', icon: null, show: true },
-        { label: 'Admin Users', href: '/admin/users', icon: null, show: true },
+        { href: '/diagnostics', label: 'Diagnostics' },
+        { href: '/service-history', label: 'Service History' },
+        { href: '/marketplace/jobs', label: 'Mechanic Hub', show: isMechanic },
       ],
-    }] : []),
+    },
+    {
+      label: 'System',
+      links: [
+        { href: '/control-center', label: 'Control Center' },
+        { href: '/privacy', label: 'Privacy Policy' },
+      ],
+    },
   ];
+  if (isAdmin) {
+    groups.push({
+      label: 'Admin',
+      links: [
+        { href: '/admin', label: 'Admin Dashboard' },
+        { href: '/admin/jobs', label: 'Admin Jobs' },
+        { href: '/admin/mechanics', label: 'Admin Mechanics' },
+        { href: '/admin/users', label: 'Admin Users' },
+      ],
+    });
+  }
+  return groups;
 }
