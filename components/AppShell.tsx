@@ -4,7 +4,7 @@ import { ReactNode, useEffect, useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
-import Sidebar from './Sidebar';
+import Sidebar from './sidebar/Sidebar';
 import Topbar from './Topbar';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';

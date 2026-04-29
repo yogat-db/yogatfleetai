@@ -1,7 +1,8 @@
 // app/api/stripe/create-checkout-session/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2025-02-24.acacia',
@@ -15,49 +16,61 @@ export async function POST(req: NextRequest) {
     // Validate required fields
     if (!planId || !mechanicId || !successUrl || !cancelUrl) {
       return NextResponse.json(
-        { error: 'Missing required fields (planId, mechanicId, successUrl, cancelUrl)' },
+        { error: 'Missing required fields' },
         { status: 400 }
       );
     }
 
-    // Get the correct price ID based on plan
+    // Get price ID from environment variables
     let priceId: string | undefined;
     if (planId === 'basic') {
       priceId = process.env.STRIPE_BASIC_PRICE_ID;
     } else if (planId === 'pro') {
       priceId = process.env.STRIPE_PRO_PRICE_ID;
     } else {
-      return NextResponse.json({ error: 'Invalid plan. Use "basic" or "pro".' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid plan' }, { status: 400 });
     }
 
-    // If price ID is missing, return a clear error
     if (!priceId) {
       console.error(`Missing Stripe price ID for plan: ${planId}`);
       return NextResponse.json(
-        { error: `Server configuration error: missing price ID for ${planId}. Please contact support.` },
+        { error: `Subscription not configured. Please contact support.` },
         { status: 500 }
       );
     }
 
-    // Authenticate user
-    const supabase = await createClient();
+    // ✅ Authenticate using the same pattern as other protected routes
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() { return cookieStore.getAll(); },
+          setAll() { /* no writes needed */ },
+        },
+      }
+    );
+
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
+      console.error('Auth error in stripe checkout:', userError?.message);
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Verify the mechanic belongs to this user
+    // Verify mechanic belongs to this user
     const { data: mechanic, error: mechError } = await supabase
       .from('mechanics')
       .select('id')
       .eq('id', mechanicId)
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
+
     if (mechError || !mechanic) {
+      console.error('Mechanic verification error:', mechError?.message);
       return NextResponse.json({ error: 'Invalid mechanic profile' }, { status: 403 });
     }
 
-    // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       payment_method_types: ['card'],
@@ -70,7 +83,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
     console.error('Stripe checkout error:', err);
-    // Always return a valid JSON error
     return NextResponse.json(
       { error: err.message || 'Internal server error' },
       { status: 500 }

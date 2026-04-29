@@ -1,9 +1,10 @@
+// app/layout.tsx
 import type { Metadata } from 'next';
 import { Toaster } from 'react-hot-toast';
 import AppShell from '@/components/AppShell';
 import ParticlesBackground from '@/components/ParticlesBackground';
-import NotificationBell from '@/components/NotificationBell';
 import { BasketProvider } from '@/lib/contexts/BasketContext';
+import NotificationBellWrapper from '@/components/NotificationBellWrapper';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -11,11 +12,7 @@ export const metadata: Metadata = {
   description: 'Fleet management and garage marketplace platform',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -23,6 +20,7 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&display=swap"
           rel="stylesheet"
         />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes" />
       </head>
       <body
         style={{
@@ -48,7 +46,7 @@ export default function RootLayout({
             gap: '10px',
           }}
         >
-          <NotificationBell />
+          <NotificationBellWrapper />
         </div>
 
         <BasketProvider>
