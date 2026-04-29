@@ -84,3 +84,18 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+* {
+  box-sizing: border-box;
+}
+body {
+  overflow-x: hidden;
+  width: 100%;
+}
+img, video {
+  max-width: 100%;
+  height: auto;
+}
+@media (max-width: 768px) {
+  .hide-on-mobile { display: none; }
+  .full-width-on-mobile { width: 100%; padding: 16px; }
+}

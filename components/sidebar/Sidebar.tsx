@@ -20,12 +20,11 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
 
-// ---------- Helper to get current user role (admin & mechanic) ----------
-async function getUserRole(userId: string): Promise<{ isAdmin: boolean; isMechanic: boolean }> {
+// ---------- Helper to get user roles ----------
+async function getUserRoles(userId: string) {
   let isAdmin = false;
   let isMechanic = false;
 
-  // Check admin via profiles table
   const { data: profile } = await supabase
     .from('profiles')
     .select('role')
@@ -33,7 +32,6 @@ async function getUserRole(userId: string): Promise<{ isAdmin: boolean; isMechan
     .maybeSingle();
   if (profile?.role === 'admin') isAdmin = true;
 
-  // Check mechanic
   const { data: mechanic } = await supabase
     .from('mechanics')
     .select('id')
@@ -44,7 +42,6 @@ async function getUserRole(userId: string): Promise<{ isAdmin: boolean; isMechan
   return { isAdmin, isMechanic };
 }
 
-// ---------- Custom hook for user role (with loading) ----------
 function useUserRole() {
   const [isMechanic, setIsMechanic] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -58,7 +55,7 @@ function useUserRole() {
           setLoading(false);
           return;
         }
-        const { isAdmin, isMechanic } = await getUserRole(user.id);
+        const { isAdmin, isMechanic } = await getUserRoles(user.id);
         setIsAdmin(isAdmin);
         setIsMechanic(isMechanic);
       } catch (error) {
@@ -73,7 +70,7 @@ function useUserRole() {
   return { isMechanic, isAdmin, loading };
 }
 
-// ---------- Safe theme access (with fallbacks) ----------
+// ---------- Safe theme access ----------
 const getThemeValue = (path: string, fallback: any) => {
   const parts = path.split('.');
   let current: any = theme;
@@ -92,7 +89,6 @@ const borderLight = getThemeValue('colors.border.light', '#1e293b');
 const borderMedium = getThemeValue('colors.border.medium', '#334155');
 const activeBg = getThemeValue('colors.background.subtle', '#1e293b');
 
-// ---------- Main Sidebar Component ----------
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -132,7 +128,6 @@ export default function Sidebar() {
     }
   };
 
-  // Navigation items (main for all authenticated users)
   const mainNavItems = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, exact: true },
     { name: 'Fleet', href: '/fleet', icon: Truck, exact: true },
@@ -142,10 +137,7 @@ export default function Sidebar() {
     { name: 'Control Center', href: '/control-center', icon: Settings, exact: true },
   ];
 
-  // Mechanic specific
   const mechanicItem = { name: 'Mechanic Dashboard', href: '/marketplace/mechanics/dashboard', icon: Briefcase, exact: false };
-
-  // Admin specific (only shown if user has admin role)
   const adminItem = { name: 'Admin Dashboard', href: '/admin', icon: ShieldCheck, exact: false };
 
   const isActive = (href: string, exact = false) => {
@@ -201,7 +193,7 @@ export default function Sidebar() {
     </>
   );
 
-  // Mobile drawer
+  // Mobile drawer (only opens/closes, no logout)
   const MobileDrawer = () => (
     <AnimatePresence>
       {isMobileOpen && (
@@ -230,7 +222,7 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile menu button (hamburger) */}
+      {/* Mobile menu button – ONLY toggles the drawer, does NOT sign out */}
       {isMobile && (
         <motion.button
           whileHover={{ scale: 1.05 }}
@@ -288,7 +280,7 @@ export default function Sidebar() {
   );
 }
 
-// ==================== STYLES (theme-aware, responsive) ====================
+// ==================== STYLES ====================
 const styles: Record<string, React.CSSProperties> = {
   desktopSidebar: {
     position: 'fixed',
