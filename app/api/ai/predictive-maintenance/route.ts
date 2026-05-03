@@ -1,35 +1,83 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { computeFleetBrain } from '@/lib/ai';
 
-// Helper to generate predictive maintenance data for a single vehicle
-function generatePredictions(vehicle: any, enriched: any) {
-  // Use health score or fallback to default
-  const healthScore = enriched.health_score ?? 100;
+// ---------- Types ----------
+interface Vehicle {
+  id: string;
+  license_plate: string;
+  make: string | null;
+  model: string | null;
+  health_score: number | null;
+  mileage: number | null;
+  year: number | null;
+  // ... other fields
+}
 
-  // Simple heuristics:
-  // - Lower health => higher predicted cost
-  // - Lower health => shorter time until maintenance
-  const predictedCost = Math.round((100 - healthScore) * 15);
-  const predictedDays = Math.round((100 - healthScore) * 1.5);
+interface Prediction {
+  vehicle_id: string;
+  license_plate: string;
+  make: string;
+  model: string;
+  predicted_cost: number;    // GBP
+  predicted_days: number;    // days until maintenance recommended
+  confidence: 'low' | 'medium' | 'high';
+}
 
-  // Additional logic: if mileage is high, increase cost/time
+// ---------- Core prediction logic (no external AI lib required) ----------
+function generatePrediction(vehicle: Vehicle): Prediction {
+  // Default values
+  let healthScore = vehicle.health_score ?? 100;
+  // Clamp between 0 and 100
+  healthScore = Math.min(100, Math.max(0, healthScore));
+
   const mileage = vehicle.mileage ?? 0;
-  const mileageFactor = Math.max(0, (mileage - 50000) / 50000);
-  const finalCost = Math.min(500, Math.max(0, predictedCost + mileageFactor * 100));
-  const finalDays = Math.min(180, Math.max(7, predictedDays + mileageFactor * 30));
+  const year = vehicle.year ?? new Date().getFullYear();
+  const age = new Date().getFullYear() - year;
+
+  // Heuristics:
+  // - Lower health = higher cost, sooner
+  // - Higher mileage = increased cost and urgency
+  // - Older vehicle = higher cost
+
+  let predictedCost = Math.round((100 - healthScore) * 12);
+  let predictedDays = Math.round((100 - healthScore) * 1.2);
+
+  // Mileage factor (0 to 1)
+  let mileageFactor = 0;
+  if (mileage > 200000) mileageFactor = 0.8;
+  else if (mileage > 100000) mileageFactor = 0.5;
+  else if (mileage > 50000) mileageFactor = 0.2;
+
+  // Age factor (0 to 0.5)
+  const ageFactor = Math.min(0.5, age / 20);
+
+  predictedCost += Math.round(mileageFactor * 150 + ageFactor * 100);
+  predictedDays -= Math.round(mileageFactor * 30 + ageFactor * 20);
+
+  // Bounds
+  predictedCost = Math.min(800, Math.max(10, predictedCost));
+  predictedDays = Math.min(180, Math.max(3, predictedDays));
+
+  // Confidence based on data completeness
+  let confidence: 'low' | 'medium' | 'high' = 'low';
+  if (vehicle.health_score !== null && vehicle.mileage !== null && vehicle.year !== null)
+    confidence = 'high';
+  else if (vehicle.health_score !== null || vehicle.mileage !== null)
+    confidence = 'medium';
 
   return {
     vehicle_id: vehicle.id,
     license_plate: vehicle.license_plate,
     make: vehicle.make ?? 'Unknown',
     model: vehicle.model ?? 'Unknown',
-    predicted_cost: Math.round(finalCost),
-    predicted_days: Math.round(finalDays),
+    predicted_cost: predictedCost,
+    predicted_days: predictedDays,
+    confidence,
   };
 }
 
+// ---------- GET Handler ----------
 export async function GET(request: Request) {
   try {
     const cookieStore = await cookies();
@@ -38,7 +86,9 @@ export async function GET(request: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
-          get(name: string) { return cookieStore.get(name)?.value; },
+          get(name: string) {
+            return cookieStore.get(name)?.value;
+          },
         },
       }
     );
@@ -46,6 +96,7 @@ export async function GET(request: Request) {
     // Authenticate user
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
+      console.error('Predictive maintenance auth error:', userError?.message);
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -56,7 +107,7 @@ export async function GET(request: Request) {
       // Fetch single vehicle
       const { data: vehicle, error } = await supabase
         .from('vehicles')
-        .select('*')
+        .select('id, license_plate, make, model, health_score, mileage, year')
         .eq('id', vehicleId)
         .eq('user_id', user.id)
         .single();
@@ -65,33 +116,32 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Vehicle not found' }, { status: 404 });
       }
 
-      const enriched = computeFleetBrain([vehicle])[0];
-      const predictions = generatePredictions(vehicle, enriched);
-      return NextResponse.json(predictions);
+      const prediction = generatePrediction(vehicle);
+      return NextResponse.json(prediction);
     } else {
       // Fetch all vehicles for this user
       const { data: vehicles, error: vehiclesError } = await supabase
         .from('vehicles')
-        .select('*')
+        .select('id, license_plate, make, model, health_score, mileage, year')
         .eq('user_id', user.id);
 
       if (vehiclesError) {
-        throw vehiclesError;
+        console.error('Failed to fetch vehicles:', vehiclesError);
+        return NextResponse.json({ error: 'Database error' }, { status: 500 });
       }
 
       if (!vehicles || vehicles.length === 0) {
         return NextResponse.json([]);
       }
 
-      const enrichedVehicles = computeFleetBrain(vehicles);
-      const predictionsArray = vehicles.map((vehicle, index) =>
-        generatePredictions(vehicle, enrichedVehicles[index])
-      );
-
-      return NextResponse.json(predictionsArray);
+      const predictions: Prediction[] = vehicles.map(generatePrediction);
+      return NextResponse.json(predictions);
     }
   } catch (err: any) {
     console.error('Predictive maintenance API error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { error: err.message || 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

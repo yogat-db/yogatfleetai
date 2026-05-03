@@ -1,304 +1,273 @@
+// app/marketplace/jobs/[jobId]/page.tsx
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { AnimatePresence, motion } from 'framer-motion';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  AlertCircle,
-  ArrowRight,
-  Briefcase,
-  Calendar,
-  Car,
-  MapPin,
-  PoundSterling,
+  Briefcase, MapPin, PoundSterling, Car, Calendar, AlertCircle,
+  Clock, User, MessageSquare, DollarSign, CheckCircle, Star
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import theme from '@/app/theme';
+import toast from 'react-hot-toast';
 
-type JobVehicle = {
-  make: string | null;
-  model: string | null;
-  license_plate: string | null;
-};
-
+// ==================== TYPES ====================
 interface Job {
   id: string;
   title: string;
-  description: string | null;
+  description: string;
   budget: number | null;
-  status: string;
-  location: string | null;
+  status: 'open' | 'assigned' | 'in_progress' | 'completed' | 'cancelled';
+  location?: string;
   user_id: string;
+  assigned_mechanic_id?: string;
   created_at: string;
-  vehicle: JobVehicle | null;
+  vehicle?: { make: string; model: string; license_plate: string };
 }
 
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(date));
+interface Application {
+  id: string;
+  mechanic_id: string;
+  bid_amount: number;
+  message: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at: string;
+  mechanic?: { business_name: string; id: string; rating?: number };
 }
 
-function formatBudget(budget: number | null) {
-  if (budget == null || Number.isNaN(Number(budget))) return 'TBD';
-
-  return new Intl.NumberFormat('en-GB', {
-    style: 'currency',
-    currency: 'GBP',
-    maximumFractionDigits: 0,
-  }).format(budget);
-}
-
-function truncate(text: string | null | undefined, length = 140) {
-  if (!text) return 'No description provided.';
-  return text.length > length ? `${text.slice(0, length).trim()}…` : text;
-}
-
-export default function JobsPage() {
+// ==================== MAIN COMPONENT ====================
+export default function JobDetailPage() {
+  const params = useParams();
   const router = useRouter();
+  const jobId = params?.jobId as string;
 
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [job, setJob] = useState<Job | null>(null);
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [user, setUser] = useState<any>(null);
+  const [mechanicId, setMechanicId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isMechanic, setIsMechanic] = useState<boolean | null>(null);
+  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+  const [showPayment, setShowPayment] = useState(false);
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
     try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
+      setLoading(true);
+      setError(null);
 
-      if (sessionError) {
-        throw sessionError;
-      }
-
-      if (!session?.user?.id) {
-        router.replace('/login');
+      // Auth
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
         return;
       }
+      setUser(user);
 
-      const [mechanicResponse, jobsResponse] = await Promise.all([
-        supabase
-          .from('mechanics')
-          .select('id, verified')
-          .eq('user_id', session.user.id)
-          .maybeSingle(),
-        supabase
-          .from('jobs')
-          .select(
-            'id, title, description, budget, status, location, user_id, created_at, vehicle:vehicles(make, model, license_plate)'
-          )
-          .eq('status', 'open')
-          .neq('user_id', session.user.id)
-          .order('created_at', { ascending: false }),
-      ]);
+      // Mechanic check
+      const { data: mechanic } = await supabase
+        .from('mechanics')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      setMechanicId(mechanic?.id || null);
 
-      if (mechanicResponse.error) {
-        throw mechanicResponse.error;
+      // Job details
+      const { data: jobData, error: jobErr } = await supabase
+        .from('jobs')
+        .select(`*, vehicle:vehicles(make, model, license_plate)`)
+        .eq('id', jobId)
+        .single();
+      if (jobErr) throw new Error(jobErr.message);
+      if (!jobData) throw new Error('Job not found');
+      setJob(jobData);
+
+      // Applications (only if owner)
+      if (jobData.user_id === user.id) {
+        const { data: apps, error: appsErr } = await supabase
+          .from('applications')
+          .select(`*, mechanic:mechanics(business_name, id, rating)`)
+          .eq('job_id', jobId)
+          .order('bid_amount', { ascending: true });
+        if (!appsErr) setApplications(apps || []);
       }
-
-      if (jobsResponse.error) {
-        throw jobsResponse.error;
-      }
-
-      if (!mechanicResponse.data) {
-        setIsMechanic(false);
-        setJobs([]);
-        return;
-      }
-
-      setIsMechanic(true);
-      setJobs((jobsResponse.data ?? []) as unknown as Job[]);
-    } catch (err) {
-      console.error('Error fetching jobs:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load jobs.');
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [jobId, router]);
 
   useEffect(() => {
-    void fetchData();
-  }, [fetchData]);
+    if (jobId) fetchData();
+  }, [jobId, fetchData]);
 
-  if (loading) {
-    return <LoadingSkeleton />;
-  }
+  const handleSelectMechanic = (app: Application) => {
+    setSelectedApp(app);
+    setShowPayment(true);
+    // scroll to payment section
+    setTimeout(() => {
+      document.getElementById('payment-section')?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  };
 
-  if (isMechanic === false) {
-    return (
-      <div className="mx-auto flex min-h-[70vh] max-w-2xl items-center justify-center px-4 py-10">
-        <div className="w-full rounded-3xl border border-white/10 bg-slate-950 p-8 text-center shadow-xl">
-          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-400">
-            <AlertCircle size={28} />
-          </div>
+  const handlePaymentSuccess = async () => {
+    if (!selectedApp || !job) return;
+    // Update job: assign mechanic, change status
+    const { error } = await supabase
+      .from('jobs')
+      .update({
+        status: 'assigned',
+        assigned_mechanic_id: selectedApp.mechanic_id,
+      })
+      .eq('id', job.id);
+    if (error) {
+      toast.error('Failed to update job. Please contact support.');
+      return;
+    }
+    // Mark application as accepted
+    await supabase
+      .from('applications')
+      .update({ status: 'accepted' })
+      .eq('id', selectedApp.id);
+    toast.success('Mechanic selected and payment confirmed!');
+    setShowPayment(false);
+    fetchData(); // refresh
+  };
 
-          <h2 className="text-2xl font-semibold tracking-tight text-white">
-            Mechanic access required
-          </h2>
+  if (loading) return <LoadingSkeleton />;
+  if (error) return <ErrorState error={error} onRetry={fetchData} />;
+  if (!job) return <div>Job not found</div>;
 
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            To view and apply for repair jobs, you need to register your business as a mechanic first.
-          </p>
-
-          <button
-            type="button"
-            onClick={() => router.push('/marketplace/mechanics/register')}
-            className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 active:scale-[0.98]"
-          >
-            Start mechanic registration
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const isOwner = user?.id === job.user_id;
+  const hasApplied = applications.some(a => a.mechanic_id === mechanicId);
 
   return (
-    <div className="mx-auto min-h-screen max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <header className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-          Available jobs
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">
-          Find repair opportunities in your area and grow your business.
-        </p>
-      </header>
+    <div style={styles.page}>
+      <button onClick={() => router.back()} style={styles.backButton}>← Back to Jobs</button>
 
-      {error ? (
-        <div
-          role="alert"
-          className="mb-6 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-sm text-rose-200"
-        >
-          {error}
-        </div>
-      ) : null}
-
-      <AnimatePresence mode="wait">
-        {jobs.length === 0 ? (
-          <motion.div
-            key="empty"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="flex min-h-[40vh] flex-col items-center justify-center rounded-3xl border border-white/10 bg-slate-950 px-6 py-14 text-center"
-          >
-            <Briefcase size={44} className="mb-4 text-slate-500" />
-            <h2 className="text-xl font-semibold text-white">No open jobs right now</h2>
-            <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">
-              Check back soon — new repair opportunities appear throughout the day.
-            </p>
-          </motion.div>
-        ) : (
-          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-            {jobs.map((job, index) => (
-              <motion.article
-                key={job.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.04, duration: 0.22 }}
-                className="group flex h-full flex-col rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-xl shadow-black/10 transition hover:border-white/20 hover:bg-slate-900"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-300">
-                    <Briefcase size={18} />
-                  </div>
-
-                  <div className="min-w-0">
-                    <h2 className="truncate text-lg font-semibold tracking-tight text-white">
-                      {job.title}
-                    </h2>
-
-                    <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-400">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Calendar size={12} />
-                        {formatDate(job.created_at)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <p className="mt-4 text-sm leading-6 text-slate-300">
-                  {truncate(job.description)}
-                </p>
-
-                <div className="mt-5 grid gap-3 text-sm text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <PoundSterling size={14} className="text-emerald-300" />
-                    <span>Est. {formatBudget(job.budget)}</span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <MapPin size={14} className="text-emerald-300" />
-                    <span>{job.location || 'Remote / TBD'}</span>
-                  </div>
-
-                  {job.vehicle ? (
-                    <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-xs text-slate-300">
-                      <Car size={14} className="text-emerald-300" />
-                      <span className="truncate">
-                        {job.vehicle.make || 'Vehicle'} {job.vehicle.model || ''}
-                        {job.vehicle.license_plate ? ` • ${job.vehicle.license_plate}` : ''}
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="mt-auto pt-6">
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/marketplace/jobs/${job.id}/apply`)}
-                    className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 active:scale-[0.98]"
-                  >
-                    View and apply
-                    <ArrowRight size={16} />
-                  </button>
-                </div>
-              </motion.article>
-            ))}
+      <div style={styles.grid}>
+        {/* LEFT COLUMN: Job Details */}
+        <div style={styles.mainCard}>
+          <div style={styles.statusRow}>
+            <h1 style={styles.title}>{job.title}</h1>
+            <span style={{ ...styles.badge, backgroundColor: job.status === 'open' ? '#22c55e' : '#3b82f6' }}>
+              {job.status.toUpperCase()}
+            </span>
           </div>
-        )}
-      </AnimatePresence>
+          <div style={styles.metaRow}>
+            <div style={styles.metaItem}><PoundSterling size={16} /> £{job.budget ?? 'TBD'}</div>
+            <div style={styles.metaItem}><MapPin size={16} /> {job.location || 'Remote'}</div>
+            <div style={styles.metaItem}><Calendar size={16} /> {new Date(job.created_at).toLocaleDateString()}</div>
+          </div>
+          <div style={styles.divider} />
+          <p style={styles.description}>{job.description}</p>
+          {job.vehicle && (
+            <div style={styles.vehicleBox}>
+              <h4 style={{ margin: '0 0 8px 0' }}>Vehicle</h4>
+              <p>{job.vehicle.make} {job.vehicle.model} – {job.vehicle.license_plate}</p>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT COLUMN: Applications / Actions */}
+        <div style={styles.sideCard}>
+          {isOwner ? (
+            <div>
+              <h3 style={styles.sectionTitle}>Bids ({applications.length})</h3>
+              {applications.length === 0 ? (
+                <div style={styles.emptyState}>No bids yet. Share the job with mechanics.</div>
+              ) : (
+                <div style={styles.appList}>
+                  {applications.map(app => (
+                    <div key={app.id} style={styles.appCard}>
+                      <div style={styles.appHeader}>
+                        <strong>{app.mechanic?.business_name || 'Mechanic'}</strong>
+                        <span style={styles.bidAmount}>£{app.bid_amount}</span>
+                      </div>
+                      <p style={styles.appMessage}>{app.message}</p>
+                      {app.mechanic?.rating && (
+                        <div style={styles.rating}><Star size={14} fill="#fbbf24" color="#fbbf24" /> {app.mechanic.rating}</div>
+                      )}
+                      {job.status === 'open' && (
+                        <button onClick={() => handleSelectMechanic(app)} style={styles.selectBtn}>Select & Escrow</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              {job.status === 'open' && mechanicId && !hasApplied && (
+                <button onClick={() => router.push(`/marketplace/jobs/${jobId}/apply`)} style={styles.primaryBtn}>Submit Quote</button>
+              )}
+              {hasApplied && <div style={styles.infoBanner}>Application submitted – Awaiting owner review</div>}
+              {job.status !== 'open' && <div style={styles.infoBanner}>This job is no longer accepting applications.</div>}
+              {!mechanicId && <div style={styles.infoBanner}>Register as a mechanic to bid on jobs.</div>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Payment & Escrow (owner only) */}
+      {isOwner && showPayment && selectedApp && (
+        <div id="payment-section" style={styles.paymentContainer}>
+          <h3>Secure Escrow Payment</h3>
+          <p>You are authorising £{selectedApp.bid_amount}. Funds are held securely and only released upon completion.</p>
+          {/* Payment form will be integrated here – for now a placeholder */}
+          <button onClick={handlePaymentSuccess} style={styles.paymentBtn}>Confirm Payment (Integration Ready)</button>
+          <button onClick={() => setShowPayment(false)} style={styles.cancelBtn}>Cancel</button>
+        </div>
+      )}
     </div>
   );
 }
 
+// ==================== SUB‑COMPONENTS ====================
 function LoadingSkeleton() {
+  return <div style={styles.centered}><div className="spinner" /><p>Loading job details...</p></div>;
+}
+function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
-    <div className="mx-auto min-h-screen max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <div className="h-10 w-64 animate-pulse rounded-xl bg-white/10" />
-        <div className="mt-3 h-5 w-96 max-w-full animate-pulse rounded-xl bg-white/5" />
-      </div>
-
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className="rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-xl shadow-black/10"
-          >
-            <div className="flex items-start gap-3">
-              <div className="h-11 w-11 rounded-2xl bg-white/10" />
-              <div className="flex-1">
-                <div className="h-5 w-2/3 animate-pulse rounded bg-white/10" />
-                <div className="mt-3 h-4 w-1/3 animate-pulse rounded bg-white/5" />
-              </div>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              <div className="h-4 w-full animate-pulse rounded bg-white/5" />
-              <div className="h-4 w-11/12 animate-pulse rounded bg-white/5" />
-              <div className="h-4 w-10/12 animate-pulse rounded bg-white/5" />
-            </div>
-
-            <div className="mt-6 h-11 w-full animate-pulse rounded-xl bg-white/10" />
-          </div>
-        ))}
-      </div>
+    <div style={styles.centered}>
+      <p style={{ color: theme.colors.status.critical }}>Error: {error}</p>
+      <button onClick={onRetry} style={styles.retryButton}>Try Again</button>
     </div>
   );
 }
+
+// ==================== STYLES ====================
+const styles: Record<string, React.CSSProperties> = {
+  page: { padding: 'clamp(20px, 5vw, 40px)', background: theme.colors.background.main, minHeight: '100vh', color: '#fff' },
+  backButton: { background: 'transparent', border: `1px solid ${theme.colors.border.medium}`, borderRadius: '40px', padding: '8px 20px', color: theme.colors.text.secondary, cursor: 'pointer', marginBottom: '24px' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '32px' },
+  mainCard: { background: theme.colors.background.card, borderRadius: '24px', padding: 'clamp(20px, 5vw, 32px)', border: `1px solid ${theme.colors.border.light}` },
+  statusRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', marginBottom: '16px' },
+  title: { fontSize: 'clamp(24px, 6vw, 32px)', fontWeight: 800, margin: 0 },
+  badge: { padding: '4px 12px', borderRadius: '40px', fontSize: '12px', fontWeight: 700, color: '#fff' },
+  metaRow: { display: 'flex', flexWrap: 'wrap', gap: '20px', marginBottom: '24px', color: theme.colors.text.secondary },
+  metaItem: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px' },
+  divider: { margin: '24px 0', border: 0, borderTop: `1px solid ${theme.colors.border.light}` },
+  description: { fontSize: '16px', lineHeight: 1.6, color: theme.colors.text.secondary, whiteSpace: 'pre-wrap' },
+  vehicleBox: { marginTop: '24px', padding: '16px', background: theme.colors.background.subtle, borderRadius: '16px' },
+  sideCard: { background: theme.colors.background.card, borderRadius: '24px', padding: 'clamp(20px, 5vw, 24px)', border: `1px solid ${theme.colors.border.light}`, height: 'fit-content' },
+  sectionTitle: { fontSize: '18px', fontWeight: 700, marginBottom: '16px' },
+  appList: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  appCard: { padding: '16px', background: theme.colors.background.subtle, borderRadius: '16px' },
+  appHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
+  bidAmount: { fontWeight: 800, fontSize: '18px', color: theme.colors.primary },
+  appMessage: { fontSize: '14px', color: theme.colors.text.secondary, marginBottom: '12px' },
+  rating: { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#fbbf24' },
+  selectBtn: { width: '100%', background: theme.colors.primary, border: 'none', borderRadius: '12px', padding: '10px', fontWeight: 700, cursor: 'pointer', marginTop: '8px' },
+  primaryBtn: { width: '100%', background: theme.colors.primary, border: 'none', borderRadius: '12px', padding: '14px', fontWeight: 700, cursor: 'pointer' },
+  infoBanner: { background: theme.colors.background.subtle, padding: '16px', borderRadius: '12px', textAlign: 'center', fontSize: '14px', color: theme.colors.text.muted },
+  paymentContainer: { marginTop: '40px', padding: '24px', background: theme.colors.background.card, borderRadius: '24px', border: `2px solid ${theme.colors.primary}`, textAlign: 'center' },
+  paymentBtn: { background: theme.colors.primary, border: 'none', borderRadius: '40px', padding: '12px 24px', fontWeight: 700, cursor: 'pointer', margin: '16px 8px 0 0' },
+  cancelBtn: { background: 'transparent', border: `1px solid ${theme.colors.border.medium}`, borderRadius: '40px', padding: '12px 24px', cursor: 'pointer', marginTop: '16px' },
+  centered: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: '16px' },
+  retryButton: { background: theme.colors.primary, border: 'none', borderRadius: '8px', padding: '8px 16px', color: '#000', cursor: 'pointer' },
+  emptyState: { textAlign: 'center', padding: '32px', color: theme.colors.text.muted },
+};
+
+// Add global spinner animation (already in globals.css, but add if missing)

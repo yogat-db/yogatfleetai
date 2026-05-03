@@ -1,59 +1,82 @@
-// app/admin/AdminLayoutClient.tsx
+// app/admin/layout.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
-import AdminSidebar from '@/components/admin/AdminSidebar';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
-import { Menu } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
-export default function AdminLayoutClient({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+    const checkAdmin = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (profile?.role !== 'admin') {
+        router.push('/dashboard');
+        return;
+      }
+      setIsAdmin(true);
+      setLoading(false);
+    };
+    checkAdmin();
+  }, [router]);
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.colors.background.main }}>
+        <Loader2 size={40} className="spin" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) return null;
 
   return (
     <div style={styles.container}>
-      {isMobile && (
-        <button onClick={() => setSidebarOpen(!sidebarOpen)} style={styles.menuButton}>
-          <Menu size={24} />
-        </button>
-      )}
-      <div
-        style={{
-          ...styles.sidebarWrapper,
-          transform: isMobile && !sidebarOpen ? 'translateX(-100%)' : 'translateX(0)',
-          position: isMobile ? 'fixed' : 'sticky',
-          top: 0,
-          height: '100vh',
-          zIndex: 100,
-        }}
-      >
-        <AdminSidebar />
-      </div>
-      {isMobile && sidebarOpen && <div style={styles.overlay} onClick={() => setSidebarOpen(false)} />}
-      <main style={{ ...styles.main, marginLeft: isMobile ? 0 : '280px' }}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>Admin Dashboard</h1>
-        </div>
-        <div style={styles.content}>{children}</div>
-      </main>
+      <header style={styles.header}>
+        <h1 style={styles.title}>Admin Dashboard</h1>
+      </header>
+      <main style={styles.main}>{children}</main>
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { display: 'flex', minHeight: '100vh', background: theme.colors.background.main, position: 'relative' },
-  sidebarWrapper: { transition: 'transform 0.25s ease', boxShadow: '2px 0 15px rgba(0,0,0,0.2)', zIndex: 100, width: '280px' },
-  menuButton: { position: 'fixed', top: '16px', left: '16px', background: theme.colors.background.card, border: `1px solid ${theme.colors.border.light}`, borderRadius: '12px', padding: '8px', zIndex: 101, cursor: 'pointer', color: theme.colors.text.primary },
-  main: { flex: 1, padding: '24px 20px', transition: 'margin-left 0.25s ease', overflowX: 'auto', width: '100%' },
-  header: { marginBottom: '32px' },
-  title: { fontSize: '28px', fontWeight: 800, background: theme.gradients.title, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.5px', margin: 0 },
-  content: { width: '100%' },
-  overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', zIndex: 99 },
+  container: {
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+    color: theme.colors.text.primary,
+    fontFamily: theme.fontFamilies.sans,
+  },
+  header: {
+    padding: '24px 32px',
+    borderBottom: `1px solid ${theme.colors.border.light}`,
+    background: theme.colors.background.card,
+  },
+  title: {
+    fontSize: '28px',
+    fontWeight: 800,
+    background: theme.gradients.title,
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    letterSpacing: '-0.5px',
+    margin: 0,
+  },
+  main: {
+    padding: '32px',
+    width: '100%',
+  },
 };

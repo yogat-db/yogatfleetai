@@ -15,6 +15,7 @@
     "@stripe/stripe-js": "^5.10.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.99.3",
+    "axios": "^1.16.0",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.38.0",
     "html5-qrcode": "^2.3.8",
@@ -22,6 +23,7 @@
     "lucide-react": "^0.468.0",
     "mapbox-gl": "^3.20.0",
     "next": "^16.2.4",
+    "node-fetch": "^2.7.0",
     "nodemailer": "^8.0.4",
     "openai": "^6.32.0",
     "react": "^19.2.5",
@@ -30,6 +32,7 @@
     "react-hot-toast": "^2.6.0",
     "react-qr-code": "^2.0.18",
     "stripe": "^17.7.0",
+    "undici": "^8.2.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

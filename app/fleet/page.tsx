@@ -1,15 +1,16 @@
+// app/fleet/page.tsx
 'use client';
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Plus, Search, 
-  Trash2, Edit, Car, ChevronRight, Activity, 
-  History, Info, Loader2 
+  Plus, Search, Trash2, Edit, Car, ChevronRight, Activity, 
+  History, Info, Loader2, Calendar, CheckCircle, AlertCircle 
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
+import toast from 'react-hot-toast';
 
 // ==================== TYPES ====================
 type Vehicle = {
@@ -21,6 +22,8 @@ type Vehicle = {
   mileage: number | null;
   status: string;
   health_score: number | null;
+  mot_expiry: string | null;
+  mot_status: 'valid' | 'expired' | 'unknown' | null;
 };
 
 // ==================== MAIN COMPONENT ====================
@@ -28,7 +31,7 @@ export default function FleetPage() {
   const router = useRouter();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
-  const [, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'healthy' | 'warning' | 'critical'>('all');
 
@@ -37,7 +40,6 @@ export default function FleetPage() {
       setLoading(true);
       setError(null);
       const { data: { user } } = await supabase.auth.getUser();
-      
       if (!user) {
         router.push('/login');
         return;
@@ -85,14 +87,32 @@ export default function FleetPage() {
   }, [vehicles, searchTerm, filterStatus]);
 
   const handleDeleteVehicle = async (id: string) => {
-    // Optimistic update
     const previousVehicles = [...vehicles];
     setVehicles(prev => prev.filter(v => v.id !== id));
-    
     const { error } = await supabase.from('vehicles').delete().eq('id', id);
     if (error) {
       setVehicles(previousVehicles);
       setError('Failed to delete vehicle. Please try again.');
+      toast.error('Delete failed');
+    } else {
+      toast.success('Vehicle removed');
+    }
+  };
+
+  const syncMOT = async (vehicleId: string, registration: string) => {
+    toast.loading('Checking MOT...', { id: 'mot-sync' });
+    try {
+      const res = await fetch('/api/mot/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vehicleId, registration }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'MOT sync failed');
+      toast.success(`MOT ${data.status === 'valid' ? 'valid' : 'expired'}`, { id: 'mot-sync' });
+      fetchVehicles(); // refresh list to show updated status
+    } catch (err: any) {
+      toast.error(err.message, { id: 'mot-sync' });
     }
   };
 
@@ -159,6 +179,7 @@ export default function FleetPage() {
                 onDelete={() => handleDeleteVehicle(vehicle.id)}
                 onEdit={() => router.push(`/vehicles/edit/${vehicle.id}`)}
                 onView={() => router.push(`/vehicles/${vehicle.license_plate}`)}
+                onMOTSync={() => syncMOT(vehicle.id, vehicle.license_plate)}
               />
             ))}
           </div>
@@ -187,12 +208,13 @@ function StatCard({ label, value, color }: StatCardProps) {
 
 interface SwipeableCardProps {
   vehicle: Vehicle;
-  onDelete: () => Promise<void>;
+  onDelete: () => void;
   onEdit: () => void;
   onView: () => void;
+  onMOTSync: () => void;
 }
 
-function SwipeableCard({ vehicle, onDelete, onEdit, onView }: SwipeableCardProps) {
+function SwipeableCard({ vehicle, onDelete, onEdit, onView, onMOTSync }: SwipeableCardProps) {
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -203,21 +225,23 @@ function SwipeableCard({ vehicle, onDelete, onEdit, onView }: SwipeableCardProps
     return { color: theme.colors.status.critical, label: 'Critical' };
   };
 
-  const meta = getHealthMeta(vehicle.health_score);
+  const healthMeta = getHealthMeta(vehicle.health_score);
+  const motMeta = (() => {
+    if (!vehicle.mot_status || vehicle.mot_status === 'unknown') return { color: theme.colors.text.muted, label: '?', icon: null };
+    if (vehicle.mot_status === 'valid') return { color: theme.colors.status.healthy, label: 'MOT ✓', icon: CheckCircle };
+    return { color: theme.colors.status.critical, label: 'MOT ✗', icon: AlertCircle };
+  })();
+  const MotIcon = motMeta.icon;
 
   const handleDragEnd = () => {
-    if (dragX <= -80) {
-      // User swiped enough to trigger actions, let the callback decide
-      setDragX(-120);
-    } else {
-      setDragX(0);
-    }
+    if (dragX <= -80) setDragX(-180);
+    else setDragX(0);
     setIsDragging(false);
   };
 
   const handleDrag = (info: any) => {
     const newX = info.offset.x;
-    if (newX < 0) setDragX(Math.max(-120, newX));
+    if (newX < 0) setDragX(Math.max(-180, newX));
     else setDragX(0);
   };
 
@@ -226,12 +250,13 @@ function SwipeableCard({ vehicle, onDelete, onEdit, onView }: SwipeableCardProps
       {/* Background Actions (Revealed on Swipe) */}
       <div style={styles.actionLayer}>
         <div style={{ ...styles.bgBtn, background: '#3b82f6' }} onClick={onEdit}><Edit size={20} /></div>
+        <div style={{ ...styles.bgBtn, background: '#f59e0b' }} onClick={onMOTSync}><Calendar size={20} /></div>
         <div style={{ ...styles.bgBtn, background: '#ef4444' }} onClick={onDelete}><Trash2 size={20} /></div>
       </div>
 
       <motion.div
         drag="x"
-        dragConstraints={{ left: -120, right: 0 }}
+        dragConstraints={{ left: -180, right: 0 }}
         dragElastic={0.1}
         onDrag={(_, info) => handleDrag(info)}
         onDragEnd={handleDragEnd}
@@ -244,9 +269,14 @@ function SwipeableCard({ vehicle, onDelete, onEdit, onView }: SwipeableCardProps
         <div style={styles.cardContent}>
           <div style={styles.cardHeader}>
             <span style={styles.platePill}>{vehicle.license_plate}</span>
-            <div style={{ ...styles.healthBadge, backgroundColor: `${meta.color}15`, color: meta.color }}>
+            <div style={{ ...styles.healthBadge, backgroundColor: `${healthMeta.color}15`, color: healthMeta.color }}>
               <Activity size={12} /> {vehicle.health_score ?? 0}%
             </div>
+            {MotIcon && (
+              <div style={{ ...styles.healthBadge, backgroundColor: `${motMeta.color}15`, color: motMeta.color }}>
+                <MotIcon size={12} /> {motMeta.label}
+              </div>
+            )}
           </div>
           <h3 style={styles.vehicleTitle}>{vehicle.make} {vehicle.model}</h3>
           <div style={styles.metaRow}>
@@ -288,7 +318,7 @@ const styles: Record<string, React.CSSProperties> = {
   filterTabActive: { background: theme.colors.background.subtle, color: theme.colors.text.primary },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' },
   cardWrapper: { position: 'relative', background: theme.colors.background.card, borderRadius: '24px', overflow: 'hidden' },
-  actionLayer: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '120px', display: 'flex', zIndex: 1 },
+  actionLayer: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '180px', display: 'flex', zIndex: 1 },
   bgBtn: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' },
   card: { background: theme.colors.background.card, border: `1px solid ${theme.colors.border.light}`, padding: '24px', borderRadius: '24px', display: 'flex', alignItems: 'center', cursor: 'pointer', position: 'relative', zIndex: 2 },
   cardContent: { flex: 1 },

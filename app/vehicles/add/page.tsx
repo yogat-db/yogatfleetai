@@ -1,4 +1,3 @@
-// app/vehicles/add/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -10,6 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
+import toast from 'react-hot-toast';
 
 export default function AddVehiclePage() {
   const router = useRouter();
@@ -42,6 +42,7 @@ export default function AddVehiclePage() {
 
   useEffect(() => { checkFleetLimits(); }, [checkFleetLimits]);
 
+  // Fetch vehicle from DVLA
   const fetchVehicleDetails = async () => {
     if (!plate.trim()) return setError('Licence plate required');
     setFetching(true);
@@ -64,9 +65,22 @@ export default function AddVehiclePage() {
     }
   };
 
+  // Auto‑fetch MOT and store expiry
+  const syncMOTData = async (vehicleId: string, reg: string) => {
+    try {
+      await fetch('/api/mot/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vehicleId, registration: reg }),
+      });
+    } catch (err) {
+      console.warn('MOT sync failed (non‑critical):', err);
+    }
+  };
+
   const detectLocation = () => {
     if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser');
+      setError('Geolocation not supported');
       return;
     }
     setDetectingLocation(true);
@@ -74,25 +88,20 @@ export default function AddVehiclePage() {
       async (position) => {
         const { latitude, longitude } = position.coords;
         setCoords({ lat: latitude, lng: longitude });
-        // Reverse geocode using OpenStreetMap Nominatim (free, no API key required)
         try {
           const geoRes = await fetch(
             `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
           );
           const geoData = await geoRes.json();
-          if (geoData.display_name) {
-            setAddress(geoData.display_name);
-          } else {
-            setAddress(`${latitude}, ${longitude}`);
-          }
+          setAddress(geoData.display_name || `${latitude}, ${longitude}`);
         } catch {
           setAddress(`${latitude}, ${longitude}`);
         }
         setDetectingLocation(false);
       },
       (err) => {
-        console.error('Geolocation error:', err);
-        setError('Unable to get your location. Please allow location access.');
+        console.error(err);
+        setError('Unable to get location. Please allow access.');
         setDetectingLocation(false);
       }
     );
@@ -104,8 +113,11 @@ export default function AddVehiclePage() {
       const res = await fetch('/api/stripe/create-multi-vehicle-checkout', { method: 'POST' });
       const { url } = await res.json();
       if (url) window.location.href = url;
-    } catch { alert('Payment gateway error. Try again later.'); }
-    finally { setUpgradeLoading(false); }
+    } catch {
+      toast.error('Payment gateway error');
+    } finally {
+      setUpgradeLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -114,27 +126,39 @@ export default function AddVehiclePage() {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Auth session expired');
-      const { error: insErr } = await supabase.from('vehicles').insert({
-        license_plate: plate.toUpperCase(),
-        make: vehicleData.make,
-        model: vehicleData.model,
-        year: vehicleData.yearOfManufacture,
-        fuel_type: vehicleData.fuelType,
-        engine_capacity: vehicleData.engineCapacity,
-        vin: vehicleData.vin || null,
-        user_id: user.id,
-        status: 'active',
-        health_score: 85,
-        lat: coords.lat,
-        lng: coords.lng,
-        address: address.trim() || null
-      });
+      if (!user) throw new Error('Session expired – please log in again');
+
+      const { data: newVehicle, error: insErr } = await supabase
+        .from('vehicles')
+        .insert({
+          license_plate: plate.toUpperCase(),
+          make: vehicleData.make,
+          model: vehicleData.model,
+          year: vehicleData.yearOfManufacture,
+          fuel_type: vehicleData.fuelType,
+          engine_capacity: vehicleData.engineCapacity,
+          vin: vehicleData.vin || null,
+          user_id: user.id,
+          status: 'active',
+          health_score: 85,
+          lat: coords.lat,
+          lng: coords.lng,
+          address: address.trim() || null
+        })
+        .select()
+        .single();
+
       if (insErr) throw insErr;
+
+      // Fire and forget MOT sync
+      await syncMOTData(newVehicle.id, plate);
+      
       setSuccess(true);
+      toast.success('Vehicle added successfully!');
       setTimeout(() => router.push('/fleet'), 2000);
     } catch (err: any) {
       setError(err.message);
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
@@ -148,7 +172,7 @@ export default function AddVehiclePage() {
           <h1 style={{ marginBottom: 12 }}>Fleet Limit Reached</h1>
           <p style={{ color: theme.colors.text.secondary, lineHeight: 1.6 }}>
             Your Free tier allows 1 vehicle. Unlock <strong>Unlimited Fleet Management</strong> and 
-            Advanced AI Diagnostics for a one-time lifetime access fee.
+            Advanced AI Diagnostics for a one‑time lifetime fee.
           </p>
           <div style={styles.upgradeActions}>
             <button onClick={handleUpgrade} disabled={upgradeLoading} style={styles.upgradeButton}>
@@ -168,7 +192,7 @@ export default function AddVehiclePage() {
       <div style={styles.container}>
         <div style={styles.header}>
           <h1 style={styles.title}>Vehicle Onboarding</h1>
-          <p style={styles.subtitle}>Enter a UK licence plate to sync with Fleet AI</p>
+          <p style={styles.subtitle}>Enter UK licence plate to sync with Fleet AI</p>
         </div>
 
         <div style={styles.card}>
@@ -201,9 +225,9 @@ export default function AddVehiclePage() {
                   <h3>{vehicleData.make} {vehicleData.model}</h3>
                 </div>
                 <div style={styles.previewGrid}>
-                  <div style={styles.previewItem}><small>YEAR</small> <span>{vehicleData.yearOfManufacture}</span></div>
-                  <div style={styles.previewItem}><small>ENGINE</small> <span>{vehicleData.engineCapacity}cc</span></div>
-                  <div style={styles.previewItem}><small>FUEL</small> <span>{vehicleData.fuelType}</span></div>
+                  <div><small>YEAR</small> <span>{vehicleData.yearOfManufacture}</span></div>
+                  <div><small>ENGINE</small> <span>{vehicleData.engineCapacity}cc</span></div>
+                  <div><small>FUEL</small> <span>{vehicleData.fuelType}</span></div>
                 </div>
               </motion.div>
             )}
@@ -241,7 +265,7 @@ export default function AddVehiclePage() {
               {aiLoading ? (
                 <div style={styles.aiPlaceholder}>
                   <Sparkles size={16} className="pulse" />
-                  <span>AI is analyzing vehicle reliability trends...</span>
+                  <span>AI is analyzing reliability trends...</span>
                 </div>
               ) : aiInsight ? (
                 <div style={styles.aiInsight}>
@@ -283,9 +307,6 @@ const styles: Record<string, React.CSSProperties> = {
   dataPreview: { background: 'rgba(255,255,255,0.03)', borderRadius: '16px', padding: '20px', border: `1px solid ${theme.colors.border.light}` },
   previewHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' },
   previewGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' },
-previewItem: { display: 'flex', flexDirection: 'column', gap: '4px' },
-previewItemSmall: { fontSize: '10px', color: theme.colors.text.muted },
-previewItemSpan: { fontWeight: 600 },
   field: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' },
   label: { fontSize: '13px', fontWeight: 600, color: theme.colors.text.secondary },
   formInput: { flex: 1, width: '100%', background: 'rgba(255,255,255,0.05)', border: `1px solid ${theme.colors.border.light}`, borderRadius: '12px', padding: '14px', color: '#fff', outline: 'none' },

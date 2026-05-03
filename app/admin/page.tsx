@@ -1,3 +1,4 @@
+// app/admin/dashboard/page.tsx
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import Link from 'next/link';
 import { Briefcase, Users, UserCog, ArrowRight, AlertCircle, TrendingUp } from 'lucide-react';
@@ -6,12 +7,6 @@ import theme from '@/app/theme';
 export const metadata = {
   title: 'Admin Command Center | Yogat Fleet AI',
   description: 'Global platform overview and management.',
-};
-
-export const viewport = {
-  width: 'device-width',
-  initialScale: 1,
-  themeColor: '#020617', // Darker to match our Slate 950 background
 };
 
 export default async function AdminDashboardPage() {
@@ -26,7 +21,6 @@ export default async function AdminDashboardPage() {
   const mechanicsCount = results[1].status === 'fulfilled' ? (results[1].value as any).count || 0 : 0;
   const usersCount = results[2].status === 'fulfilled' ? (results[2].value as any).data.users.length || 0 : 0;
   
-  // Check if everything failed
   const allFailed = results.every(r => r.status === 'rejected');
 
   const stats = [
@@ -48,62 +42,64 @@ export default async function AdminDashboardPage() {
   }
 
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <div style={styles.badge}>
-          <TrendingUp size={12} /> System Live
+    <div style={{ width: '100%', padding: 0, margin: 0 }}>
+      <div style={styles.container}>
+        <header style={styles.header}>
+          <div style={styles.badge}>
+            <TrendingUp size={12} /> System Live
+          </div>
+          <h1 style={styles.title}>Admin Dashboard</h1>
+          <p style={styles.subtitle}>Real-time metrics and platform control.</p>
+        </header>
+
+        <div style={styles.statsGrid}>
+          {stats.map((stat) => (
+            <Link key={stat.label} href={stat.href} style={{ textDecoration: 'none' }}>
+              <div style={styles.statCard}>
+                <div style={{ ...styles.iconBox, background: `${stat.color}15` }}>
+                  <stat.icon size={24} color={stat.color} />
+                </div>
+                <div style={styles.statContent}>
+                  <span style={styles.statValue}>{stat.value.toLocaleString()}</span>
+                  <span style={styles.statLabel}>{stat.label}</span>
+                </div>
+                <ArrowRight size={18} style={styles.arrow} />
+              </div>
+            </Link>
+          ))}
         </div>
-        <h1 style={styles.title}>Admin Dashboard</h1>
-        <p style={styles.subtitle}>Real-time metrics and platform control.</p>
-      </header>
 
-      <div style={styles.statsGrid}>
-        {stats.map((stat) => (
-          <Link key={stat.label} href={stat.href} style={{ textDecoration: 'none' }}>
-            <div style={styles.statCard}>
-              <div style={{ ...styles.iconBox, background: `${stat.color}15` }}>
-                <stat.icon size={24} color={stat.color} />
-              </div>
-              <div style={styles.statContent}>
-                <span style={styles.statValue}>{stat.value.toLocaleString()}</span>
-                <span style={styles.statLabel}>{stat.label}</span>
-              </div>
-              <ArrowRight size={18} style={styles.arrow} />
-            </div>
-          </Link>
-        ))}
-      </div>
+        <div style={styles.sectionHeader}>
+          <h2 style={styles.sectionTitle}>Quick Actions</h2>
+          <div style={styles.divider} />
+        </div>
 
-      <div style={styles.sectionHeader}>
-        <h2 style={styles.sectionTitle}>Quick Actions</h2>
-        <div style={styles.divider} />
-      </div>
-
-      <div style={styles.actionGrid}>
-        <ActionCard 
-          href="/admin/jobs" 
-          icon={Briefcase} 
-          title="Manage Jobs" 
-          desc="Audit active repair requests and history." 
-        />
-        <ActionCard 
-          href="/admin/mechanics" 
-          icon={Users} 
-          title="Mechanic Approval" 
-          desc="Review pending shop verifications." 
-        />
-        <ActionCard 
-          href="/admin/users" 
-          icon={UserCog} 
-          title="User Permissions" 
-          desc="Adjust roles and account status." 
-        />
+        <div style={styles.actionGrid}>
+          <ActionCard 
+            href="/admin/jobs" 
+            icon={Briefcase} 
+            title="Manage Jobs" 
+            desc="Audit active repair requests and history." 
+          />
+          <ActionCard 
+            href="/admin/mechanics" 
+            icon={Users} 
+            title="Mechanic Approval" 
+            desc="Review pending shop verifications." 
+          />
+          <ActionCard 
+            href="/admin/users" 
+            icon={UserCog} 
+            title="User Permissions" 
+            desc="Adjust roles and account status." 
+          />
+        </div>
       </div>
     </div>
   );
 }
 
-// Reusable Sub-component (Internal)
+// Reusable Sub-component
 function ActionCard({ href, icon: Icon, title, desc }: any) {
   return (
     <Link href={href} style={{ textDecoration: 'none' }}>
@@ -120,10 +116,13 @@ function ActionCard({ href, icon: Icon, title, desc }: any) {
   );
 }
 
-// ==================== STYLES ====================
+// ==================== STYLES (unchanged, but ensure no max-width) ====================
 const styles: Record<string, React.CSSProperties> = {
   container: {
     padding: '40px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
     background: theme.colors.background.main,
     minHeight: '100vh',
     fontFamily: theme.fontFamilies.sans,
