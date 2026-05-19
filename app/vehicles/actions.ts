@@ -5,25 +5,36 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 export async function deleteVehicle(formData: FormData) {
-  const id = formData.get('id') as string;
-  if (!id) throw new Error('Vehicle ID is required');
+  const rawId = formData.get('id');
+  const id = typeof rawId === 'string' ? rawId.trim() : '';
+
+  if (!id) {
+    throw new Error('Vehicle ID is required');
+  }
 
   const supabase = await createClient();
 
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
-  if (userError || !user) throw new Error('You must be logged in to delete a vehicle');
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
 
-  const { error } = await supabase
+  if (authError || !user) {
+    throw new Error('You must be logged in to delete a vehicle');
+  }
+
+  const { error: deleteError } = await supabase
     .from('vehicles')
     .delete()
     .eq('id', id)
     .eq('user_id', user.id);
 
-  if (error) {
-    console.error('Delete error:', error);
+  if (deleteError) {
+    console.error('Delete vehicle error:', deleteError);
     throw new Error('Failed to delete vehicle');
   }
 
   revalidatePath('/fleet');
+  revalidatePath('/vehicles');
   redirect('/fleet');
 }

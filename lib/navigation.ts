@@ -1,16 +1,42 @@
-// lib/navigation.ts
-import { 
-  LayoutDashboard, Truck, ShoppingCart, Wrench, History, 
-  Settings, Briefcase, ShieldCheck, Menu, 
-  type LucideIcon, 
-  Users
+import {
+  Briefcase,
+  FileText,
+  History,
+  LayoutDashboard,
+  Menu,
+  Settings,
+  ShieldCheck,
+  ShoppingCart,
+  Truck,
+  type LucideIcon,
+  Users,
+  Wrench,
 } from 'lucide-react';
+
+const ICONS = {
+  dashboard: LayoutDashboard,
+  fleet: Truck,
+  marketplace: ShoppingCart,
+  accessories: ShoppingCart,
+  diagnostics: Wrench,
+  serviceHistory: History,
+  controlCenter: Settings,
+  mechanicHub: Briefcase,
+  privacy: FileText,
+  adminDashboard: ShieldCheck,
+  adminJobs: Briefcase,
+  adminMechanics: Wrench,
+  adminUsers: Users,
+} satisfies Record<string, LucideIcon>;
+
+export type IconKey = keyof typeof ICONS;
 
 export type NavLink = {
   label: string;
   href: string;
   show?: boolean;
-  icon?: LucideIcon; // optional, can be resolved in sidebar
+  icon?: LucideIcon;
+  key?: IconKey;
 };
 
 export type NavGroup = {
@@ -18,67 +44,101 @@ export type NavGroup = {
   links: NavLink[];
 };
 
-// Helper: get icon component for a given link label
-export function getIconForLabel(label: string): LucideIcon {
-  const iconMap: Record<string, LucideIcon> = {
-    Dashboard: LayoutDashboard,
-    'My Fleet': Truck,
-    Marketplace: ShoppingCart,
-    'Car Accessories': ShoppingCart,
-    Diagnostics: Wrench,
-    'Service History': History,
-    'Control Center': Settings,
-    'Mechanic Hub': Briefcase,
-    'Admin Dashboard': ShieldCheck,
-    'Admin Jobs': Briefcase,
-    'Admin Mechanics': Wrench,
-    'Admin Users': Users,
-  };
-  return iconMap[label] || Menu;
+export function getIconForLink(link: NavLink): LucideIcon {
+  if (link.icon) return link.icon;
+  if (link.key) return ICONS[link.key];
+  return Menu;
 }
 
-export function NAV_GROUPS(isMechanic: boolean, isAdmin: boolean): NavGroup[] {
+export function getNavGroups(
+  isMechanic: boolean,
+  isAdmin: boolean
+): NavGroup[] {
   const groups: NavGroup[] = [
     {
-      label: 'Operations',
+      label: 'Overview',
+      links: [{ href: '/dashboard', label: 'Dashboard', key: 'dashboard' }],
+    },
+    {
+      label: 'Fleet',
       links: [
-        { href: '/dashboard', label: 'Dashboard' },
-        { href: '/fleet', label: 'My Fleet' },
+        { href: '/fleet', label: 'My Fleet', key: 'fleet' },
+        { href: '/diagnostics', label: 'Diagnostics', key: 'diagnostics' },
+        {
+          href: '/service-history',
+          label: 'Service History',
+          key: 'serviceHistory',
+        },
       ],
     },
     {
       label: 'Marketplace',
       links: [
-        { href: '/marketplace', label: 'Marketplace' },
-        { href: '/marketplace/affiliate', label: 'Car Accessories' },
-      ],
-    },
-    {
-      label: 'Technical',
-      links: [
-        { href: '/diagnostics', label: 'Diagnostics' },
-        { href: '/service-history', label: 'Service History' },
-        { href: '/marketplace/jobs', label: 'Mechanic Hub', show: isMechanic },
+        {
+          href: '/marketplace',
+          label: 'Marketplace',
+          key: 'marketplace',
+        },
+        {
+          href: '/marketplace/affiliate',
+          label: 'Car Accessories',
+          key: 'accessories',
+        },
+        {
+          href: '/marketplace/jobs',
+          label: 'Mechanic Hub',
+          key: 'mechanicHub',
+          show: isMechanic,
+        },
       ],
     },
     {
       label: 'System',
       links: [
-        { href: '/control-center', label: 'Control Center' },
-        { href: '/privacy', label: 'Privacy Policy' },
+        {
+          href: '/control-center',
+          label: 'Control Center',
+          key: 'controlCenter',
+        },
+        {
+          href: '/privacy',
+          label: 'Privacy Policy',
+          key: 'privacy',
+        },
       ],
     },
   ];
+
   if (isAdmin) {
     groups.push({
       label: 'Admin',
       links: [
-        { href: '/admin', label: 'Admin Dashboard' },
-        { href: '/admin/jobs', label: 'Admin Jobs' },
-        { href: '/admin/mechanics', label: 'Admin Mechanics' },
-        { href: '/admin/users', label: 'Admin Users' },
+        {
+          href: '/admin/dashboard',
+          label: 'Admin Dashboard',
+          key: 'adminDashboard',
+        },
+        {
+          href: '/admin/jobs',
+          label: 'Admin Jobs',
+          key: 'adminJobs',
+        },
+        {
+          href: '/admin/mechanics',
+          label: 'Admin Mechanics',
+          key: 'adminMechanics',
+        },
+        {
+          href: '/admin/users',
+          label: 'Admin Users',
+          key: 'adminUsers',
+        },
       ],
     });
   }
-  return groups;
+
+  return groups.map((group) => ({
+    ...group,
+    links: group.links.filter((link) => link.show !== false),
+  }));
 }

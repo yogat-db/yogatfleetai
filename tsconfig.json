@@ -1,16 +1,19 @@
 {
   "compilerOptions": {
-    /* Base Options */
-    "target": "ES2022",
+    "target": "ES2017",
     "lib": [
       "dom",
       "dom.iterable",
       "esnext"
     ],
-    "allowJs": true,
+    "allowJs": false,
     "skipLibCheck": true,
     "strict": true,
-    "noEmit": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
@@ -19,20 +22,13 @@
     "jsx": "react-jsx",
     "incremental": true,
     "forceConsistentCasingInFileNames": true,
-    /* Strictness - No "Any" allowed for AI calculations */
-    "noImplicitAny": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    /* Path Aliases - Fixes your @/lib import errors */
-    "baseUrl": ".",
+    "noEmit": true,
+    "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": [
         "./*"
       ]
     },
-    /* Plugins & Types */
     "plugins": [
       {
         "name": "next"
@@ -41,8 +37,7 @@
     "types": [
       "node",
       "react",
-      "react-dom",
-      "next"
+      "react-dom"
     ]
   },
   "include": [
@@ -53,8 +48,6 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    ".next",
-    "out"
+    "node_modules"
   ]
 }

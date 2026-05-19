@@ -1,182 +1,188 @@
-// app/diagnostics/[code]/page.tsx
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { ArrowLeft, CircleAlert, Wrench } from 'lucide-react';
 import { getDTCInfo, type DTCInfo } from '@/lib/ai/diagnostics';
 import theme from '@/app/theme';
 
-export default function DTCDetailPage() {
-  const params = useParams();
-  const router = useRouter();
-  const code = params.code as string;
+type DTCDetailPageProps = {
+  params: Promise<{
+    code: string;
+  }>;
+};
 
-  const [dtc, setDtc] = useState<DTCInfo | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function normalizeCode(code: string) {
+  return code.trim().toUpperCase();
+}
 
-  useEffect(() => {
-    if (!code) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const info = getDTCInfo(code);
-      if (!info) {
-        setError(`DTC code "${code}" not found in our database.`);
-      } else {
-        setDtc(info);
-      }
-    } catch (err) {
-      setError('An error occurred while fetching DTC information.');
-    } finally {
-      setLoading(false);
-    }
-  }, [code]);
+export default async function DTCDetailPage({ params }: DTCDetailPageProps) {
+  const { code } = await params;
+  const normalizedCode = normalizeCode(code);
+  const dtc = getDTCInfo(normalizedCode) as DTCInfo | null;
 
-  if (loading) {
-    return (
-      <div style={styles.centered}>
-        <div style={styles.spinner} />
-        <p style={{ marginTop: 16, color: theme.colors.text.secondary }}>Loading diagnostic data...</p>
-      </div>
-    );
+  if (!dtc) {
+    notFound();
   }
-
-  if (error) {
-    return (
-      <div style={styles.centered}>
-        <p style={{ color: theme.colors.status.critical }}>{error}</p>
-        <button onClick={() => router.back()} style={styles.backButton}>← Go Back</button>
-      </div>
-    );
-  }
-
-  if (!dtc) return null;
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
-      <button onClick={() => router.back()} style={styles.backButton}>← Back</button>
-      <h1 style={styles.code}>{dtc.code}</h1>
-      <p style={styles.description}>{dtc.description}</p>
+    <div style={styles.page}>
+      <div style={styles.container}>
+        <Link href="/diagnostics" style={styles.backLink}>
+          <ArrowLeft size={16} />
+          Back to diagnostics
+        </Link>
 
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Possible Causes</h3>
-        <ul style={styles.list}>
-          {dtc.causes.map((c, i) => <li key={i}>{c}</li>)}
-        </ul>
+        <header style={styles.hero}>
+          <div style={styles.badge}>Diagnostic trouble code</div>
+          <h1 style={styles.code}>{dtc.code}</h1>
+          <p style={styles.description}>{dtc.description}</p>
+        </header>
+
+        <div style={styles.grid}>
+          <section style={styles.card}>
+            <div style={styles.cardHeader}>
+              <CircleAlert size={18} color={theme.colors.primary} />
+              <h2 style={styles.cardTitle}>Possible causes</h2>
+            </div>
+
+            <ul style={styles.list}>
+              {dtc.causes.map((cause, index) => (
+                <li key={`${dtc.code}-cause-${index}`} style={styles.listItem}>
+                  {cause}
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section style={styles.card}>
+            <div style={styles.cardHeader}>
+              <Wrench size={18} color={theme.colors.primary} />
+              <h2 style={styles.cardTitle}>Suggested fix</h2>
+            </div>
+
+            <p style={styles.fixText}>{dtc.fix}</p>
+
+            {typeof dtc.estimatedCost === 'number' && (
+              <div style={styles.costBox}>
+                <span style={styles.costLabel}>Estimated cost</span>
+                <span style={styles.costValue}>£{dtc.estimatedCost}</span>
+              </div>
+            )}
+          </section>
+        </div>
       </div>
-
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Suggested Fix</h3>
-        <p style={styles.fixText}>{dtc.fix}</p>
-        {dtc.estimatedCost && (
-          <p><strong>Estimated Cost:</strong> £{dtc.estimatedCost}</p>
-        )}
-      </div>
-
-      <style>{`
-        .spinner {
-          border: 3px solid ${theme.colors.border.medium};
-          border-top: 3px solid ${theme.colors.primary};
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-    </motion.div>
+    </div>
   );
 }
 
-// ==================== STYLES ====================
-const getThemeValue = (path: string, fallback: any) => {
-  const parts = path.split('.');
-  let current: any = theme;
-  for (const part of parts) {
-    if (current && typeof current === 'object' && part in current) {
-      current = current[part];
-    } else {
-      return fallback;
-    }
-  }
-  return current;
-};
-
-const primaryColor = getThemeValue('colors.primary', '#22c55e');
-const bgCard = getThemeValue('colors.background.card', '#0f172a');
-const borderLight = getThemeValue('colors.border.light', '#1e293b');
-const borderMedium = getThemeValue('colors.border.medium', '#334155');
-const textPrimary = getThemeValue('colors.text.primary', '#f1f5f9');
-const textSecondary = getThemeValue('colors.text.secondary', '#94a3b8');
-
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    padding: getThemeValue('spacing.10', '40px'),
-    background: getThemeValue('colors.background.main', '#020617'),
     minHeight: '100vh',
-    color: textPrimary,
-    fontFamily: getThemeValue('fontFamilies.sans', 'Inter, sans-serif'),
+    background: theme.colors.background.main,
+    color: theme.colors.text.primary,
+    fontFamily: theme.fontFamilies.sans,
+    padding: '40px 24px',
   },
-  centered: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
+  container: {
+    maxWidth: 960,
+    margin: '0 auto',
+  },
+  backLink: {
+    display: 'inline-flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    color: textSecondary,
+    gap: '8px',
+    textDecoration: 'none',
+    color: theme.colors.text.secondary,
+    border: `1px solid ${theme.colors.border.medium}`,
+    borderRadius: '10px',
+    padding: '10px 14px',
+    marginBottom: '24px',
   },
-  spinner: {
-    border: `3px solid ${borderMedium}`,
-    borderTop: `3px solid ${primaryColor}`,
-    borderRadius: '50%',
-    width: '40px',
-    height: '40px',
-    animation: 'spin 1s linear infinite',
+  hero: {
+    marginBottom: '28px',
   },
-  backButton: {
-    background: 'transparent',
-    border: `1px solid ${borderMedium}`,
-    borderRadius: getThemeValue('borderRadius.lg', '8px'),
-    padding: `${getThemeValue('spacing.2', '8px')} ${getThemeValue('spacing.4', '16px')}`,
-    color: textSecondary,
-    cursor: 'pointer',
-    marginBottom: getThemeValue('spacing.6', '24px'),
+  badge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '6px 10px',
+    borderRadius: '999px',
+    background: `${theme.colors.primary}18`,
+    color: theme.colors.primary,
+    fontSize: '12px',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: '14px',
   },
   code: {
-    fontSize: getThemeValue('fontSizes.4xl', '48px'),
-    fontWeight: getThemeValue('fontWeights.bold', '700'),
-    color: primaryColor,
-    marginBottom: getThemeValue('spacing.2', '8px'),
+    margin: 0,
+    fontSize: 'clamp(36px, 8vw, 56px)',
+    lineHeight: 1,
+    fontWeight: 800,
+    color: theme.colors.primary,
   },
   description: {
-    fontSize: getThemeValue('fontSizes.lg', '18px'),
-    color: textSecondary,
-    marginBottom: getThemeValue('spacing.6', '24px'),
+    margin: '12px 0 0 0',
+    fontSize: '18px',
+    lineHeight: 1.6,
+    color: theme.colors.text.secondary,
+    maxWidth: '60ch',
+  },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: '20px',
   },
   card: {
-    background: bgCard,
-    padding: getThemeValue('spacing.5', '20px'),
-    borderRadius: getThemeValue('borderRadius.xl', '16px'),
-    border: `1px solid ${borderLight}`,
-    marginBottom: getThemeValue('spacing.5', '20px'),
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.light}`,
+    borderRadius: '18px',
+    padding: '22px',
+  },
+  cardHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    marginBottom: '14px',
   },
   cardTitle: {
-    fontSize: getThemeValue('fontSizes.xl', '20px'),
-    fontWeight: getThemeValue('fontWeights.semibold', '600'),
-    marginBottom: getThemeValue('spacing.3', '12px'),
-    color: textPrimary,
+    margin: 0,
+    fontSize: '20px',
+    fontWeight: 700,
+    color: theme.colors.text.primary,
   },
   list: {
-    listStyleType: 'disc',
-    paddingLeft: getThemeValue('spacing.5', '20px'),
-    color: textSecondary,
+    margin: 0,
+    paddingLeft: '20px',
+    color: theme.colors.text.secondary,
+  },
+  listItem: {
+    marginBottom: '10px',
+    lineHeight: 1.6,
   },
   fixText: {
-    color: textSecondary,
-    lineHeight: 1.6,
+    margin: 0,
+    color: theme.colors.text.secondary,
+    lineHeight: 1.7,
+  },
+  costBox: {
+    marginTop: '18px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '14px 16px',
+    borderRadius: '12px',
+    background: `${theme.colors.primary}12`,
+    border: `1px solid ${theme.colors.primary}30`,
+  },
+  costLabel: {
+    color: theme.colors.text.secondary,
+    fontSize: '14px',
+    fontWeight: 600,
+  },
+  costValue: {
+    color: theme.colors.primary,
+    fontSize: '18px',
+    fontWeight: 800,
   },
 };

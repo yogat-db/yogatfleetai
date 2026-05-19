@@ -1,125 +1,224 @@
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 
-/**
- * SERVICE EVENTS API
- * Handles deep-dive retrieval, updates, and deletion for specific vehicle service records.
- */
+type RouteContext = {
+  params: Promise<{ eventId: string }>;
+};
 
-async function getMacSafeClient(isAdmin = false) {
-  const cookieStore = await cookies();
-  const key = isAdmin 
-    ? process.env.SUPABASE_SERVICE_ROLE_KEY 
-    : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!key) throw new Error("Missing Supabase environment variables");
-
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    key,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet: { name: any; value: any; options: any; }[]) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, { ...options })
-            );
-          } catch { /* SSR Safe */ }
-        },
-      },
-      global: {
-        fetch: (url: string | Request | URL, options: RequestInit | undefined) => {
-          return fetch(url, {
-            ...options,
-            headers: {
-              ...options?.headers,
-              // Fix for the MacBook Air "libcurl" build-time feature error
-              'Accept-Encoding': 'identity',
-            },
-          });
-        },
-      },
-    }
+function jsonError(message: string, status: number) {
+  return NextResponse.json(
+    { success: false, error: message },
+    { status }
   );
 }
 
-// GET /api/service-events/:eventId
-export async function GET(
-  { params }: { params: Promise<{ eventId: string }> }
-) {
+function jsonSuccess(data: unknown, status = 200) {
+  return NextResponse.json(
+    { success: true, data },
+    { status }
+  );
+}
+
+function isValidId(value: string) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+async function getAuthedClient() {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError) {
+    return { supabase, user: null, authError };
+  }
+
+  return { supabase, user, authError: null };
+}
+
+// GET /api/service-events/[eventId]
+export async function GET(_request: Request, context: RouteContext) {
   try {
-    const { eventId } = await params;
-    const supabase = await getMacSafeClient();
+    const { eventId } = await context.params;
+
+    if (!isValidId(eventId)) {
+      return jsonError('Invalid service event id', 400);
+    }
+
+    const { supabase, user, authError } = await getAuthedClient();
+
+    if (authError || !user) {
+      return jsonError('Unauthorized', 401);
+    }
 
     const { data: event, error } = await supabase
       .from('service_events')
-      .select('*, vehicle:vehicles(*)')
+      .select(`
+        *,
+        vehicle:vehicles!inner(*)
+      `)
       .eq('id', eventId)
-      .single();
-
-    if (error || !event) {
-      return NextResponse.json({ error: 'Service event not found' }, { status: 404 });
-    }
-
-    return NextResponse.json(event);
-  } catch (err: any) {
-    console.error('GET service event error:', err.message);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
-
-// PATCH /api/service-events/:eventId
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ eventId: string }> }
-) {
-  try {
-    const { eventId } = await params;
-    const updates = await request.json();
-    const supabase = await getMacSafeClient(true); // Using Admin for updates
-
-    const { data: updatedEvent, error } = await supabase
-      .from('service_events')
-      .update(updates)
-      .eq('id', eventId)
-      .select()
-      .single();
+      .eq('vehicle.user_id', user.id)
+      .maybeSingle();
 
     if (error) {
-      console.error('Update error:', error.message);
-      return NextResponse.json({ error: 'Failed to update service event' }, { status: 500 });
+      console.error('GET service event error:', error);
+      return jsonError(error.message, 500);
     }
 
-    return NextResponse.json(updatedEvent);
-  } catch (err: any) {
-    console.error('PATCH service event error:', err.message);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    if (!event) {
+      return jsonError('Service event not found', 404);
+    }
+
+    return jsonSuccess(event);
+  } catch (error) {
+    console.error('GET /api/service-events/[eventId] error:', error);
+    return jsonError(
+      error instanceof Error ? error.message : 'Internal server error',
+      500
+    );
   }
 }
 
-// DELETE /api/service-events/:eventId
-export async function DELETE(
-  { params }: { params: Promise<{ eventId: string }> }
-) {
+// PATCH /api/service-events/[eventId]
+export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
-    const { eventId } = await params;
-    const supabase = await getMacSafeClient(true);
+    const { eventId } = await context.params;
 
-    const { error } = await supabase
+    if (!isValidId(eventId)) {
+      return jsonError('Invalid service event id', 400);
+    }
+
+    const updates = await request.json();
+
+    const allowedUpdates = {
+      service_type: updates?.service_type,
+      service_date: updates?.service_date,
+      mileage: updates?.mileage,
+      cost: updates?.cost,
+      notes: updates?.notes,
+      provider: updates?.provider,
+      next_due_date: updates?.next_due_date,
+      next_due_mileage: updates?.next_due_mileage,
+      status: updates?.status,
+    };
+
+    const sanitizedUpdates = Object.fromEntries(
+      Object.entries(allowedUpdates).filter(([, value]) => value !== undefined)
+    );
+
+    if (Object.keys(sanitizedUpdates).length === 0) {
+      return jsonError('No valid fields provided for update', 400);
+    }
+
+    const { supabase, user, authError } = await getAuthedClient();
+
+    if (authError || !user) {
+      return jsonError('Unauthorized', 401);
+    }
+
+    const { data: existingEvent, error: existingError } = await supabase
+      .from('service_events')
+      .select(`
+        id,
+        vehicle:vehicles!inner(
+          id,
+          user_id
+        )
+      `)
+      .eq('id', eventId)
+      .eq('vehicle.user_id', user.id)
+      .maybeSingle();
+
+    if (existingError) {
+      console.error('Lookup service event error:', existingError);
+      return jsonError(existingError.message, 500);
+    }
+
+    if (!existingEvent) {
+      return jsonError('Service event not found', 404);
+    }
+
+    const { data: updatedEvent, error: updateError } = await supabase
+      .from('service_events')
+      .update(sanitizedUpdates)
+      .eq('id', eventId)
+      .select(`
+        *,
+        vehicle:vehicles(*)
+      `)
+      .single();
+
+    if (updateError) {
+      console.error('Update service event error:', updateError);
+      return jsonError(updateError.message, 500);
+    }
+
+    return jsonSuccess(updatedEvent);
+  } catch (error) {
+    console.error('PATCH /api/service-events/[eventId] error:', error);
+    return jsonError(
+      error instanceof Error ? error.message : 'Internal server error',
+      500
+    );
+  }
+}
+
+// DELETE /api/service-events/[eventId]
+export async function DELETE(_request: Request, context: RouteContext) {
+  try {
+    const { eventId } = await context.params;
+
+    if (!isValidId(eventId)) {
+      return jsonError('Invalid service event id', 400);
+    }
+
+    const { supabase, user, authError } = await getAuthedClient();
+
+    if (authError || !user) {
+      return jsonError('Unauthorized', 401);
+    }
+
+    const { data: existingEvent, error: existingError } = await supabase
+      .from('service_events')
+      .select(`
+        id,
+        vehicle:vehicles!inner(
+          id,
+          user_id
+        )
+      `)
+      .eq('id', eventId)
+      .eq('vehicle.user_id', user.id)
+      .maybeSingle();
+
+    if (existingError) {
+      console.error('Lookup service event error:', existingError);
+      return jsonError(existingError.message, 500);
+    }
+
+    if (!existingEvent) {
+      return jsonError('Service event not found', 404);
+    }
+
+    const { error: deleteError } = await supabase
       .from('service_events')
       .delete()
       .eq('id', eventId);
 
-    if (error) {
-      console.error('Delete error:', error.message);
-      return NextResponse.json({ error: 'Failed to delete service event' }, { status: 500 });
+    if (deleteError) {
+      console.error('Delete service event error:', deleteError);
+      return jsonError(deleteError.message, 500);
     }
 
-    return NextResponse.json({ success: true, message: 'Service event deleted' });
-  } catch (err: any) {
-    console.error('DELETE service event error:', err.message);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonSuccess({ message: 'Service event deleted' });
+  } catch (error) {
+    console.error('DELETE /api/service-events/[eventId] error:', error);
+    return jsonError(
+      error instanceof Error ? error.message : 'Internal server error',
+      500
+    );
   }
 }

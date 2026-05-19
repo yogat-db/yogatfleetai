@@ -1,65 +1,127 @@
-// app/api/stripe/create-checkout-session/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import Stripe from 'stripe';
 import { createClient } from '@/lib/supabase/server';
+import { stripe } from '@/lib/stripe/server';
+import { getStripePlan } from '@/lib/stripe/plans';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
-});
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ success: false, error: message }, { status });
+}
+
+function getSafeRedirectUrl(path: string) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) {
+    throw new Error('Missing NEXT_PUBLIC_APP_URL');
+  }
+
+  const base = new URL(appUrl);
+  const url = new URL(path, base);
+
+  if (url.origin !== base.origin) {
+    throw new Error('Invalid redirect URL origin');
+  }
+
+  return url.toString();
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { planId, mechanicId, token, successUrl, cancelUrl } = body;
+    const { planId, mechanicId } = await req.json();
 
-    if (!planId || !mechanicId || !token || !successUrl || !cancelUrl) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!planId || !mechanicId) {
+      return jsonError('Missing required fields', 400);
     }
 
-    // Authenticate via the token (no cookie needed)
+    const plan = getStripePlan(String(planId));
+    const priceId = plan?.priceId;
+
+    if (!plan || !priceId) {
+      return jsonError('Invalid or unconfigured plan', 400);
+    }
+
     const supabase = await createClient();
-    // Verify the token – we'll use a helper that checks a store (in‑memory or Redis)
-    // We'll assume you have an endpoint that validates tokens (see below)
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-    if (userError || !user) {
-      // If cookie fails, try to validate token via a separate call? Better to have token validation function.
-      // For simplicity, we'll assume the frontend sends a valid token that we can verify against a DB.
-      // But to avoid complexity, we'll keep the existing auth but store token in metadata.
-      // The success page will use the token to re‑authenticate.
-      console.warn('Auth via cookie failed, but we still proceed with token');
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      console.error('Auth error:', authError);
+      return jsonError('Unauthorized', 401);
     }
 
-    // Map plan to price ID
-    let priceId: string | undefined;
-    if (planId === 'basic') priceId = process.env.STRIPE_BASIC_PRICE_ID;
-    else if (planId === 'pro') priceId = process.env.STRIPE_PRO_PRICE_ID;
-    else return NextResponse.json({ error: 'Invalid plan' }, { status: 400 });
+    const { data: mechanic, error: mechanicError } = await supabase
+      .from('mechanics')
+      .select('id, user_id, email, stripe_customer_id')
+      .eq('id', mechanicId)
+      .eq('user_id', user.id)
+      .maybeSingle();
 
-    if (!priceId) {
-      return NextResponse.json(
-        { error: 'Subscription not configured. Please contact support.' },
-        { status: 500 }
-      );
+    if (mechanicError) {
+      console.error('Mechanic validation error:', mechanicError);
+      return jsonError('Failed to validate mechanic profile', 500);
     }
 
-    // Create Stripe checkout session with token in metadata
+    if (!mechanic) {
+      return jsonError('Invalid mechanic profile', 403);
+    }
+
+    let customerId = mechanic.stripe_customer_id ?? null;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: mechanic.email ?? undefined,
+        metadata: {
+          user_id: user.id,
+          mechanic_id: mechanic.id,
+        },
+      });
+
+      customerId = customer.id;
+
+      const { error: customerSaveError } = await supabase
+        .from('mechanics')
+        .update({ stripe_customer_id: customerId })
+        .eq('id', mechanic.id)
+        .eq('user_id', user.id);
+
+      if (customerSaveError) {
+        console.error('Failed to save Stripe customer ID:', customerSaveError);
+        return jsonError('Failed to prepare billing profile', 500);
+      }
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
+      customer: customerId,
       payment_method_types: ['card'],
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
+      success_url: getSafeRedirectUrl('/billing/success?session_id={CHECKOUT_SESSION_ID}'),
+      cancel_url: getSafeRedirectUrl('/billing'),
       metadata: {
-        plan: planId,
-        mechanicId,
-        authToken: token,   // store the one‑time token
+        user_id: user.id,
+        mechanic_id: mechanic.id,
+        plan_id: plan.id,
       },
+      subscription_data: {
+        metadata: {
+          user_id: user.id,
+          mechanic_id: mechanic.id,
+          plan_id: plan.id,
+        },
+      },
+      allow_promotion_codes: true,
     });
 
-    return NextResponse.json({ url: session.url });
-  } catch (err: any) {
-    console.error('Stripe checkout error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({
+      success: true,
+      url: session.url,
+    });
+  } catch (error) {
+    console.error('Stripe checkout error:', error);
+    return jsonError(
+      error instanceof Error ? error.message : 'Internal server error',
+      500
+    );
   }
 }

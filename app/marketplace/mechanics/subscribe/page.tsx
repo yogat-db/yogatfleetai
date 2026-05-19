@@ -1,290 +1,228 @@
-// app/marketplace/mechanics/subscribe/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { Check, Loader2, AlertCircle } from 'lucide-react';
-import { supabase } from '@/lib/supabase/client';
-import theme from '@/app/theme';
-import toast from 'react-hot-toast';
+import { getStripe } from '@/lib/stripe/client';
 
-const PLANS = [
-  {
-    id: 'basic',
-    name: 'Basic',
-    price: 18.00,                   // ✅ correct price
-    features: [
-      'Apply to up to 10 jobs per month',
-      'Basic profile listing',
-      'Email support',
-    ],
-  },
-  {
-    id: 'pro',
-    name: 'Professional',
-    price: 35.00,                   // ✅ correct price
-    features: [
-      'Unlimited job applications',
-      'Verified badge',
-      'Priority listing in search',
-      'Priority support',
-    ],
-  },
-];
+type SubscriptionPlan = {
+  id: 'basic' | 'pro';
+  name: string;
+  price: number;
+  interval: 'month';
+  featured?: boolean;
+  features: string[];
+};
 
-export default function SubscribePage() {
+type MechanicProfile = {
+  id: string;
+};
+
+export default function MechanicSubscribePage() {
   const router = useRouter();
-  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [mechanicId, setMechanicId] = useState<string | null>(null);
-  const [checking, setChecking] = useState(true);
 
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://yogatfleetai.com';
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [mechanic, setMechanic] = useState<MechanicProfile | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<'basic' | 'pro'>('pro');
+  const [loadingPlans, setLoadingPlans] = useState(true);
+  const [loadingMechanic, setLoadingMechanic] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    checkMechanic();
+    void loadPlans();
+    void loadMechanic();
   }, []);
 
-  const checkMechanic = async () => {
+  async function loadPlans() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push('/login');
-        return;
+      setLoadingPlans(true);
+      setError(null);
+
+      const response = await fetch('/api/stripe/subscription-plans', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'Failed to load subscription plans');
       }
-      const { data: mechanic } = await supabase
-        .from('mechanics')
-        .select('id, subscription_status')
-        .eq('user_id', user.id)
-        .single();
-      if (!mechanic) {
-        router.push('/marketplace/mechanics/register');
-        return;
-      }
-      if (mechanic.subscription_status === 'active') {
-        router.push('/marketplace/mechanics/dashboard');
-        return;
-      }
-      setMechanicId(mechanic.id);
+
+      setPlans(result.data ?? []);
     } catch (err) {
-      console.error('Error checking mechanic:', err);
-      setError('Failed to load your profile. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to load plans');
     } finally {
-      setChecking(false);
+      setLoadingPlans(false);
     }
-  };
+  }
 
-  // ✅ Upgraded handleSubscribe – uses one‑time token to avoid logout
-  const handleSubscribe = async () => {
-    if (!selectedPlan) return;
-    setLoading(true);
-    setError(null);
-
+  async function loadMechanic() {
     try {
-      // 1. Get a one‑time authentication token
-      const tokenRes = await fetch('/api/stripe/create-subscription-token', { method: 'POST' });
-      const tokenData = await tokenRes.json();
-      if (!tokenRes.ok) throw new Error(tokenData.error || 'Failed to create auth token');
+      setLoadingMechanic(true);
 
-      // 2. Create Stripe Checkout session with the token
+      const response = await fetch('/api/mechanics/me', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result?.error || 'Failed to load mechanic profile');
+      }
+
+      if (!result?.data?.id) {
+        throw new Error('Mechanic profile not found');
+      }
+
+      setMechanic({ id: result.data.id });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load mechanic');
+    } finally {
+      setLoadingMechanic(false);
+    }
+  }
+
+  const selectedPlan = useMemo(
+    () => plans.find((plan) => plan.id === selectedPlanId) ?? null,
+    [plans, selectedPlanId]
+  );
+
+  async function handleSubscribe() {
+    try {
+      setSubmitting(true);
+      setError(null);
+
+      if (!mechanic?.id) {
+        throw new Error('Mechanic profile is missing');
+      }
+
       const response = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          planId: selectedPlan,
-          mechanicId,
-          token: tokenData.token,
-          successUrl: `${baseUrl}/marketplace/mechanics/subscribe/success?token=${tokenData.token}&session_id={CHECKOUT_SESSION_ID}`,
-          cancelUrl: `${baseUrl}/marketplace/mechanics/subscribe`,
+          planId: selectedPlanId,
+          mechanicId: mechanic.id,
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to create checkout session');
-      if (!data.url) throw new Error('No checkout URL returned');
+      const result = await response.json();
 
-      // 3. Redirect to Stripe
-      window.location.href = data.url;
-    } catch (err: any) {
-      console.error('Subscription error:', err);
-      setError(err.message || 'Something went wrong. Please try again.');
-      toast.error(err.message);
-      setLoading(false); // important to reset if error occurs before redirect
+      if (!response.ok || !result?.success || !result?.url) {
+        throw new Error(result?.error || 'Failed to create checkout session');
+      }
+
+      await getStripe();
+      window.location.assign(result.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to start checkout');
+      setSubmitting(false);
     }
-  };
+  }
 
-  if (checking) {
+  if (loadingPlans || loadingMechanic) {
     return (
-      <div style={styles.centered}>
-        <Loader2 size={32} className="spin" />
-        <p>Loading subscription options...</p>
-      </div>
+      <main className="mx-auto max-w-5xl px-4 py-10">
+        <h1 className="text-2xl font-semibold">Choose a plan</h1>
+        <p className="mt-3 text-sm text-gray-600">Loading subscription options…</p>
+      </main>
     );
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
-      <h1 style={styles.title}>Choose Your Subscription</h1>
-      <div style={styles.plansGrid}>
-        {PLANS.map((plan) => (
-          <motion.div
-            key={plan.id}
-            whileHover={{ scale: 1.02 }}
-            style={{
-              ...styles.planCard,
-              borderColor: selectedPlan === plan.id ? theme.colors.primary : theme.colors.border.light,
-            }}
-            onClick={() => setSelectedPlan(plan.id)}
-          >
-            <h2 style={styles.planName}>{plan.name}</h2>
-            <p style={styles.planPrice}>
-              £{plan.price.toFixed(2)} <span style={styles.planPeriod}>/mo</span>
-            </p>
-            <ul style={styles.featureList}>
-              {plan.features.map((feat, i) => (
-                <li key={i} style={styles.featureItem}>
-                  <Check size={16} color={theme.colors.primary} />
-                  {feat}
-                </li>
-              ))}
-            </ul>
-          </motion.div>
-        ))}
+    <main className="mx-auto max-w-5xl px-4 py-10">
+      <div className="mb-8">
+        <h1 className="text-2xl font-semibold">Choose a plan</h1>
+        <p className="mt-2 text-sm text-gray-600">
+          Start your mechanic subscription and continue to secure checkout.
+        </p>
       </div>
-      <button
-        onClick={handleSubscribe}
-        disabled={!selectedPlan || loading}
-        style={{
-          ...styles.subscribeButton,
-          opacity: !selectedPlan || loading ? 0.6 : 1,
-        }}
-      >
-        {loading ? (
-          <>
-            <Loader2 size={18} className="spin" />
-            Processing...
-          </>
-        ) : (
-          'Subscribe Now'
-        )}
-      </button>
-      {error && (
-        <div style={styles.errorBox}>
-          <AlertCircle size={16} />
-          <span>{error}</span>
+
+      {error ? (
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
         </div>
-      )}
-      <style>{`
-        .spin { animation: spin 1s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
-    </motion.div>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {plans.map((plan) => {
+          const isSelected = selectedPlanId === plan.id;
+
+          return (
+            <button
+              key={plan.id}
+              type="button"
+              onClick={() => setSelectedPlanId(plan.id)}
+              className={[
+                'rounded-xl border p-5 text-left transition',
+                isSelected
+                  ? 'border-black bg-black text-white'
+                  : 'border-gray-200 bg-white text-black hover:border-gray-400',
+              ].join(' ')}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold">{plan.name}</h2>
+                  <p className={isSelected ? 'text-gray-200' : 'text-gray-600'}>
+                    £{plan.price}/{plan.interval}
+                  </p>
+                </div>
+
+                {plan.featured ? (
+                  <span
+                    className={[
+                      'rounded-full px-3 py-1 text-xs font-medium',
+                      isSelected ? 'bg-white text-black' : 'bg-black text-white',
+                    ].join(' ')}
+                  >
+                    Popular
+                  </span>
+                ) : null}
+              </div>
+
+              <ul className="mt-4 space-y-2">
+                {plan.features.map((feature) => (
+                  <li
+                    key={feature}
+                    className={isSelected ? 'text-sm text-gray-100' : 'text-sm text-gray-700'}
+                  >
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-8 flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-5">
+        <div>
+          <p className="text-sm text-gray-600">Selected plan</p>
+          <p className="text-lg font-semibold">
+            {selectedPlan ? `${selectedPlan.name} — £${selectedPlan.price}/${selectedPlan.interval}` : 'None'}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSubscribe}
+          disabled={submitting || !selectedPlan || !mechanic?.id}
+          className="rounded-lg bg-black px-5 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {submitting ? 'Redirecting…' : 'Continue to checkout'}
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => router.back()}
+        className="mt-4 text-sm text-gray-600 underline underline-offset-4"
+      >
+        Go back
+      </button>
+    </main>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    padding: theme.spacing[10],
-    background: theme.colors.background.main,
-    minHeight: '100vh',
-    color: theme.colors.text.primary,
-    fontFamily: theme.fontFamilies.sans,
-  },
-  title: {
-    fontSize: theme.fontSizes['4xl'],
-    fontWeight: theme.fontWeights.bold,
-    textAlign: 'center',
-    marginBottom: theme.spacing[10],
-    background: theme.gradients.title,
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  plansGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-    gap: theme.spacing[6],
-    maxWidth: '800px',
-    margin: '0 auto',
-    marginBottom: theme.spacing[8],
-  },
-  planCard: {
-    background: theme.colors.background.card,
-    border: `2px solid ${theme.colors.border.light}`,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[6],
-    cursor: 'pointer',
-    transition: 'transform 0.2s ease, border-color 0.2s ease',
-  },
-  planName: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.semibold,
-    marginBottom: theme.spacing[3],
-  },
-  planPrice: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.primary,
-    marginBottom: theme.spacing[4],
-  },
-  planPeriod: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.text.muted,
-    fontWeight: theme.fontWeights.normal,
-  },
-  featureList: {
-    listStyle: 'none',
-    padding: 0,
-    margin: 0,
-  },
-  featureItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    marginBottom: theme.spacing[2],
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.text.secondary,
-  },
-  subscribeButton: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing[2],
-    background: theme.colors.primary,
-    border: 'none',
-    borderRadius: theme.borderRadius.lg,
-    padding: `${theme.spacing[3]} ${theme.spacing[6]}`,
-    fontSize: theme.fontSizes.base,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.background.main,
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
-    width: 'fit-content',
-    margin: '0 auto',
-  },
-  errorBox: {
-    marginTop: theme.spacing[4],
-    padding: theme.spacing[3],
-    background: `${theme.colors.status.critical}20`,
-    border: `1px solid ${theme.colors.status.critical}`,
-    borderRadius: theme.borderRadius.lg,
-    color: theme.colors.status.critical,
-    textAlign: 'center',
-    maxWidth: '400px',
-    margin: `${theme.spacing[4]} auto 0`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing[2],
-  },
-  centered: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: theme.colors.text.secondary,
-    gap: theme.spacing[4],
-  },
-};

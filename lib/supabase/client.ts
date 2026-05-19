@@ -1,15 +1,18 @@
 import { createBrowserClient } from '@supabase/ssr';
 
-export const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    cookieOptions: {
-      name: 'sb-auth-token',
-      lifetime: 60 * 60 * 24 * 7, // 7 days
-      path: '/',
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-    },
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export function createClient() {
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error(
+      'Missing NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY'
+    );
   }
-);
+
+  return createBrowserClient(supabaseUrl, supabaseKey);
+}
+
+export const supabase = createClient();

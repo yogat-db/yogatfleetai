@@ -1,67 +1,107 @@
 'use client';
 
-import { useFormStatus } from 'react-dom';
+import { useTransition } from 'react';
 import { Trash2, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
 import theme from '@/app/theme';
 
-interface DeleteJobButtonProps {
-  jobId: string;
-  // Note: Changed return type to any to handle the response object from actions.ts
-  deleteAction: (formData: FormData) => Promise<any>;
-}
+type DeleteJobAction = (
+  jobId: string
+) => Promise<{ success?: boolean; message?: string; error?: string }>;
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
+type DeleteJobButtonProps = {
+  jobId: string;
+  deleteAction: DeleteJobAction;
+};
+
+export default function DeleteJobButton({
+  jobId,
+  deleteAction,
+}: DeleteJobButtonProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  const handleDelete = () => {
+    if (isPending) return;
+
+    const confirmed = window.confirm(
+      'Permanently delete this job and its related applications? This cannot be undone.'
+    );
+
+    if (!confirmed) return;
+
+    startTransition(async () => {
+      try {
+        const result = await deleteAction(jobId);
+
+        if (!result?.success) {
+          throw new Error(result?.error || 'Failed to delete job');
+        }
+
+        toast.success(result.message || 'Job deleted successfully');
+        router.refresh();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to delete job';
+        toast.error(message);
+      }
+    });
+  };
 
   return (
     <motion.button
-      whileHover={{ scale: 1.05, backgroundColor: 'rgba(239, 68, 68, 0.1)' }}
-      whileTap={{ scale: 0.95 }}
-      type="submit"
-      disabled={pending}
+      type="button"
+      whileHover={isPending ? undefined : { scale: 1.04 }}
+      whileTap={isPending ? undefined : { scale: 0.96 }}
+      onClick={handleDelete}
+      disabled={isPending}
+      aria-label="Delete job"
+      title="Delete job"
       style={{
-        background: 'transparent',
-        border: `1px solid ${pending ? theme.colors.border.light : '#ef4444'}`,
-        color: '#ef4444',
-        padding: '8px',
-        borderRadius: '8px',
-        cursor: pending ? 'not-allowed' : 'pointer',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        opacity: pending ? 0.6 : 1,
-        transition: 'all 0.2s ease',
+        ...styles.button,
+        ...(isPending ? styles.buttonDisabled : {}),
       }}
     >
-      {pending ? (
-        <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+      {isPending ? (
+        <Loader2 size={16} className="spin" />
       ) : (
         <Trash2 size={16} />
       )}
+
       <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .spin {
+          animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin {
+          to {
+            transform: rotate(360deg);
+          }
+        }
       `}</style>
     </motion.button>
   );
 }
 
-export default function DeleteJobButton({ jobId, deleteAction }: DeleteJobButtonProps) {
-  
-  const handleClientSideConfirm = (e: React.FormEvent<HTMLFormElement>) => {
-    // Custom styled confirm could go here, but native works for speed
-    if (!confirm('PROTOCOL ALERT: Are you sure you want to delete this job record? This action cannot be undone.')) {
-      e.preventDefault();
-    }
-  };
-
-  return (
-    <form action={deleteAction} onSubmit={handleClientSideConfirm}>
-      {/* CRITICAL FIX: 
-        The name must match what you extract in actions.ts: formData.get('jobId') 
-      */}
-      <input type="hidden" name="jobId" value={jobId} />
-      <SubmitButton />
-    </form>
-  );
-}
+const styles: Record<string, React.CSSProperties> = {
+  button: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 34,
+    height: 34,
+    background: 'transparent',
+    border: `1px solid ${theme.colors.status.critical}55`,
+    borderRadius: '10px',
+    color: theme.colors.status.critical,
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+  },
+  buttonDisabled: {
+    opacity: 0.55,
+    cursor: 'not-allowed',
+    border: `1px solid ${theme.colors.border.light}`,
+    color: theme.colors.text.muted,
+  },
+};

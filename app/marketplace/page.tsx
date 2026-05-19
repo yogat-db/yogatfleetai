@@ -2,218 +2,300 @@
 
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Briefcase, Wrench, Truck, ArrowUpRight } from 'lucide-react';
+import type { CSSProperties } from 'react';
+import type { LucideIcon } from 'lucide-react';
+import {
+  ArrowUpRight,
+  Briefcase,
+  LayoutDashboard,
+  ShoppingBag,
+  Wrench,
+} from 'lucide-react';
 import theme from '@/app/theme';
 
-export default function MarketplacePage() {
-  const marketplaceOptions = [
-    {
-      title: 'Post a Repair Job',
-      description: 'Describe your issue and get competitive quotes.',
-      icon: Briefcase,
-      href: '/jobs/post',
-      color: theme.colors.primary,
-      badge: 'Vehicle Owners',
-    },
-    {
-      title: 'Find Jobs',
-      description: 'Browse open repair jobs and submit your application.',
-      icon: Wrench,
-      href: '/marketplace/jobs',
-      color: '#10b981',
-      badge: 'Mechanic Hub',
-    },
-    {
-      title: 'Car Accessories',
-      description: 'Shop premium parts, tools, and upgrades.',
-      icon: Truck,
-      href: '/marketplace/affiliate',
-      color: '#f59e0b',
-      badge: 'Shop & Save',
-    },
-  ];
+type MarketplaceOption = {
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  href: string;
+  color: string;
+  badge: string;
+  featured?: boolean;
+};
 
+const marketplaceOptions: MarketplaceOption[] = [
+  {
+    title: 'Post a Repair Job',
+    description: 'Create a clear repair request and receive competitive quotes from mechanics.',
+    icon: Briefcase,
+    href: '/marketplace/jobs/post',
+    color: theme.colors.primary,
+    badge: 'Vehicle Owners',
+    featured: true,
+  },
+  {
+    title: 'Find Jobs',
+    description: 'Browse open repair jobs and submit quotes from one focused workspace.',
+    icon: Wrench,
+    href: '/marketplace/jobs',
+    color: '#16a34a',
+    badge: 'Mechanics',
+  },
+  {
+    title: 'Mechanic Dashboard',
+    description: 'Track bids, active work, and workshop activity in one place.',
+    icon: LayoutDashboard,
+    href: '/marketplace/mechanics/dashboard',
+    color: '#22c55e',
+    badge: 'Workshop',
+  },
+  {
+    title: 'Automotive Supplies',
+    description: 'Browse professional accessories, tools, and vehicle care essentials.',
+    icon: ShoppingBag,
+    href: '/marketplace/affiliate',
+    color: '#f59e0b',
+    badge: 'Shop',
+  },
+];
+
+const stats = [
+  { value: '500+', label: 'Jobs completed' },
+  { value: '150+', label: 'Verified mechanics' },
+  { value: '24/7', label: 'Platform uptime' },
+];
+
+function getAccentStyles(color: string): {
+  iconWrapper: CSSProperties;
+  badge: CSSProperties;
+} {
+  return {
+    iconWrapper: {
+      ...styles.iconWrapper,
+      backgroundColor: `${color}14`,
+      border: `1px solid ${color}26`,
+    },
+    badge: {
+      ...styles.badge,
+      backgroundColor: `${color}18`,
+      color,
+    },
+  };
+}
+
+export default function MarketplacePage() {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
+    <motion.main
+      initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
       style={styles.container}
     >
       <header style={styles.header}>
-        <div style={styles.badgeTop}>Fleet Ecosystem</div>
+        <div style={styles.eyebrow}>Fleet ecosystem</div>
         <h1 style={styles.title}>Marketplace</h1>
-        <p style={styles.subtitle}>Everything you need to keep your vehicle on the road</p>
+        <p style={styles.subtitle}>
+          Post repair work, browse live opportunities, and access trusted automotive supplies
+          from one cleaner workspace.
+        </p>
       </header>
 
-      <div style={styles.grid}>
+      <section aria-label="Marketplace modules" style={styles.grid}>
         {marketplaceOptions.map((option) => {
           const Icon = option.icon;
+          const accent = getAccentStyles(option.color);
+
           return (
             <motion.div
               key={option.href}
               whileHover={{ y: -3 }}
-              transition={{ type: 'spring', stiffness: 300 }}
+              transition={{ duration: 0.18 }}
+              style={styles.tileWrap}
             >
-              <Link href={option.href} style={styles.card}>
-                <div style={{ ...styles.iconWrapper, background: `${option.color}15`, border: `1px solid ${option.color}30` }}>
-                  <Icon size={22} style={{ color: option.color }} />
-                </div>
-                <div style={styles.cardContent}>
-                  <div style={styles.cardHeader}>
-                    <h2 style={styles.cardTitle}>{option.title}</h2>
-                    <span style={{ ...styles.badge, background: `${option.color}20`, color: option.color }}>
-                      {option.badge}
-                    </span>
+              <Link
+                href={option.href}
+                style={{
+                  ...styles.card,
+                  ...(option.featured ? styles.featuredCard : {}),
+                }}
+                aria-label={`${option.title} - ${option.description}`}
+              >
+                <div style={styles.cardTop}>
+                  <div style={accent.iconWrapper}>
+                    <Icon size={22} color={option.color} aria-hidden="true" />
                   </div>
+                  <span style={accent.badge}>{option.badge}</span>
+                </div>
+
+                <div style={styles.cardContent}>
+                  <h2 style={styles.cardTitle}>{option.title}</h2>
                   <p style={styles.cardDescription}>{option.description}</p>
                 </div>
+
                 <div style={styles.cardFooter}>
-                  <span style={styles.footerText}>Open Module</span>
-                  <ArrowUpRight size={12} style={styles.footerIcon} />
+                  <span style={styles.footerText}>Open</span>
+                  <ArrowUpRight size={15} style={styles.footerIcon} aria-hidden="true" />
                 </div>
               </Link>
             </motion.div>
           );
         })}
-      </div>
+      </section>
 
-      {/* Stats bar – also made more compact */}
-      <div style={styles.stats}>
-        <div style={styles.statItem}>
-          <span style={styles.statNumber}>500+</span>
-          <span style={styles.statLabel}>Jobs Completed</span>
-        </div>
-        <div style={styles.statDivider} />
-        <div style={styles.statItem}>
-          <span style={styles.statNumber}>150+</span>
-          <span style={styles.statLabel}>Verified Mechanics</span>
-        </div>
-        <div style={styles.statDivider} />
-        <div style={styles.statItem}>
-          <span style={styles.statNumber}>24/7</span>
-          <span style={styles.statLabel}>System Uptime</span>
-        </div>
-      </div>
-    </motion.div>
+      <section aria-label="Marketplace statistics" style={styles.stats}>
+        {stats.map((stat, index) => (
+          <div key={stat.label} style={styles.statBlock}>
+            <div style={styles.statItem}>
+              <span style={styles.statNumber}>{stat.value}</span>
+              <span style={styles.statLabel}>{stat.label}</span>
+            </div>
+            {index < stats.length - 1 ? <div style={styles.statDivider} /> : null}
+          </div>
+        ))}
+      </section>
+    </motion.main>
   );
 }
 
-// ==================== COMPACT STYLES (smaller cards) ====================
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   container: {
-    padding: `${theme.spacing[8]} ${theme.spacing[6]}`,
-    maxWidth: '1200px',
+    padding: '32px 20px 40px',
+    maxWidth: '1100px',
     margin: '0 auto',
     background: theme.colors.background.main,
     minHeight: '100vh',
+    color: theme.colors.text.primary,
   },
   header: {
     textAlign: 'left',
-    marginBottom: theme.spacing[8],
-    paddingLeft: theme.spacing[2],
+    marginBottom: '28px',
   },
-  badgeTop: {
-    fontSize: '10px',
-    fontWeight: '900',
+  eyebrow: {
+    fontSize: '11px',
+    fontWeight: 800,
     textTransform: 'uppercase',
-    letterSpacing: '0.3em',
+    letterSpacing: '0.22em',
     color: theme.colors.text.muted,
-    marginBottom: theme.spacing[1],
+    marginBottom: '8px',
   },
   title: {
-    fontSize: '2.5rem',
-    fontWeight: '800',
+    fontSize: 'clamp(2rem, 4vw, 3rem)',
+    fontWeight: 800,
     letterSpacing: '-0.03em',
-    color: '#fff',
-    marginBottom: theme.spacing[2],
-    lineHeight: 1.2,
+    color: theme.colors.text.primary,
+    margin: '0 0 10px 0',
+    lineHeight: 1.04,
   },
   subtitle: {
-    fontSize: theme.fontSizes.sm,
+    fontSize: '15px',
     color: theme.colors.text.secondary,
-    maxWidth: '500px',
+    maxWidth: '620px',
+    lineHeight: 1.6,
+    margin: 0,
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: theme.spacing[6],
-    marginBottom: theme.spacing[10],
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+    gap: '16px',
+    marginBottom: '24px',
+  },
+  tileWrap: {
+    height: '100%',
   },
   card: {
-    background: 'rgba(15, 23, 42, 0.4)',
-    borderRadius: '1.5rem',
+    background: theme.colors.background.card,
+    borderRadius: theme.borderRadius.xl,
     border: `1px solid ${theme.colors.border.light}`,
-    padding: theme.spacing[5],
+    padding: '18px',
     display: 'flex',
     flexDirection: 'column',
+    justifyContent: 'space-between',
+    minHeight: '206px',
     height: '100%',
     textDecoration: 'none',
-    transition: 'all 0.25s ease',
+    boxShadow: '0 6px 20px rgba(0,0,0,0.05)',
+  },
+  featuredCard: {
+    border: `1px solid ${theme.colors.primary}35`,
+    boxShadow: '0 10px 28px rgba(0,0,0,0.07)',
+  },
+  cardTop: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '12px',
+    marginBottom: '16px',
   },
   iconWrapper: {
-    width: '48px',
-    height: '48px',
-    borderRadius: '1rem',
+    width: '46px',
+    height: '46px',
+    borderRadius: '14px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: theme.spacing[4],
+    flexShrink: 0,
   },
   cardContent: {
     flex: 1,
   },
-  cardHeader: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: theme.spacing[2],
-    marginBottom: theme.spacing[3],
-  },
   cardTitle: {
-    fontSize: theme.fontSizes.xl,
-    fontWeight: '700',
-    color: '#fff',
-    margin: 0,
+    fontSize: '19px',
+    fontWeight: 700,
+    color: theme.colors.text.primary,
+    margin: '0 0 8px 0',
     letterSpacing: '-0.01em',
+    lineHeight: 1.2,
   },
   badge: {
-    fontSize: '8px',
-    padding: '3px 10px',
-    borderRadius: '100px',
-    fontWeight: '800',
+    fontSize: '11px',
+    padding: '6px 10px',
+    borderRadius: 999,
+    fontWeight: 800,
     textTransform: 'uppercase',
-    letterSpacing: '0.08em',
+    letterSpacing: '0.06em',
+    whiteSpace: 'nowrap',
   },
   cardDescription: {
-    fontSize: theme.fontSizes.xs,
+    fontSize: '14px',
     color: theme.colors.text.secondary,
-    lineHeight: 1.5,
+    lineHeight: 1.6,
     margin: 0,
   },
   cardFooter: {
-    marginTop: theme.spacing[5],
-    display: 'flex',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    color: theme.colors.text.muted,
-  },
-  footerText: {
-    fontSize: '10px',
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: '0.08em',
-  },
-  footerIcon: {
-    transition: 'transform 0.2s',
-  },
-  stats: {
+    marginTop: '18px',
+    paddingTop: '14px',
+    borderTop: `1px solid ${theme.colors.border.light}`,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: theme.spacing[5],
-    background: 'rgba(2, 6, 23, 0.5)',
-    borderRadius: '1.5rem',
+    gap: '8px',
+    color: theme.colors.text.muted,
+  },
+  footerText: {
+    fontSize: '12px',
+    fontWeight: 800,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: theme.colors.text.muted,
+  },
+  footerIcon: {
+    color: theme.colors.text.muted,
+    flexShrink: 0,
+  },
+  stats: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: '10px',
+    padding: '16px',
+    background: theme.colors.background.card,
+    borderRadius: theme.borderRadius.xl,
     border: `1px solid ${theme.colors.border.light}`,
+  },
+  statBlock: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
   },
   statItem: {
     flex: 1,
@@ -221,21 +303,22 @@ const styles: Record<string, React.CSSProperties> = {
   },
   statDivider: {
     width: '1px',
-    height: '30px',
+    alignSelf: 'stretch',
     background: theme.colors.border.light,
   },
   statNumber: {
     display: 'block',
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: '800',
+    fontSize: '26px',
+    fontWeight: 800,
     color: theme.colors.primary,
     letterSpacing: '-0.03em',
   },
   statLabel: {
-    fontSize: '9px',
+    display: 'block',
+    fontSize: '11px',
     textTransform: 'uppercase',
     letterSpacing: '0.08em',
     color: theme.colors.text.muted,
-    marginTop: theme.spacing[1],
+    marginTop: '6px',
   },
 };

@@ -1,14 +1,22 @@
-// app/service-history/edit/[id]/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase/client';
 import theme from '@/app/theme';
-import { 
-  AlertCircle, CheckCircle, Loader2, 
-  Wrench, MapPin, Crosshair, Calendar, DollarSign, Gauge, ArrowLeft
+import {
+  AlertCircle,
+  CheckCircle,
+  Loader2,
+  Wrench,
+  MapPin,
+  Crosshair,
+  Calendar,
+  DollarSign,
+  Gauge,
+  ArrowLeft,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -31,12 +39,12 @@ const SERVICE_TYPES = [
   'Wheel Alignment',
   'General Inspection',
   'Custom (write below)',
-];
+] as const;
 
 export default function EditServiceHistoryPage() {
-  const params = useParams();
+  const params = useParams<{ id: string }>();
   const router = useRouter();
-  const id = params?.id as string;
+  const id = typeof params?.id === 'string' ? params.id : '';
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
@@ -48,158 +56,240 @@ export default function EditServiceHistoryPage() {
   const [location, setLocation] = useState('');
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const [detectingLocation, setDetectingLocation] = useState(false);
 
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
   useEffect(() => {
-    if (id) {
-      fetchData();
+    if (!id) {
+      setError('Invalid record id');
+      setInitialLoading(false);
+      return;
     }
+
+    void fetchData();
   }, [id]);
 
   const fetchData = async () => {
     setInitialLoading(true);
+    setError(null);
+
     try {
-      // Fetch vehicles
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
         router.push('/login');
         return;
       }
-      const { data: vehiclesData } = await supabase
+
+      const { data: vehiclesData, error: vehiclesError } = await supabase
         .from('vehicles')
         .select('id, make, model, license_plate')
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .order('make', { ascending: true });
+
+      if (vehiclesError) throw vehiclesError;
       setVehicles(vehiclesData || []);
 
-      // Fetch record to edit
-      const { data: record, error } = await supabase
+      const { data: record, error: recordError } = await supabase
         .from('service_history')
         .select('*')
         .eq('id', id)
-        .single();
-      if (error) throw error;
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (recordError) throw recordError;
+
       if (!record) {
         toast.error('Record not found');
         router.push('/service-history');
         return;
       }
 
-      setSelectedVehicleId(record.vehicle_id);
-      setServiceDate(record.service_date);
-      setMileage(record.mileage.toString());
-      setCost(record.cost?.toString() || '');
-      setLocation(record.location || '');
-      setLat(record.lat);
-      setLng(record.lng);
+      setSelectedVehicleId(record.vehicle_id ?? '');
+      setServiceDate(record.service_date ?? '');
+      setMileage(record.mileage ? String(record.mileage) : '');
+      setCost(record.cost != null ? String(record.cost) : '');
+      setLocation(record.location ?? '');
+      setLat(typeof record.lat === 'number' ? record.lat : null);
+      setLng(typeof record.lng === 'number' ? record.lng : null);
 
-      // Pre‑fill description dropdown
-      const isCustom = !SERVICE_TYPES.includes(record.description);
+      const recordDescription = record.description ?? '';
+      const isCustom = !SERVICE_TYPES.includes(
+        recordDescription as (typeof SERVICE_TYPES)[number]
+      );
+
       if (isCustom) {
         setDescriptionType('Custom (write below)');
-        setCustomDescription(record.description);
+        setCustomDescription(recordDescription);
       } else {
-        setDescriptionType(record.description);
+        setDescriptionType(recordDescription);
         setCustomDescription('');
       }
-    } catch (err: any) {
-      toast.error(err.message);
-      setError(err.message);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to load service record';
+      setError(message);
+      toast.error(message);
     } finally {
       setInitialLoading(false);
     }
   };
 
   const detectLocation = () => {
-    if (!navigator.geolocation) {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
       toast.error('Geolocation is not supported by your browser');
       return;
     }
+
     setDetectingLocation(true);
+
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
         setLat(latitude);
         setLng(longitude);
+
         try {
+          const controller = new AbortController();
+          const timeout = window.setTimeout(() => controller.abort(), 5000);
+
           const geoRes = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
+            {
+              signal: controller.signal,
+              headers: {
+                Accept: 'application/json',
+              },
+            }
           );
+
+          window.clearTimeout(timeout);
+
+          if (!geoRes.ok) {
+            throw new Error('Reverse geocoding failed');
+          }
+
           const geoData = await geoRes.json();
+
           if (geoData.display_name) {
             setLocation(geoData.display_name);
             toast.success('Location detected');
           } else {
-            setLocation(`${latitude}, ${longitude}`);
+            setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
             toast.error('Coordinates captured, but address could not be resolved');
           }
         } catch {
-          setLocation(`${latitude}, ${longitude}`);
+          setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
           toast.error('Coordinates captured, but address could not be resolved');
+        } finally {
+          setDetectingLocation(false);
         }
-        setDetectingLocation(false);
       },
-      (err) => {
-        console.error(err);
+      (geoError) => {
+        console.error(geoError);
         toast.error('Unable to get location. Please allow access.');
         setDetectingLocation(false);
-      }
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
   const getFinalDescription = () => {
-    if (descriptionType === 'Custom (write below)') return customDescription.trim();
-    return descriptionType;
+    if (descriptionType === 'Custom (write below)') {
+      return customDescription.trim();
+    }
+    return descriptionType.trim();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
+
+    const parsedMileage = Number.parseInt(mileage, 10);
+    const parsedCost = cost ? Number.parseFloat(cost) : null;
+    const finalDescription = getFinalDescription();
+    const trimmedLocation = location.trim();
+
+    if (!id) {
+      setError('Invalid record id');
+      return;
+    }
+
     if (!selectedVehicleId) {
       setError('Please select a vehicle');
       return;
     }
+
     if (!serviceDate) {
       setError('Service date is required');
       return;
     }
-    if (!mileage || parseInt(mileage) <= 0) {
+
+    if (!mileage || Number.isNaN(parsedMileage) || parsedMileage <= 0) {
       setError('Valid mileage is required');
       return;
     }
-    const finalDesc = getFinalDescription();
-    if (!finalDesc) {
-      setError('Please select or enter a service description');
+
+    if (cost && (Number.isNaN(parsedCost) || (parsedCost ?? 0) < 0)) {
+      setError('Cost must be a valid positive number');
       return;
     }
+
+    if (!descriptionType) {
+      setError('Please select a service description');
+      return;
+    }
+
+    if (!finalDescription) {
+      setError('Please enter a custom service description');
+      return;
+    }
+
     setLoading(true);
+
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-      const { error } = await supabase
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw new Error('Not authenticated');
+      }
+
+      const { error: updateError } = await supabase
         .from('service_history')
         .update({
           vehicle_id: selectedVehicleId,
           service_date: serviceDate,
-          mileage: parseInt(mileage),
-          description: finalDesc,
-          cost: cost ? parseFloat(cost) : null,
-          location: location.trim() || null,
-          lat: lat,
-          lng: lng,
+          mileage: parsedMileage,
+          description: finalDescription,
+          cost: parsedCost,
+          location: trimmedLocation || null,
+          lat,
+          lng,
         })
         .eq('id', id)
         .eq('user_id', user.id);
-      if (error) throw error;
+
+      if (updateError) throw updateError;
+
       setSuccess(true);
       toast.success('Service record updated!');
-      setTimeout(() => router.push('/service-history'), 1500);
-    } catch (err: any) {
-      setError(err.message);
-      toast.error(err.message);
+      window.setTimeout(() => router.push('/service-history'), 1200);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to update service record';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -208,17 +298,30 @@ export default function EditServiceHistoryPage() {
   if (initialLoading) {
     return (
       <div style={styles.centered}>
-        <Loader2 size={40} className="spin" style={{ color: theme.colors.primary }} />
-        <p>Loading record...</p>
+        <Loader2
+          size={40}
+          className="spin"
+          style={{ color: theme.colors.primary }}
+        />
+        <p style={styles.loadingText}>Loading record...</p>
+        <style>{`
+          .spin { animation: spin 1s linear infinite; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+        `}</style>
       </div>
     );
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={styles.page}>
-      <button onClick={() => router.back()} style={styles.backButton}>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={styles.page}
+    >
+      <button onClick={() => router.back()} style={styles.backButton} type="button">
         <ArrowLeft size={16} /> Back
       </button>
+
       <div style={styles.card}>
         <h1 style={styles.title}>Edit Service Record</h1>
         <p style={styles.subtitle}>Update maintenance details</p>
@@ -234,7 +337,7 @@ export default function EditServiceHistoryPage() {
               disabled={loading || success}
             >
               <option value="">Select a vehicle</option>
-              {vehicles.map(v => (
+              {vehicles.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.make} {v.model} ({v.license_plate})
                 </option>
@@ -242,8 +345,8 @@ export default function EditServiceHistoryPage() {
             </select>
           </div>
 
-          <div style={styles.row}>
-            <div style={{ flex: 1 }}>
+          <div className="service-edit-row" style={styles.row}>
+            <div style={styles.rowCol}>
               <label style={styles.label}>Service Date *</label>
               <div style={styles.inputIconWrapper}>
                 <Calendar size={16} style={styles.inputIcon} />
@@ -254,10 +357,12 @@ export default function EditServiceHistoryPage() {
                   style={styles.inputWithIcon}
                   required
                   disabled={loading || success}
+                  max={new Date().toISOString().split('T')[0]}
                 />
               </div>
             </div>
-            <div style={{ flex: 1 }}>
+
+            <div style={styles.rowCol}>
               <label style={styles.label}>Mileage (mi) *</label>
               <div style={styles.inputIconWrapper}>
                 <Gauge size={16} style={styles.inputIcon} />
@@ -269,6 +374,7 @@ export default function EditServiceHistoryPage() {
                   style={styles.inputWithIcon}
                   required
                   disabled={loading || success}
+                  min="1"
                 />
               </div>
             </div>
@@ -281,15 +387,19 @@ export default function EditServiceHistoryPage() {
               onChange={(e) => setDescriptionType(e.target.value)}
               style={styles.select}
               disabled={loading || success}
+              required
             >
               <option value="">Select service type</option>
-              {SERVICE_TYPES.map(type => (
-                <option key={type} value={type}>{type}</option>
+              {SERVICE_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
               ))}
             </select>
+
             {descriptionType === 'Custom (write below)' && (
               <textarea
-                rows={2}
+                rows={3}
                 placeholder="Describe the service performed..."
                 value={customDescription}
                 onChange={(e) => setCustomDescription(e.target.value)}
@@ -300,14 +410,15 @@ export default function EditServiceHistoryPage() {
             )}
           </div>
 
-          <div style={styles.row}>
-            <div style={{ flex: 1 }}>
+          <div className="service-edit-row" style={styles.row}>
+            <div style={styles.rowCol}>
               <label style={styles.label}>Cost (£) (optional)</label>
               <div style={styles.inputIconWrapper}>
                 <DollarSign size={16} style={styles.inputIcon} />
                 <input
                   type="number"
                   step="0.01"
+                  min="0"
                   placeholder="e.g., 150.00"
                   value={cost}
                   onChange={(e) => setCost(e.target.value)}
@@ -316,10 +427,11 @@ export default function EditServiceHistoryPage() {
                 />
               </div>
             </div>
-            <div style={{ flex: 1 }}>
+
+            <div style={styles.rowCol}>
               <label style={styles.label}>Garage Location</label>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <div style={{ flex: 1, position: 'relative' }}>
+              <div style={styles.locationInputRow}>
+                <div style={styles.locationInputWrap}>
                   <MapPin size={16} style={styles.inputIcon} />
                   <input
                     type="text"
@@ -330,6 +442,7 @@ export default function EditServiceHistoryPage() {
                     disabled={loading || success}
                   />
                 </div>
+
                 <button
                   type="button"
                   onClick={detectLocation}
@@ -337,10 +450,15 @@ export default function EditServiceHistoryPage() {
                   style={styles.locationBtn}
                   title="Use my current location"
                 >
-                  {detectingLocation ? <Loader2 size={18} className="spin" /> : <Crosshair size={18} />}
+                  {detectingLocation ? (
+                    <Loader2 size={18} className="spin" />
+                  ) : (
+                    <Crosshair size={18} />
+                  )}
                 </button>
               </div>
-              {lat && lng && (
+
+              {lat !== null && lng !== null && (
                 <div style={styles.coordsHint}>
                   <MapPin size={12} /> Lat: {lat.toFixed(5)}, Lng: {lng.toFixed(5)}
                 </div>
@@ -349,13 +467,16 @@ export default function EditServiceHistoryPage() {
           </div>
 
           {error && (
-            <div style={styles.errorBox}>
-              <AlertCircle size={16} /> {error}
+            <div style={styles.errorBox} role="alert">
+              <AlertCircle size={16} />
+              <span>{error}</span>
             </div>
           )}
+
           {success && (
             <div style={styles.successBox}>
-              <CheckCircle size={16} /> Record updated! Redirecting...
+              <CheckCircle size={16} />
+              <span>Record updated! Redirecting...</span>
             </div>
           )}
 
@@ -365,16 +486,28 @@ export default function EditServiceHistoryPage() {
           </button>
         </form>
       </div>
+
       <style>{`
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        @media (min-width: 700px) {
+          .service-edit-row {
+            flex-wrap: nowrap;
+          }
+        }
       `}</style>
     </motion.div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  page: { padding: '60px 20px', background: theme.colors.background.main, minHeight: '100vh', color: '#fff' },
+const styles: Record<string, CSSProperties> = {
+  page: {
+    padding: '60px 20px',
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+    color: '#fff',
+  },
   backButton: {
     position: 'fixed',
     top: theme.spacing[5],
@@ -397,12 +530,33 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: theme.borderRadius.xl,
     border: `1px solid ${theme.colors.border.light}`,
     padding: theme.spacing[8],
+    boxShadow: '0 18px 40px rgba(15,23,42,0.35)',
   },
-  title: { fontSize: theme.fontSizes['3xl'], fontWeight: theme.fontWeights.bold, marginBottom: theme.spacing[2] },
-  subtitle: { fontSize: theme.fontSizes.sm, color: theme.colors.text.secondary, marginBottom: theme.spacing[6] },
-  form: { display: 'flex', flexDirection: 'column', gap: theme.spacing[5] },
-  field: { display: 'flex', flexDirection: 'column', gap: theme.spacing[2] },
-  label: { fontSize: theme.fontSizes.sm, fontWeight: 600, color: theme.colors.text.secondary },
+  title: {
+    fontSize: theme.fontSizes['3xl'],
+    fontWeight: theme.fontWeights.bold,
+    marginBottom: theme.spacing[2],
+  },
+  subtitle: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[6],
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[5],
+  },
+  field: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing[2],
+  },
+  label: {
+    fontSize: theme.fontSizes.sm,
+    fontWeight: 600,
+    color: theme.colors.text.secondary,
+  },
   select: {
     width: '100%',
     background: theme.colors.background.subtle,
@@ -412,6 +566,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: theme.colors.text.primary,
     fontSize: theme.fontSizes.base,
     cursor: 'pointer',
+    outline: 'none',
   },
   textarea: {
     width: '100%',
@@ -422,9 +577,21 @@ const styles: Record<string, React.CSSProperties> = {
     color: theme.colors.text.primary,
     fontSize: theme.fontSizes.base,
     resize: 'vertical',
+    outline: 'none',
+    minHeight: '84px',
   },
-  inputIconWrapper: { position: 'relative', width: '100%' },
-  inputIcon: { position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: theme.colors.text.muted },
+  inputIconWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+  inputIcon: {
+    position: 'absolute',
+    left: '12px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    color: theme.colors.text.muted,
+    pointerEvents: 'none',
+  },
   inputWithIcon: {
     width: '100%',
     padding: `${theme.spacing[3]} ${theme.spacing[3]} ${theme.spacing[3]} 36px`,
@@ -446,9 +613,33 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     height: '46px',
+    minWidth: '46px',
   },
-  coordsHint: { fontSize: '10px', color: theme.colors.text.muted, marginTop: theme.spacing[1], display: 'flex', alignItems: 'center', gap: '4px' },
-  row: { display: 'flex', gap: theme.spacing[4], flexWrap: 'wrap' },
+  coordsHint: {
+    fontSize: '10px',
+    color: theme.colors.text.muted,
+    marginTop: theme.spacing[1],
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  row: {
+    display: 'flex',
+    gap: theme.spacing[4],
+    flexWrap: 'wrap',
+  },
+  rowCol: {
+    flex: '1 1 260px',
+  },
+  locationInputRow: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+  },
+  locationInputWrap: {
+    flex: 1,
+    position: 'relative',
+  },
   errorBox: {
     display: 'flex',
     alignItems: 'center',
@@ -486,5 +677,15 @@ const styles: Record<string, React.CSSProperties> = {
     gap: theme.spacing[2],
     marginTop: theme.spacing[2],
   },
-  centered: { minHeight: '80vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' },
+  centered: {
+    minHeight: '80vh',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '16px',
+  },
+  loadingText: {
+    color: theme.colors.text.secondary,
+  },
 };

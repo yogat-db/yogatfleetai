@@ -1,33 +1,17 @@
-import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(
-  { }: { params: Promise<{ plate: string }> }
+  _request: NextRequest,
+  context: { params: Promise<{ plate: string }> }
 ) {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const { plate } = await context.params;
 
-    // Mock enriched data – replace with real DVLA/MOT APIs
-    const mockData = {
-      success: true,
-      dvla: {
-        make: 'NISSAN',
-        model: 'QASHQAI',
-        yearOfManufacture: 2015,
-        fuelType: 'PETROL',
-        engineSize: 1598,
-      },
-      mot: {
-        status: 'Valid',
-        expiryDate: '2024-12-01',
-      },
-    }
-    return NextResponse.json(mockData)
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ success: true, plate });
+  } catch (error) {
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

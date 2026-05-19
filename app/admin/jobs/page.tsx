@@ -1,65 +1,174 @@
-// app/admin/jobs/page.tsx
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import type { Metadata } from 'next';
 import Link from 'next/link';
-import { 
-  Briefcase, Eye, DollarSign,Car, 
-  User, ShieldCheck, Search, Filter, 
-  AlertCircle, CheckCircle2, Clock, 
-} from 'lucide-react';
-import { deleteJob, releasePayment } from './actions';
-import DeleteJobButton from './DeleteJobButton';
+import { AlertCircle, Archive, Clock3, ShieldCheck } from 'lucide-react';
 import theme from '@/app/theme';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import AdminJobsTable from './AdminJobsTable';
 
-export const metadata = {
-  title: 'HQ | Global Operations Registry',
-  description: 'Enterprise-grade administrative job management.',
+export const metadata: Metadata = {
+  title: 'Admin Jobs | Yogat Fleet AI',
+  description: 'Administrative job moderation and cleanup.',
 };
 
-// Helper to format currency
+type SearchParams = Promise<{
+  status?: string;
+  filter?: string;
+}>;
+
+type JobStatus =
+  | 'open'
+  | 'assigned'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled'
+  | 'unknown'
+  | null;
+
+type PaymentStatus = 'pending' | 'released' | 'unpaid' | null;
+
+export type AdminJob = {
+  id: string;
+  title: string | null;
+  created_at: string;
+  budget: number | null;
+  status: JobStatus;
+  payment_status: PaymentStatus;
+  user_id: string;
+  assigned_mechanic_id: string | null;
+  applications_count: number;
+  is_stale: boolean;
+  vehicles: {
+    license_plate: string | null;
+    make: string | null;
+    model: string | null;
+  } | null;
+};
+
+const STALE_DAYS = 14;
+
 const formatCurrency = (amount: number | null) => {
   if (!amount) return '—';
-  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(amount);
+
+  return new Intl.NumberFormat('en-GB', {
+    style: 'currency',
+    currency: 'GBP',
+  }).format(amount);
 };
 
-export default async function AdminJobsPage() {
-  // 1. Fetch jobs with vehicle data
-  const { data: jobs, error: jobsError } = await supabaseAdmin
+function getStaleBeforeIso(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString();
+}
+
+function getApplicationsCount(applications: unknown): number {
+  if (!Array.isArray(applications) || applications.length === 0) return 0;
+
+  const first = applications[0] as { count?: number | string | null } | undefined;
+  const raw = first?.count;
+
+  if (typeof raw === 'number') return raw;
+  if (typeof raw === 'string') return Number(raw) || 0;
+  return 0;
+}
+
+export default async function AdminJobsPage(props: {
+  searchParams: SearchParams;
+}) {
+  const searchParams = await props.searchParams;
+  const statusFilter = searchParams?.status?.trim() || '';
+  const specialFilter = searchParams?.filter?.trim() || '';
+  const staleBefore = getStaleBeforeIso(STALE_DAYS);
+
+  let jobsQuery = supabaseAdmin
     .from('jobs')
-    .select(`*, vehicles (license_plate, make, model)`)
+    .select(
+      `
+        id,
+        title,
+        created_at,
+        budget,
+        status,
+        payment_status,
+        user_id,
+        assigned_mechanic_id,
+        vehicles (license_plate, make, model),
+        applications(count)
+      `
+    )
     .order('created_at', { ascending: false });
+
+  if (statusFilter) {
+    jobsQuery = jobsQuery.eq('status', statusFilter);
+  }
+
+  if (specialFilter === 'stale') {
+    jobsQuery = jobsQuery.eq('status', 'open').lt('created_at', staleBefore);
+  }
+
+  const { data: jobs, error: jobsError } = await jobsQuery;
 
   if (jobsError) {
     return (
       <div style={styles.errorState}>
         <AlertCircle size={48} color={theme.colors.status.critical} />
-        <h2>Data Link Interrupted</h2>
-        <p>{jobsError.message}</p>
+        <h2 style={styles.errorTitle}>Data Link Interrupted</h2>
+        <p style={styles.errorText}>{jobsError.message}</p>
       </div>
     );
   }
 
-  // 2. Get user emails (for display)
-  const { data: userData } = await supabaseAdmin.auth.admin.listUsers();
-  const userEmails = (userData?.users || []).reduce((acc, u) => {
-    acc[u.id] = u.email || 'System Account';
+  const safeJobs: AdminJob[] = (jobs ?? []).map((job: any) => ({
+    id: job.id,
+    title: job.title ?? 'Untitled job',
+    created_at: job.created_at,
+    budget: job.budget ?? null,
+    status: job.status ?? 'unknown',
+    payment_status: job.payment_status ?? 'unpaid',
+    user_id: job.user_id,
+    assigned_mechanic_id: job.assigned_mechanic_id ?? null,
+    applications_count: getApplicationsCount(job.applications),
+    is_stale:
+      job.status === 'open' &&
+      Boolean(job.created_at) &&
+      new Date(job.created_at).getTime() < new Date(staleBefore).getTime(),
+    vehicles: job.vehicles
+      ? {
+          license_plate: job.vehicles.license_plate ?? null,
+          make: job.vehicles.make ?? null,
+          model: job.vehicles.model ?? null,
+        }
+      : null,
+  }));
+
+  const { data: userData, error: usersError } =
+    await supabaseAdmin.auth.admin.listUsers();
+
+  const userEmails = (userData?.users || []).reduce((acc, user) => {
+    acc[user.id] = user.email || 'System Account';
     return acc;
   }, {} as Record<string, string>);
 
-  // 3. Financial summaries
-  const totalInEscrow = jobs
-    ?.filter(j => j.payment_status === 'pending')
-    .reduce((sum, j) => sum + (j.budget || 0), 0) || 0;
+  const totalInEscrow = safeJobs
+    .filter((job) => job.payment_status === 'pending')
+    .reduce((sum, job) => sum + (job.budget || 0), 0);
 
-  const criticalJobs = jobs?.filter(j => j.status === 'open' && j.payment_status === 'pending') || [];
+  const openRequests = safeJobs.filter((job) => job.status === 'open').length;
+  const staleJobs = safeJobs.filter((job) => job.is_stale).length;
+  const assignedJobs = safeJobs.filter((job) => job.status === 'assigned').length;
+
+  const criticalJobs = safeJobs.filter(
+    (job) => job.status === 'open' && job.payment_status === 'pending'
+  );
 
   return (
     <div style={styles.container}>
-      {/* Header */}
       <div style={styles.header}>
         <div>
-          <div style={styles.breadcrumb}>SYSTEM / MARKETPLACE / REGISTRY</div>
-          <h1 style={styles.title}>Operations Control</h1>
+          <div style={styles.breadcrumb}>SYSTEM / MARKETPLACE / JOBS</div>
+          <h1 style={styles.title}>Job Moderation</h1>
         </div>
+
         <div style={styles.statsBar}>
           <div style={styles.statItem}>
             <span style={styles.statLabel}>Funds in Escrow</span>
@@ -67,145 +176,77 @@ export default async function AdminJobsPage() {
           </div>
           <div style={styles.statItem}>
             <span style={styles.statLabel}>Open Requests</span>
-            <span style={styles.statValue}>{jobs?.filter(j => j.status === 'open').length}</span>
+            <span style={styles.statValue}>{openRequests}</span>
+          </div>
+          <div style={styles.statItem}>
+            <span style={{ ...styles.statLabel, color: theme.colors.status.warning }}>
+              Stale Open Jobs
+            </span>
+            <span style={{ ...styles.statValue, color: theme.colors.status.warning }}>
+              {staleJobs}
+            </span>
+          </div>
+          <div style={styles.statItem}>
+            <span style={styles.statLabel}>Assigned</span>
+            <span style={styles.statValue}>{assignedJobs}</span>
           </div>
         </div>
       </div>
 
-      {/* Critical alerts */}
+      <div style={styles.filterBar}>
+        <Link href="/admin/jobs" style={styles.filterLink}>All</Link>
+        <Link href="/admin/jobs?status=open" style={styles.filterLink}>Open</Link>
+        <Link href="/admin/jobs?status=assigned" style={styles.filterLink}>Assigned</Link>
+        <Link href="/admin/jobs?status=cancelled" style={styles.filterLink}>Cancelled</Link>
+        <Link href="/admin/jobs?filter=stale" style={styles.filterLink}>Stale</Link>
+      </div>
+
+      {usersError ? (
+        <section style={styles.infoSection}>
+          <div style={styles.infoHeader}>
+            <AlertCircle size={18} />
+            <span>
+              User directory is temporarily unavailable. Jobs are loaded, but client
+              email mapping may be incomplete.
+            </span>
+          </div>
+        </section>
+      ) : null}
+
       {criticalJobs.length > 0 && (
         <section style={styles.alertSection}>
           <div style={styles.alertHeader}>
             <ShieldCheck size={18} />
-            <span>High Priority: {criticalJobs.length} Payments Awaiting Release</span>
+            <span>
+              High Priority: {criticalJobs.length} open jobs still show pending payment state
+            </span>
           </div>
         </section>
       )}
 
-      {/* Table */}
-      <div style={styles.tableWrapper}>
-        <div style={styles.tableControls}>
-          <div style={styles.searchBox}>
-            <Search size={16} />
-            <input 
-              type="text" 
-              placeholder="Filter by ID, title, or client email..." 
-              id="jobSearchInput"
-              style={styles.searchInput}
-            />
+      {staleJobs > 0 && (
+        <section style={styles.warningSection}>
+          <div style={styles.warningHeader}>
+            <Clock3 size={18} />
+            <span>
+              {staleJobs} open jobs are older than {STALE_DAYS} days and should be reviewed.
+            </span>
           </div>
-          <button style={styles.filterBtn}>
-            <Filter size={16} /> Advanced Filters
-          </button>
-        </div>
+        </section>
+      )}
 
-        <div style={styles.tableResponsive}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}><Briefcase size={14} /> Description</th>
-                <th style={styles.th}>Budget / Status</th>
-                <th style={styles.th}>System Status</th>
-                <th style={styles.th}><User size={14} /> Client</th>
-                <th style={styles.th}><Car size={14} /> Vehicle</th>
-                <th style={styles.th}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs?.map((job) => (
-                <tr key={job.id} style={styles.tr}>
-                  <td style={styles.td}>
-                    <div style={styles.titleInfo}>
-                      <span style={styles.uuid}>#{job.id.slice(0, 8)}</span>
-                      <strong style={styles.jobName}>{job.title}</strong>
-                      <div style={styles.timestamp}>
-                        <Clock size={10} /> {new Date(job.created_at).toLocaleDateString()}
-                      </div>
-                    </div>
-                  </td>
-                  <td style={styles.td}>
-                    <div style={styles.budgetCell}>
-                      <span style={styles.amount}>{formatCurrency(job.budget)}</span>
-                      <span style={{
-                        ...styles.payStatus,
-                        ...(job.payment_status === 'pending' ? styles.payStatusPending :
-                          job.payment_status === 'released' ? styles.payStatusReleased :
-                          styles.payStatusUnpaid)
-                      }}>
-                        {job.payment_status || 'unpaid'}
-                      </span>
-                    </div>
-                  </td>
-                  <td style={styles.td}>
-                    <div style={{
-                      ...styles.statusBadge,
-                      ...(job.status === 'open' ? styles.statusOpen :
-                        job.status === 'in_progress' ? styles.statusInProgress :
-                        job.status === 'completed' ? styles.statusCompleted :
-                        styles.statusCancelled)
-                    }}>
-                      {job.status === 'completed' && <CheckCircle2 size={12} />}
-                      {job.status}
-                    </div>
-                  </td>
-                  <td style={styles.td}>
-                    <div style={styles.clientInfo}>
-                      <span style={styles.email}>{userEmails[job.user_id]}</span>
-                      <span style={styles.userId}>UID: {job.user_id.slice(0, 6)}</span>
-                    </div>
-                  </td>
-                  <td style={styles.td}>
-                    {job.vehicles ? (
-                      <div style={styles.assetBadge}>
-                        <span style={styles.plate}>{job.vehicles.license_plate}</span>
-                        <span style={styles.makeModel}>{job.vehicles.make} {job.vehicles.model}</span>
-                      </div>
-                    ) : (
-                      <span style={styles.noAsset}>Internal/Misc</span>
-                    )}
-                  </td>
-                  <td style={styles.td}>
-                    <div style={styles.actionGrid}>
-                      <Link href={`/marketplace/jobs/${job.id}`} style={styles.iconBtn} title="Audit">
-                        <Eye size={18} />
-                      </Link>
-                      {job.payment_status === 'pending' && (
-                        <form action={releasePayment.bind(null, job.id)}>
-                          <button type="submit" style={{...styles.iconBtn, ...styles.successIcon}} title="Release Funds">
-                            <DollarSign size={18} />
-                          </button>
-                        </form>
-                      )}
-                      <DeleteJobButton jobId={job.id} deleteAction={deleteJob} />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {safeJobs.length === 0 && (
+        <section style={styles.emptySection}>
+          <Archive size={18} />
+          <span>No jobs matched the selected admin filter.</span>
+        </section>
+      )}
 
-      {/* Simple client-side filter script (runs after hydration) */}
-      <script dangerouslySetInnerHTML={{ __html: `
-        document.addEventListener('DOMContentLoaded', function() {
-          const searchInput = document.getElementById('jobSearchInput');
-          if (!searchInput) return;
-          const tableRows = document.querySelectorAll('tbody tr');
-          searchInput.addEventListener('input', function(e) {
-            const term = e.target.value.toLowerCase();
-            tableRows.forEach(row => {
-              const text = row.innerText.toLowerCase();
-              row.style.display = text.includes(term) ? '' : 'none';
-            });
-          });
-        });
-      `}} />
+      <AdminJobsTable jobs={safeJobs} userEmails={userEmails} />
     </div>
   );
 }
 
-// ==================== STYLES (inline, theme‑aware) ====================
 const styles: Record<string, React.CSSProperties> = {
   container: {
     padding: '40px',
@@ -219,9 +260,19 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '16px',
+    gap: '12px',
     minHeight: '60vh',
     textAlign: 'center',
+  },
+  errorTitle: {
+    margin: 0,
+    fontSize: '24px',
+    fontWeight: 800,
+  },
+  errorText: {
+    margin: 0,
+    color: theme.colors.text.muted,
+    maxWidth: '560px',
   },
   header: {
     display: 'flex',
@@ -229,7 +280,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'flex-end',
     flexWrap: 'wrap',
     gap: '24px',
-    marginBottom: '32px',
+    marginBottom: '24px',
   },
   breadcrumb: {
     fontSize: '10px',
@@ -251,6 +302,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: `1px solid ${theme.colors.border.light}`,
     borderRadius: '24px',
     padding: '16px 24px',
+    flexWrap: 'wrap',
   },
   statItem: {
     display: 'flex',
@@ -268,12 +320,28 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     color: theme.colors.primary,
   },
+  filterBar: {
+    display: 'flex',
+    gap: '12px',
+    flexWrap: 'wrap',
+    marginBottom: '24px',
+  },
+  filterLink: {
+    textDecoration: 'none',
+    padding: '10px 14px',
+    borderRadius: '999px',
+    border: `1px solid ${theme.colors.border.light}`,
+    color: theme.colors.text.secondary,
+    background: theme.colors.background.card,
+    fontSize: '13px',
+    fontWeight: 700,
+  },
   alertSection: {
     background: `${theme.colors.status.critical}15`,
     border: `1px solid ${theme.colors.status.critical}`,
     borderRadius: '16px',
     padding: '16px 24px',
-    marginBottom: '32px',
+    marginBottom: '16px',
   },
   alertHeader: {
     display: 'flex',
@@ -282,191 +350,43 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     color: theme.colors.status.critical,
   },
-  tableWrapper: {
-    background: theme.colors.background.card,
-    borderRadius: '20px',
-    border: `1px solid ${theme.colors.border.light}`,
-    overflow: 'hidden',
-  },
-  tableControls: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  warningSection: {
+    background: `${theme.colors.status.warning}15`,
+    border: `1px solid ${theme.colors.status.warning}`,
+    borderRadius: '16px',
     padding: '16px 24px',
-    borderBottom: `1px solid ${theme.colors.border.light}`,
-    flexWrap: 'wrap',
+    marginBottom: '16px',
+  },
+  warningHeader: {
+    display: 'flex',
+    alignItems: 'center',
     gap: '12px',
-  },
-  searchBox: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    background: theme.colors.background.subtle,
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: '40px',
-    padding: '6px 16px',
-  },
-  searchInput: {
-    background: 'transparent',
-    border: 'none',
-    outline: 'none',
-    color: theme.colors.text.primary,
-    fontSize: '14px',
-    minWidth: '240px',
-  },
-  filterBtn: {
-    background: 'transparent',
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: '40px',
-    padding: '6px 16px',
-    color: theme.colors.text.secondary,
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  tableResponsive: {
-    overflowX: 'auto',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-  },
-  th: {
-    textAlign: 'left',
-    padding: '16px 20px',
-    fontSize: '11px',
-    fontWeight: 800,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    color: theme.colors.text.muted,
-    borderBottom: `1px solid ${theme.colors.border.light}`,
-  },
-  tr: {
-    borderBottom: `1px solid ${theme.colors.border.light}`,
-  },
-  td: {
-    padding: '16px 20px',
-    verticalAlign: 'middle',
-  },
-  titleInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  uuid: {
-    fontSize: '12px',
-    fontFamily: theme.fontFamilies.mono,
-    color: theme.colors.text.muted,
-  },
-  jobName: {
     fontWeight: 700,
-    fontSize: '15px',
-  },
-  timestamp: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    fontSize: '11px',
-    color: theme.colors.text.muted,
-  },
-  budgetCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  amount: {
-    fontSize: '16px',
-    fontWeight: 800,
-    color: theme.colors.text.primary,
-  },
-  payStatus: {
-    fontSize: '10px',
-    fontWeight: 800,
-    textTransform: 'uppercase',
-    padding: '2px 8px',
-    borderRadius: '20px',
-    width: 'fit-content',
-  },
-  payStatusPending: {
-    background: `${theme.colors.status.warning}20`,
     color: theme.colors.status.warning,
   },
-  payStatusReleased: {
-    background: `${theme.colors.primary}20`,
-    color: theme.colors.primary,
+  infoSection: {
+    background: `${theme.colors.status.info}12`,
+    border: `1px solid ${theme.colors.status.info}50`,
+    borderRadius: '16px',
+    padding: '16px 24px',
+    marginBottom: '16px',
   },
-  payStatusUnpaid: {
-    background: `${theme.colors.status.critical}20`,
-    color: theme.colors.status.critical,
-  },
-  statusBadge: {
-    display: 'inline-flex',
+  infoHeader: {
+    display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    padding: '4px 10px',
-    borderRadius: '20px',
-    fontSize: '11px',
-    fontWeight: 700,
-    width: 'fit-content',
+    gap: '12px',
+    fontWeight: 600,
+    color: theme.colors.status.info,
   },
-  statusOpen: { background: `${theme.colors.primary}20`, color: theme.colors.primary },
-  statusInProgress: { background: `${theme.colors.status.info}20`, color: theme.colors.status.info },
-  statusCompleted: { background: `${theme.colors.status.healthy}20`, color: theme.colors.status.healthy },
-  statusCancelled: { background: `${theme.colors.status.critical}20`, color: theme.colors.status.critical },
-  clientInfo: {
+  emptySection: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  email: {
-    fontSize: '13px',
-    fontWeight: 500,
-  },
-  userId: {
-    fontSize: '10px',
-    fontFamily: theme.fontFamilies.mono,
-    color: theme.colors.text.muted,
-  },
-  assetBadge: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  plate: {
-    fontWeight: 700,
-    fontSize: '12px',
-    fontFamily: theme.fontFamilies.mono,
-  },
-  makeModel: {
-    fontSize: '11px',
-    color: theme.colors.text.muted,
-  },
-  noAsset: {
-    fontSize: '11px',
-    color: theme.colors.text.muted,
-    fontStyle: 'italic',
-  },
-  actionGrid: {
-    display: 'flex',
-    gap: '8px',
-  },
-  iconBtn: {
-    display: 'inline-flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    background: 'transparent',
-    border: `1px solid ${theme.colors.border.medium}`,
-    borderRadius: '8px',
-    padding: '6px',
-    cursor: 'pointer',
+    gap: '12px',
+    borderRadius: '16px',
+    padding: '16px 24px',
+    marginBottom: '16px',
+    background: theme.colors.background.card,
+    border: `1px solid ${theme.colors.border.light}`,
     color: theme.colors.text.secondary,
-    transition: 'all 0.2s',
-  },
-  successIcon: {
-    color: theme.colors.primary,
-    borderColor: `${theme.colors.primary}40`,
   },
 };

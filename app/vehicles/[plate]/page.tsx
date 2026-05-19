@@ -1,152 +1,556 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Calendar,
+  Edit,
+  Loader2,
+  Trash2,
+  Wrench,
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { Edit, ArrowLeft, Calendar, Wrench, Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import theme from '@/app/theme';
 import toast from 'react-hot-toast';
 
-export default function VehicleDetailPage() {
-  const params = useParams();
-  const router = useRouter();
-  const plate = params.plate as string;
+type Vehicle = {
+  id: string;
+  license_plate: string;
+  make: string;
+  model: string;
+  year: number | null;
+  mileage: number | null;
+  status: string | null;
+  health_score: number | null;
+  vin?: string | null;
+  fuel_type?: string | null;
+  engine_capacity?: number | null;
+  mot_expiry: string | null;
+  mot_status: 'valid' | 'expired' | 'unknown' | null;
+};
 
-  const [vehicle, setVehicle] = useState<any>(null);
+type MotState = {
+  expiry: string | null;
+  status: 'valid' | 'expired' | 'unknown' | null;
+};
+
+export default function VehicleDetailPage() {
+  const params = useParams<{ plate: string | string[] }>();
+  const router = useRouter();
+  const plateParam = Array.isArray(params.plate) ? params.plate[0] : params.plate;
+  const plate = plateParam?.toUpperCase() ?? '';
+
+  const [vehicle, setVehicle] = useState<Vehicle | null>(null);
+  const [motStatus, setMotStatus] = useState<MotState>({
+    expiry: null,
+    status: 'unknown',
+  });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [motStatus, setMotStatus] = useState<{ expiry: string | null; status: string | null }>({ expiry: null, status: null });
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!plate) return;
-    fetchVehicle();
+    void fetchVehicle();
   }, [plate]);
 
   const fetchVehicle = async () => {
     try {
       setLoading(true);
+      setError(null);
+
       const { data, error } = await supabase
         .from('vehicles')
-        .select('*')
-        .eq('license_plate', plate.toUpperCase())
-        .single();
+        .select(
+          'id, license_plate, make, model, year, mileage, status, health_score, vin, fuel_type, engine_capacity, mot_expiry, mot_status'
+        )
+        .eq('license_plate', plate)
+        .maybeSingle();
 
       if (error) throw error;
-      setVehicle(data);
-      setMotStatus({ expiry: data.mot_expiry, status: data.mot_status });
-    } catch (err: any) {
-      setError(err.message);
+
+      if (!data) {
+        setError('Vehicle not found');
+        setVehicle(null);
+        return;
+      }
+
+      setVehicle(data as Vehicle);
+      setMotStatus({
+        expiry: data.mot_expiry,
+        status: data.mot_status ?? 'unknown',
+      });
+    } catch (err) {
+      console.error('Fetch vehicle error:', err);
+      setError('Unable to load vehicle details. Please try again.');
+      setVehicle(null);
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm('Delete this vehicle permanently?')) return;
+    if (!vehicle || deleting) return;
+
+    const confirmed = window.confirm(
+      `Delete ${vehicle.license_plate} and its related data?`
+    );
+
+    if (!confirmed) return;
+
     setDeleting(true);
+
     try {
-      const res = await fetch(`/api/vehicles/${encodeURIComponent(plate)}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await res.text());
+      const res = await fetch(
+        `/api/vehicles/${encodeURIComponent(vehicle.id)}`,
+        { method: 'DELETE' }
+      );
+
+      const body = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(body?.error || 'Failed to delete vehicle');
+      }
+
       toast.success('Vehicle deleted');
       router.push('/vehicles');
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
+      router.refresh();
+    } catch (err) {
+      console.error('Delete vehicle error:', err);
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to delete vehicle'
+      );
       setDeleting(false);
     }
   };
 
   const handleMOTCheck = () => {
-    window.open(`https://www.gov.uk/check-mot-history?registration=${plate}`, '_blank');
+    if (!plate) return;
+
+    window.open(
+      `https://www.gov.uk/check-mot-history?registration=${encodeURIComponent(plate)}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
   };
 
-  const displayValue = (value: any, fallback = '—') => (value !== null && value !== undefined && value !== '' ? String(value) : fallback);
+  const displayValue = (value: unknown, fallback = '—') =>
+    value !== null && value !== undefined && value !== ''
+      ? String(value)
+      : fallback;
 
-  if (loading) return <LoadingView />;
-  if (error || !vehicle) return <ErrorView error={error} onBack={() => router.back()} />;
+  const motComputed = useMemo(() => {
+    if (!motStatus.expiry) {
+      return {
+        hasMOT: false,
+        isExpired: false,
+        daysLeft: null as number | null,
+        label: 'MOT status unknown',
+      };
+    }
 
-  const motExpiry = motStatus.expiry ? new Date(motStatus.expiry) : null;
-  const isMOTExpired = motExpiry && motExpiry < new Date();
-  const daysLeft = motExpiry ? Math.ceil((motExpiry.getTime() - Date.now()) / (1000 * 3600 * 24)) : null;
+    const expiry = new Date(motStatus.expiry);
+    const now = new Date();
+    const isExpired = expiry < now;
+    const daysLeft = Math.ceil(
+      (expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    return {
+      hasMOT: true,
+      isExpired,
+      daysLeft,
+      label: isExpired
+        ? 'MOT expired'
+        : `MOT valid until ${expiry.toLocaleDateString()}`,
+    };
+  }, [motStatus.expiry]);
+
+  if (loading) {
+    return <LoadingView />;
+  }
+
+  if (!vehicle || error) {
+    return (
+      <ErrorView
+        message={error ?? 'Vehicle not found'}
+        onBack={() => router.back()}
+      />
+    );
+  }
 
   return (
-    <div style={styles.container}>
-      <button onClick={() => router.back()} style={styles.backButton}>
-        <ArrowLeft size={16} /> Back
+    <main style={styles.container}>
+      <button
+        type="button"
+        onClick={() => router.back()}
+        style={styles.backButton}
+      >
+        <ArrowLeft size={14} />
+        <span>Back to fleet</span>
       </button>
 
-      <div style={styles.card}>
-        <h1 style={styles.title}>{displayValue(vehicle.make)} {displayValue(vehicle.model)}</h1>
-        <p style={styles.plate}>{vehicle.license_plate}</p>
-
-        <div style={styles.detailsGrid}>
-          <div><strong>Year:</strong> {displayValue(vehicle.year)}</div>
-          <div><strong>Mileage:</strong> {displayValue(vehicle.mileage?.toLocaleString())} mi</div>
-          <div><strong>Health:</strong> {displayValue(vehicle.health_score)}%</div>
-          <div><strong>Status:</strong> {displayValue(vehicle.status, 'Active')}</div>
-          {vehicle.vin && <div><strong>VIN:</strong> {vehicle.vin}</div>}
-          {vehicle.fuel_type && <div><strong>Fuel:</strong> {vehicle.fuel_type}</div>}
-          {vehicle.engine_capacity && <div><strong>Engine:</strong> {vehicle.engine_capacity} cc</div>}
-        </div>
-
-        {/* MOT Reminder Card */}
-        {motStatus.expiry && (
-          <div style={{ ...styles.motCard, background: isMOTExpired ? '#ef444420' : '#f59e0b20', borderColor: isMOTExpired ? '#ef4444' : '#f59e0b' }}>
-            <AlertTriangle size={20} color={isMOTExpired ? '#ef4444' : '#f59e0b'} />
-            <div>
-              <strong>MOT Status:</strong> {isMOTExpired ? 'Expired' : `Valid until ${motExpiry?.toLocaleDateString()}`}
-              {!isMOTExpired && daysLeft !== null && daysLeft <= 30 && <span style={{ color: '#f59e0b' }}> (Renew soon!)</span>}
-            </div>
-            <button onClick={handleMOTCheck} style={styles.motButton}>Check MOT History →</button>
+      <section style={styles.card} aria-label="Vehicle details">
+        <header style={styles.headerRow}>
+          <div>
+            <h1 style={styles.title}>
+              {displayValue(vehicle.make)} {displayValue(vehicle.model)}
+            </h1>
+            <p style={styles.plate}>{vehicle.license_plate}</p>
           </div>
+          <span style={styles.statusPill}>
+            {displayValue(vehicle.status ?? 'Active')}
+          </span>
+        </header>
+
+        <section aria-label="Specification" style={styles.detailsGrid}>
+          <DetailItem label="Year" value={displayValue(vehicle.year)} />
+          <DetailItem
+            label="Mileage"
+            value={
+              vehicle.mileage != null
+                ? `${vehicle.mileage.toLocaleString()} mi`
+                : '—'
+            }
+          />
+          <DetailItem
+            label="Health score"
+            value={
+              vehicle.health_score != null ? `${vehicle.health_score}%` : '—'
+            }
+          />
+          <DetailItem label="VIN" value={displayValue(vehicle.vin)} />
+          <DetailItem label="Fuel" value={displayValue(vehicle.fuel_type)} />
+          <DetailItem
+            label="Engine"
+            value={
+              vehicle.engine_capacity != null
+                ? `${vehicle.engine_capacity} cc`
+                : '—'
+            }
+          />
+        </section>
+
+        {motComputed.hasMOT && (
+          <section
+            aria-label="MOT status"
+            style={{
+              ...styles.motCard,
+              backgroundColor: motComputed.isExpired ? '#fee2e2' : '#fef3c7',
+              borderColor: motComputed.isExpired ? '#ef4444' : '#f59e0b',
+            }}
+          >
+            <AlertTriangle
+              size={18}
+              color={motComputed.isExpired ? '#b91c1c' : '#b45309'}
+            />
+            <div style={styles.motText}>
+              <p style={styles.motLabel}>{motComputed.label}</p>
+              {!motComputed.isExpired &&
+                motComputed.daysLeft !== null &&
+                motComputed.daysLeft <= 30 && (
+                  <p style={styles.motHint}>
+                    Due in {motComputed.daysLeft} days – plan a booking.
+                  </p>
+                )}
+            </div>
+            <button
+              type="button"
+              onClick={handleMOTCheck}
+              style={styles.motButton}
+            >
+              Check MOT history
+            </button>
+          </section>
         )}
 
-        <div style={styles.actions}>
-          <Link href={`/vehicles/edit/${vehicle.id}`} style={styles.editButton}><Edit size={16} /> Edit</Link>
-          <button onClick={handleDelete} disabled={deleting} style={styles.deleteButton}>
-            {deleting ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />}
-            {deleting ? ' Deleting...' : ' Delete'}
+        <section aria-label="Actions" style={styles.actions}>
+          <Link
+            href={`/vehicles/edit/${vehicle.id}`}
+            style={styles.primaryButton}
+          >
+            <Edit size={14} />
+            <span>Edit vehicle</span>
+          </Link>
+
+          <Link
+            href={`/service-history/add?vehicleId=${vehicle.id}`}
+            style={styles.secondaryButton}
+          >
+            <Calendar size={14} />
+            <span>Log service</span>
+          </Link>
+
+          <Link
+            href={`/diagnostics?vehicleId=${vehicle.id}`}
+            style={styles.secondaryButton}
+          >
+            <Wrench size={14} />
+            <span>Diagnostics</span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting}
+            style={styles.dangerButton}
+          >
+            {deleting ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+            <span>{deleting ? 'Deleting…' : 'Delete vehicle'}</span>
           </button>
-          <Link href={`/service-history/add?vehicleId=${vehicle.id}`} style={styles.serviceButton}>
-            <Calendar size={16} /> Log Service
-          </Link>
-          <Link href={`/diagnostics?vehicleId=${vehicle.id}`} style={styles.diagnosticsButton}>
-            <Wrench size={16} /> Diagnostics
-          </Link>
-        </div>
-      </div>
+        </section>
+      </section>
+
+      <style>{`
+        .spin {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </main>
+  );
+}
+
+function DetailItem({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div>
+      <p style={styles.detailLabel}>{label}</p>
+      <p style={styles.detailValue}>{value}</p>
     </div>
   );
 }
 
-const LoadingView = () => (
-  <div style={{ padding: '60px', textAlign: 'center' }}>
-    <Loader2 size={32} className="spin" />
-    <style>{`.spin { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
-  </div>
-);
+function LoadingView() {
+  return (
+    <main style={styles.loadingContainer}>
+      <Loader2 size={30} className="spin" />
+      <p style={styles.loadingLabel}>Loading vehicle…</p>
+      <style>{`
+        .spin {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </main>
+  );
+}
 
-const ErrorView = ({ error, onBack }: { error?: string | null; onBack: () => void }) => (
-  <div style={{ padding: '60px', textAlign: 'center' }}>
-    <p style={{ color: '#ef4444' }}>{error || 'Vehicle not found'}</p>
-    <button onClick={onBack} style={{ marginTop: 16, padding: '8px 16px', background: '#3b82f6', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Go Back</button>
-  </div>
-);
+function ErrorView({
+  message,
+  onBack,
+}: {
+  message: string;
+  onBack: () => void;
+}) {
+  return (
+    <main style={styles.loadingContainer}>
+      <p style={styles.errorText}>{message}</p>
+      <button
+        type="button"
+        onClick={onBack}
+        style={styles.errorBackButton}
+      >
+        <ArrowLeft size={14} />
+        <span>Go back</span>
+      </button>
+    </main>
+  );
+}
 
-const styles: Record<string, React.CSSProperties> = {
-  container: { padding: theme.spacing[10], background: theme.colors.background.main, minHeight: '100vh', color: theme.colors.text.primary, fontFamily: theme.fontFamilies.sans },
-  backButton: { display: 'inline-flex', alignItems: 'center', gap: theme.spacing[2], marginBottom: theme.spacing[6], color: theme.colors.text.secondary, background: 'transparent', border: `1px solid ${theme.colors.border.medium}`, borderRadius: theme.borderRadius.lg, padding: `${theme.spacing[1]} ${theme.spacing[4]}`, cursor: 'pointer' },
-  card: { background: theme.colors.background.card, borderRadius: theme.borderRadius.xl, border: `1px solid ${theme.colors.border.light}`, padding: theme.spacing[8] },
-  title: { fontSize: theme.fontSizes['3xl'], fontWeight: theme.fontWeights.bold, marginBottom: theme.spacing[2] },
-  plate: { fontSize: theme.fontSizes.lg, color: theme.colors.text.secondary, marginBottom: theme.spacing[6] },
-  detailsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: theme.spacing[4], marginBottom: theme.spacing[8] },
-  motCard: { display: 'flex', alignItems: 'center', gap: theme.spacing[3], padding: theme.spacing[4], borderRadius: theme.borderRadius.lg, border: '1px solid', marginBottom: theme.spacing[6], flexWrap: 'wrap' },
-  motButton: { marginLeft: 'auto', background: 'transparent', border: 'none', color: theme.colors.primary, cursor: 'pointer', textDecoration: 'underline' },
-  actions: { display: 'flex', flexWrap: 'wrap', gap: theme.spacing[4], marginTop: theme.spacing[4] },
-  editButton: { display: 'inline-flex', alignItems: 'center', gap: theme.spacing[2], background: theme.colors.primary, color: theme.colors.background.main, padding: `${theme.spacing[2]} ${theme.spacing[4]}`, borderRadius: theme.borderRadius.lg, textDecoration: 'none', fontSize: theme.fontSizes.sm, fontWeight: theme.fontWeights.medium },
-  deleteButton: { display: 'inline-flex', alignItems: 'center', gap: theme.spacing[2], background: 'transparent', border: `1px solid ${theme.colors.status.critical}`, color: theme.colors.status.critical, padding: `${theme.spacing[2]} ${theme.spacing[4]}`, borderRadius: theme.borderRadius.lg, fontSize: theme.fontSizes.sm, fontWeight: theme.fontWeights.medium, cursor: 'pointer' },
-  serviceButton: { display: 'inline-flex', alignItems: 'center', gap: theme.spacing[2], background: theme.colors.status.info, color: '#fff', padding: `${theme.spacing[2]} ${theme.spacing[4]}`, borderRadius: theme.borderRadius.lg, textDecoration: 'none', fontSize: theme.fontSizes.sm, fontWeight: theme.fontWeights.medium },
-  diagnosticsButton: { display: 'inline-flex', alignItems: 'center', gap: theme.spacing[2], background: theme.colors.status.warning, color: '#020617', padding: `${theme.spacing[2]} ${theme.spacing[4]}`, borderRadius: theme.borderRadius.lg, textDecoration: 'none', fontSize: theme.fontSizes.sm, fontWeight: theme.fontWeights.medium },
+const styles: Record<string, CSSProperties> = {
+  container: {
+    padding: '24px 32px',
+    background: theme.colors.background.main,
+    minHeight: '100vh',
+    color: theme.colors.text.primary,
+    maxWidth: 960,
+    marginInline: 'auto',
+  },
+  backButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 16,
+    padding: '6px 10px',
+    borderRadius: 999,
+    border: `1px solid ${theme.colors.border.medium}`,
+    background: 'transparent',
+    color: theme.colors.text.secondary,
+    fontSize: 13,
+    cursor: 'pointer',
+  },
+  card: {
+    background: theme.colors.background.card,
+    borderRadius: 16,
+    border: `1px solid ${theme.colors.border.light}`,
+    padding: 20,
+  },
+  headerRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 20,
+    flexWrap: 'wrap',
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: 600,
+    letterSpacing: '-0.03em',
+    margin: 0,
+  },
+  plate: {
+    marginTop: 4,
+    fontSize: 14,
+    color: theme.colors.text.secondary,
+  },
+  statusPill: {
+    alignSelf: 'flex-start',
+    padding: '4px 10px',
+    borderRadius: 999,
+    border: `1px solid ${theme.colors.border.light}`,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: theme.colors.text.secondary,
+  },
+  detailsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+    gap: 12,
+    marginBottom: 20,
+  },
+  detailLabel: {
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: theme.colors.text.muted,
+    marginBottom: 2,
+  },
+  detailValue: {
+    fontSize: 14,
+    fontWeight: 500,
+    margin: 0,
+  },
+  motCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    border: '1px solid',
+    marginBottom: 20,
+    flexWrap: 'wrap',
+  },
+  motText: {
+    flex: 1,
+    minWidth: 180,
+  },
+  motLabel: {
+    fontSize: 13,
+    fontWeight: 500,
+    margin: 0,
+  },
+  motHint: {
+    marginTop: 2,
+    fontSize: 12,
+    color: theme.colors.text.secondary,
+    marginBottom: 0,
+  },
+  motButton: {
+    borderRadius: 999,
+    border: `1px solid ${theme.colors.border.light}`,
+    padding: '6px 10px',
+    fontSize: 12,
+    background: theme.colors.background.main,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  actions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  primaryButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 12px',
+    borderRadius: 999,
+    border: 'none',
+    background: theme.colors.primary,
+    color: theme.colors.background.main,
+    fontSize: 13,
+    fontWeight: 500,
+    textDecoration: 'none',
+  },
+  secondaryButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 12px',
+    borderRadius: 999,
+    border: `1px solid ${theme.colors.border.light}`,
+    background: theme.colors.background.main,
+    color: theme.colors.text.primary,
+    fontSize: 13,
+    fontWeight: 500,
+    textDecoration: 'none',
+  },
+  dangerButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 12px',
+    borderRadius: 999,
+    border: `1px solid ${theme.colors.status.critical}`,
+    background: 'transparent',
+    color: theme.colors.status.critical,
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: 'pointer',
+  },
+  loadingContainer: {
+    minHeight: '70vh',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  loadingLabel: {
+    fontSize: 12,
+    color: theme.colors.text.secondary,
+    margin: 0,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#b91c1c',
+    marginBottom: 12,
+  },
+  errorBackButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 12px',
+    borderRadius: 999,
+    border: `1px solid ${theme.colors.border.light}`,
+    background: theme.colors.background.main,
+    cursor: 'pointer',
+    fontSize: 13,
+  },
 };

@@ -1,113 +1,193 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { stripe } from '@/lib/stripe/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
+type RouteContext = {
+  params: Promise<{ jobId: string }>;
+};
+
+function jsonError(message: string, status: number, extra?: Record<string, unknown>) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: message,
+      ...(extra ?? {}),
+    },
+    { status }
+  );
+}
+
 /**
  * COMPLETION & PAYMENT CAPTURE ROUTE
- * Triggers when the owner confirms the job is done.
+ * Triggered when the job owner confirms the work is complete.
  */
-
-export async function POST(
-  { params }: { params: Promise<{ jobId: string }> }
-) {
+export async function POST(_req: NextRequest, { params }: RouteContext) {
   try {
     const { jobId } = await params;
+
+    if (!jobId?.trim()) {
+      return jsonError('Missing job ID', 400);
+    }
+
     const cookieStore = await cookies();
 
-    // 1. Create Mac-Safe Supabase Client
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
-          getAll() { return cookieStore.getAll() },
+          getAll() {
+            return cookieStore.getAll();
+          },
           setAll(cookiesToSet: { name: any; value: any; options: any; }[]) {
             try {
-              cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, { ...options })
-              );
-            } catch { /* SSR Safe */ }
+              cookiesToSet.forEach(({ name, value, options }) => {
+                cookieStore.set(name, value, options);
+              });
+            } catch {
+              // Safe in server contexts where cookie writes are not allowed
+            }
           },
         },
         global: {
-          fetch: (url: string | URL | Request, options: RequestInit | undefined) => {
-            return fetch(url, {
+          fetch: (url: string | Request | URL, options: RequestInit | undefined) =>
+            fetch(url, {
               ...options,
               headers: {
                 ...options?.headers,
-                'Accept-Encoding': 'identity', // Prevents libcurl build-time errors on Mac
+                'Accept-Encoding': 'identity',
               },
-            });
-          },
+            }),
         },
       }
     );
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    // 2. Verify job ownership and payment state
+    if (authError || !user) {
+      console.error('[POST /api/jobs/:jobId/complete] auth error:', authError);
+      return jsonError('Unauthorized', 401);
+    }
+
     const { data: job, error: jobErr } = await supabase
       .from('jobs')
-      .select('user_id, payment_intent_id, payment_status, assigned_mechanic_id, title')
+      .select('id, user_id, payment_intent_id, payment_status, title, status')
       .eq('id', jobId)
-      .single();
+      .maybeSingle();
 
-    if (jobErr || !job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-    if (job.user_id !== user.id) return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
-    
-    // Check if there is actually a payment intent to capture
+    if (jobErr) {
+      console.error('[POST /api/jobs/:jobId/complete] job fetch error:', jobErr);
+      return jsonError('Failed to load job', 500, {
+        code: jobErr.code,
+        details: jobErr.details,
+        hint: jobErr.hint,
+      });
+    }
+
+    if (!job) {
+      return jsonError('Job not found', 404);
+    }
+
+    if (job.user_id !== user.id) {
+      return jsonError('Not authorized', 403);
+    }
+
     if (!job.payment_intent_id) {
-      return NextResponse.json({ error: 'No payment record found for this job' }, { status: 400 });
+      return jsonError('No payment record found for this job', 400);
     }
-    
+
     if (job.payment_status === 'captured') {
-      return NextResponse.json({ error: 'Payment already processed' }, { status: 400 });
+      return jsonError('Payment already processed', 400);
     }
 
-    // 3. Capture the Stripe Payment
+    if (job.status === 'completed') {
+      return jsonError('Job already marked as completed', 400);
+    }
+
     try {
-      await stripe.paymentIntents.capture(job.payment_intent_id);
-    } catch (stripeErr: any) {
-      console.error('Stripe Capture Error:', stripeErr.message);
-      return NextResponse.json({ error: 'Payment capture failed' }, { status: 500 });
+      await stripe.paymentIntents.capture(job.payment_intent_id, {}, {
+        idempotencyKey: `capture-job-${jobId}`,
+      });
+    } catch (stripeErr) {
+      console.error('[POST /api/jobs/:jobId/complete] Stripe capture error:', stripeErr);
+      return jsonError('Payment capture failed', 500);
     }
 
-    // 4. Update job and payment status
+    const completedAt = new Date().toISOString();
+
     const { error: updateError } = await supabase
       .from('jobs')
-      .update({ 
-        payment_status: 'captured', 
+      .update({
+        payment_status: 'captured',
         status: 'completed',
-        completed_at: new Date().toISOString() 
+        completed_at: completedAt,
       })
       .eq('id', jobId);
 
     if (updateError) {
-      console.error('DB Update Error after capture:', updateError.message);
-      // Note: Payment is captured, but DB update failed. This needs manual sync or a webhook.
+      console.error('[POST /api/jobs/:jobId/complete] DB update error after capture:', updateError);
+      return jsonError(
+        'Payment captured, but job status update failed. Manual reconciliation required.',
+        500,
+        {
+          code: updateError.code,
+          details: updateError.details,
+          hint: updateError.hint,
+        }
+      );
     }
 
-    // 5. Notify the Mechanic (Safe against schema errors)
-    if (job.assigned_mechanic_id) {
-      try {
-        await supabase.from('notifications').insert({
-          user_id: job.assigned_mechanic_id,
+    // Find accepted application instead of using removed/missing assigned_mechanic_id
+    const { data: acceptedApplication, error: applicationError } = await supabase
+      .from('applications')
+      .select('mechanic_id')
+      .eq('job_id', jobId)
+      .eq('status', 'accepted')
+      .maybeSingle();
+
+    if (applicationError) {
+      console.warn(
+        '[POST /api/jobs/:jobId/complete] accepted application lookup failed:',
+        applicationError
+      );
+    }
+
+    if (acceptedApplication?.mechanic_id) {
+      const { error: notificationError } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: acceptedApplication.mechanic_id,
           type: 'payment_received',
           title: 'Job Completed & Paid!',
           body: `Payment for "${job.title}" has been released.`,
-          metadata: { job_id: jobId }
+          metadata: { job_id: jobId },
         });
-      } catch (notifErr) {
-        console.warn('Completion successful, but notification failed:', notifErr);
+
+      if (notificationError) {
+        console.warn(
+          '[POST /api/jobs/:jobId/complete] notification failed:',
+          notificationError
+        );
       }
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      jobId,
+      payment_status: 'captured',
+      status: 'completed',
+      completed_at: completedAt,
+    });
+  } catch (err) {
+    console.error('[POST /api/jobs/:jobId/complete] critical error:', err);
 
-  } catch (err: any) {
-    console.error('CRITICAL_COMPLETION_ERROR:', err.message);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonError(
+      err instanceof Error ? err.message : 'Internal server error',
+      500
+    );
   }
 }

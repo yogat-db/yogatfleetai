@@ -1,41 +1,115 @@
-// app/admin/dashboard/page.tsx
-import { supabaseAdmin } from '@/lib/supabase/admin';
 import Link from 'next/link';
-import { Briefcase, Users, UserCog, ArrowRight, AlertCircle, TrendingUp } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowRight,
+  Briefcase,
+  TrendingUp,
+  UserCog,
+  Users,
+  ShieldAlert,
+  Clock3,
+} from 'lucide-react';
 import theme from '@/app/theme';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { requireAdmin } from '@/lib/admin-auth';
 
 export const metadata = {
   title: 'Admin Command Center | Yogat Fleet AI',
   description: 'Global platform overview and management.',
 };
 
+const STALE_DAYS = 14;
+
+function daysAgoIso(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString();
+}
+
 export default async function AdminDashboardPage() {
-  // Concurrent fetching with fail-safes
+  await requireAdmin();
+
+  const staleBefore = daysAgoIso(STALE_DAYS);
+
   const results = await Promise.allSettled([
     supabaseAdmin.from('jobs').select('*', { count: 'exact', head: true }),
+    supabaseAdmin.from('jobs').select('*', { count: 'exact', head: true }).eq('status', 'open'),
+    supabaseAdmin
+      .from('jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'open')
+      .lt('created_at', staleBefore),
+    supabaseAdmin.from('jobs').select('*', { count: 'exact', head: true }).eq('status', 'assigned'),
+    supabaseAdmin.from('jobs').select('*', { count: 'exact', head: true }).eq('status', 'cancelled'),
     supabaseAdmin.from('mechanics').select('*', { count: 'exact', head: true }),
-    supabaseAdmin.auth.admin.listUsers()
+    supabaseAdmin.auth.admin.listUsers(),
   ]);
 
-  const jobsCount = results[0].status === 'fulfilled' ? (results[0].value as any).count || 0 : 0;
-  const mechanicsCount = results[1].status === 'fulfilled' ? (results[1].value as any).count || 0 : 0;
-  const usersCount = results[2].status === 'fulfilled' ? (results[2].value as any).data.users.length || 0 : 0;
-  
-  const allFailed = results.every(r => r.status === 'rejected');
+  const totalJobs = results[0].status === 'fulfilled' ? results[0].value.count || 0 : 0;
+  const openJobs = results[1].status === 'fulfilled' ? results[1].value.count || 0 : 0;
+  const staleOpenJobs = results[2].status === 'fulfilled' ? results[2].value.count || 0 : 0;
+  const assignedJobs = results[3].status === 'fulfilled' ? results[3].value.count || 0 : 0;
+  const mechanicsCount = results[5].status === 'fulfilled' ? results[5].value.count || 0 : 0;
+  const usersCount =
+    results[6].status === 'fulfilled' ? results[6].value.data.users.length || 0 : 0;
+
+  const allFailed = results.every((r) => r.status === 'rejected');
 
   const stats = [
-    { label: 'Total Jobs', value: jobsCount, icon: Briefcase, href: '/admin/jobs', color: theme.colors.status.info },
-    { label: 'Mechanic Partners', value: mechanicsCount, icon: Users, href: '/admin/mechanics', color: theme.colors.primary },
-    { label: 'Registered Users', value: usersCount, icon: UserCog, href: '/admin/users', color: theme.colors.status.warning },
+    {
+      label: 'Total Jobs',
+      value: totalJobs,
+      icon: Briefcase,
+      href: '/admin/jobs',
+      color: theme.colors.status.info,
+    },
+    {
+      label: 'Open Jobs',
+      value: openJobs,
+      icon: TrendingUp,
+      href: '/admin/jobs?status=open',
+      color: theme.colors.primary,
+    },
+    {
+      label: `Stale Open Jobs (${STALE_DAYS}+d)`,
+      value: staleOpenJobs,
+      icon: Clock3,
+      href: '/admin/jobs?filter=stale',
+      color: theme.colors.status.warning,
+    },
+    {
+      label: 'Assigned Jobs',
+      value: assignedJobs,
+      icon: ShieldAlert,
+      href: '/admin/jobs?status=assigned',
+      color: theme.colors.status.info,
+    },
+    {
+      label: 'Mechanic Partners',
+      value: mechanicsCount,
+      icon: Users,
+      href: '/admin/mechanics',
+      color: theme.colors.primary,
+    },
+    {
+      label: 'Registered Users',
+      value: usersCount,
+      icon: UserCog,
+      href: '/admin/users',
+      color: theme.colors.status.warning,
+    },
   ];
 
   if (allFailed) {
     return (
       <div style={styles.errorContainer}>
         <AlertCircle size={48} color={theme.colors.status.critical} />
-        <h2 style={{ fontSize: theme.fontSizes['2xl'], fontWeight: '700' }}>System Connectivity Issue</h2>
+        <h2 style={{ fontSize: theme.fontSizes['2xl'], fontWeight: '700' }}>
+          System Connectivity Issue
+        </h2>
         <p style={{ color: theme.colors.text.secondary, maxWidth: '400px' }}>
-          Unable to establish a connection with the Supabase Admin API. Please verify your Service Role Key.
+          Unable to establish a connection with the admin data sources. Please verify your
+          Supabase configuration.
         </p>
       </div>
     );
@@ -75,31 +149,52 @@ export default async function AdminDashboardPage() {
         </div>
 
         <div style={styles.actionGrid}>
-          <ActionCard 
-            href="/admin/jobs" 
-            icon={Briefcase} 
-            title="Manage Jobs" 
-            desc="Audit active repair requests and history." 
+          <ActionCard
+            href="/admin/jobs"
+            icon={Briefcase}
+            title="Manage Jobs"
+            desc="Review stale, active, assigned, and cancelled jobs."
           />
-          <ActionCard 
-            href="/admin/mechanics" 
-            icon={Users} 
-            title="Mechanic Approval" 
-            desc="Review pending shop verifications." 
+          <ActionCard
+            href="/admin/jobs?filter=stale"
+            icon={Clock3}
+            title="Stale Job Cleanup"
+            desc="Find old open jobs and close or remove outdated listings."
           />
-          <ActionCard 
-            href="/admin/users" 
-            icon={UserCog} 
-            title="User Permissions" 
-            desc="Adjust roles and account status." 
+          <ActionCard
+            href="/admin/mechanics"
+            icon={Users}
+            title="Mechanic Approval"
+            desc="Review pending shop verifications."
+          />
+          <ActionCard
+            href="/admin/users"
+            icon={UserCog}
+            title="User Permissions"
+            desc="Adjust roles and account status."
           />
         </div>
+
+        {staleOpenJobs > 0 && (
+          <div style={styles.noticeCard}>
+            <AlertCircle size={18} color={theme.colors.status.warning} />
+            <div>
+              <div style={styles.noticeTitle}>Stale jobs need review</div>
+              <div style={styles.noticeText}>
+                {staleOpenJobs} open job{staleOpenJobs === 1 ? '' : 's'} {STALE_DAYS} days or older
+                should be reviewed for cancellation or deletion.
+              </div>
+            </div>
+            <Link href="/admin/jobs?filter=stale" style={styles.noticeLink}>
+              Review now
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// Reusable Sub-component
 function ActionCard({ href, icon: Icon, title, desc }: any) {
   return (
     <Link href={href} style={{ textDecoration: 'none' }}>
@@ -116,7 +211,6 @@ function ActionCard({ href, icon: Icon, title, desc }: any) {
   );
 }
 
-// ==================== STYLES (unchanged, but ensure no max-width) ====================
 const styles: Record<string, React.CSSProperties> = {
   container: {
     padding: '40px',
@@ -243,6 +337,35 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '13px',
     color: '#64748b',
     margin: '2px 0 0 0',
+  },
+  noticeCard: {
+    marginTop: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '16px',
+    padding: '18px 20px',
+    borderRadius: '18px',
+    border: `1px solid ${theme.colors.status.warning}`,
+    background: `${theme.colors.status.warning}15`,
+    flexWrap: 'wrap',
+  },
+  noticeTitle: {
+    color: theme.colors.text.primary,
+    fontWeight: 700,
+    marginBottom: '4px',
+  },
+  noticeText: {
+    color: theme.colors.text.secondary,
+    fontSize: '14px',
+  },
+  noticeLink: {
+    color: theme.colors.background.main,
+    background: theme.colors.status.warning,
+    borderRadius: '999px',
+    padding: '10px 14px',
+    textDecoration: 'none',
+    fontWeight: 700,
   },
   errorContainer: {
     height: '100vh',

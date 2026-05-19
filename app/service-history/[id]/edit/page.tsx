@@ -1,20 +1,29 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase/client';
 
+type FormState = {
+  title: string;
+  description: string;
+  mileage: string;
+  occurred_at: string;
+};
+
 export default function EditServiceEventPage() {
   const router = useRouter();
-  const params = useParams();
-  const id = params?.id as string;
+  const params = useParams<{ id: string }>();
+  const id = typeof params?.id === 'string' ? params.id : '';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
+
+  const [formData, setFormData] = useState<FormState>({
     title: '',
     description: '',
     mileage: '',
@@ -22,54 +31,136 @@ export default function EditServiceEventPage() {
   });
 
   useEffect(() => {
-    if (id) fetchEvent();
+    if (!id) {
+      setError('Invalid event id');
+      setLoading(false);
+      return;
+    }
+
+    void fetchEvent();
   }, [id]);
 
   async function fetchEvent() {
     try {
       setLoading(true);
+      setError(null);
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        router.push('/login');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('service_events')
-        .select('title, description, mileage, occurred_at')
+        .select('id, title, description, mileage, occurred_at, user_id')
         .eq('id', id)
-        .single();
+        .eq('user_id', user.id)
+        .maybeSingle();
 
       if (error) throw error;
+
+      if (!data) {
+        throw new Error('Service event not found');
+      }
+
       setFormData({
         title: data.title || '',
         description: data.description || '',
-        mileage: data.mileage ? String(data.mileage) : '',
-        occurred_at: data.occurred_at ? format(new Date(data.occurred_at), 'yyyy-MM-dd') : '',
+        mileage: data.mileage != null ? String(data.mileage) : '',
+        occurred_at: data.occurred_at
+          ? format(new Date(data.occurred_at), 'yyyy-MM-dd')
+          : '',
       });
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to load service event';
+      setError(message);
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
     setError(null);
 
+    const trimmedTitle = formData.title.trim();
+    const trimmedDescription = formData.description.trim();
+    const parsedMileage = formData.mileage
+      ? Number.parseInt(formData.mileage, 10)
+      : null;
+    const occurredAt = formData.occurred_at;
+
+    if (!id) {
+      setError('Invalid event id');
+      setSaving(false);
+      return;
+    }
+
+    if (!trimmedTitle) {
+      setError('Service title is required');
+      setSaving(false);
+      return;
+    }
+
+    if (trimmedTitle.length < 3) {
+      setError('Service title must be at least 3 characters');
+      setSaving(false);
+      return;
+    }
+
+    if (formData.mileage && (Number.isNaN(parsedMileage) || (parsedMileage ?? 0) < 0)) {
+      setError('Mileage must be a valid positive number');
+      setSaving(false);
+      return;
+    }
+
+    if (!occurredAt) {
+      setError('Service date is required');
+      setSaving(false);
+      return;
+    }
+
     try {
-      const updates: any = {
-        title: formData.title,
-        description: formData.description || null,
-        mileage: formData.mileage ? parseInt(formData.mileage) : null,
-        occurred_at: formData.occurred_at,
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw new Error('Not authenticated');
+      }
+
+      const updates = {
+        title: trimmedTitle,
+        description: trimmedDescription || null,
+        mileage: parsedMileage,
+        occurred_at: occurredAt,
       };
 
       const { error } = await supabase
         .from('service_events')
         .update(updates)
-        .eq('id', id);
+        .eq('id', id)
+        .eq('user_id', user.id);
 
       if (error) throw error;
+
       router.push(`/service-history/${id}`);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to save service event';
+      setError(message);
     } finally {
       setSaving(false);
     }
@@ -80,77 +171,114 @@ export default function EditServiceEventPage() {
       <div style={styles.centered}>
         <div className="spinner" />
         <p>Loading event...</p>
+
+        <style jsx>{`
+          .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #22c55e;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+          }
+          @keyframes spin {
+            to {
+              transform: rotate(360deg);
+            }
+          }
+        `}</style>
       </div>
     );
   }
 
-  if (error) {
+  if (error && !formData.title && !formData.occurred_at) {
     return (
       <div style={styles.centered}>
         <p style={{ color: '#ef4444' }}>Error: {error}</p>
-        <button onClick={() => router.back()} style={styles.backButton}>Go Back</button>
+        <button onClick={() => router.back()} style={styles.backButton}>
+          Go Back
+        </button>
       </div>
     );
   }
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.page}>
-      <button onClick={() => router.back()} style={styles.backButton}>← Back</button>
+      <button onClick={() => router.back()} style={styles.backButton} type="button">
+        ← Back
+      </button>
 
       <div style={styles.card}>
         <h1 style={styles.title}>Edit Service Event</h1>
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.field}>
-            <label htmlFor="title" style={styles.label}>Service Title *</label>
+            <label htmlFor="title" style={styles.label}>
+              Service Title *
+            </label>
             <input
               id="title"
               type="text"
               value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              onChange={(e) => updateField('title', e.target.value)}
               required
               style={styles.input}
+              maxLength={120}
             />
           </div>
 
           <div style={styles.field}>
-            <label htmlFor="description" style={styles.label}>Description</label>
+            <label htmlFor="description" style={styles.label}>
+              Description
+            </label>
             <textarea
               id="description"
               rows={4}
               value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              onChange={(e) => updateField('description', e.target.value)}
               style={styles.textarea}
             />
           </div>
 
           <div style={styles.field}>
-            <label htmlFor="mileage" style={styles.label}>Mileage (mi)</label>
+            <label htmlFor="mileage" style={styles.label}>
+              Mileage (mi)
+            </label>
             <input
               id="mileage"
               type="number"
+              min="0"
+              inputMode="numeric"
               value={formData.mileage}
-              onChange={(e) => setFormData({ ...formData, mileage: e.target.value })}
+              onChange={(e) => updateField('mileage', e.target.value)}
               style={styles.input}
             />
           </div>
 
           <div style={styles.field}>
-            <label htmlFor="occurred_at" style={styles.label}>Service Date *</label>
+            <label htmlFor="occurred_at" style={styles.label}>
+              Service Date *
+            </label>
             <input
               id="occurred_at"
               type="date"
               value={formData.occurred_at}
-              onChange={(e) => setFormData({ ...formData, occurred_at: e.target.value })}
+              onChange={(e) => updateField('occurred_at', e.target.value)}
               required
               style={styles.input}
+              max={format(new Date(), 'yyyy-MM-dd')}
             />
           </div>
 
           {error && <p style={styles.errorText}>{error}</p>}
 
           <div style={styles.actions}>
-            <button type="button" onClick={() => router.back()} style={styles.cancelButton}>
+            <button
+              type="button"
+              onClick={() => router.back()}
+              style={styles.cancelButton}
+              disabled={saving}
+            >
               Cancel
             </button>
             <button type="submit" disabled={saving} style={styles.saveButton}>
@@ -162,7 +290,7 @@ export default function EditServiceEventPage() {
 
       <style jsx>{`
         .spinner {
-          border: 3px solid rgba(255,255,255,0.1);
+          border: 3px solid rgba(255, 255, 255, 0.1);
           border-top: 3px solid #22c55e;
           border-radius: 50%;
           width: 40px;
@@ -170,14 +298,16 @@ export default function EditServiceEventPage() {
           animation: spin 1s linear infinite;
         }
         @keyframes spin {
-          to { transform: rotate(360deg); }
+          to {
+            transform: rotate(360deg);
+          }
         }
       `}</style>
     </motion.div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   page: {
     padding: '40px',
     background: '#020617',
@@ -284,5 +414,6 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     color: '#94a3b8',
+    gap: 12,
   },
 };

@@ -1,38 +1,61 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
-/**
- * REVIEWS API
- * Handles fetching mechanic reviews and submitting new ones.
- */
+const reviewQuerySchema = z.object({
+  mechanicId: z.string().trim().min(1, 'mechanicId is required'),
+});
 
-async function getMacSafeClient() {
+const createReviewSchema = z.object({
+  mechanic_id: z.string().trim().min(1, 'mechanic_id is required'),
+  job_id: z.string().trim().min(1, 'job_id is required'),
+  rating: z.coerce.number().min(1).max(5),
+  comment: z.string().trim().max(2000).optional().nullable(),
+});
+
+function jsonSuccess<T>(data: T, status = 200) {
+  return NextResponse.json(
+    {
+      success: true,
+      error: null,
+      data,
+    },
+    { status }
+  );
+}
+
+function jsonError(error: string, status: number, details?: unknown) {
+  return NextResponse.json(
+    {
+      success: false,
+      error,
+      data: null,
+      details: details ?? null,
+    },
+    { status }
+  );
+}
+
+async function getServerClient() {
   const cookieStore = await cookies();
+
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() { return cookieStore.getAll() },
+        getAll() {
+          return cookieStore.getAll();
+        },
         setAll(cookiesToSet: { name: any; value: any; options: any; }[]) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, { ...options })
-            );
-          } catch { /* SSR Safe */ }
-        },
-      },
-      global: {
-        fetch: (url: string | Request | URL, options: RequestInit | undefined) => {
-          return fetch(url, {
-            ...options,
-            headers: {
-              ...options?.headers,
-              // Critical fix for Mac built-in libcurl build-time limitations
-              'Accept-Encoding': 'identity',
-            },
-          });
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // Safe in server contexts where cookie writes are restricted
+          }
         },
       },
     }
@@ -41,85 +64,151 @@ async function getMacSafeClient() {
 
 export async function GET(req: Request) {
   try {
-    const supabase = await getMacSafeClient();
+    const supabase = await getServerClient();
     const { searchParams } = new URL(req.url);
-    const mechanicId = searchParams.get('mechanicId');
 
-    if (!mechanicId) {
-      return NextResponse.json({ error: 'mechanicId is required' }, { status: 400 });
+    const parsedQuery = reviewQuerySchema.safeParse({
+      mechanicId: searchParams.get('mechanicId'),
+    });
+
+    if (!parsedQuery.success) {
+      return jsonError('Validation failed', 400, parsedQuery.error.flatten());
     }
 
-    // Join with profiles instead of auth.users for public access
+    const { mechanicId } = parsedQuery.data;
+
     const { data, error } = await supabase
       .from('reviews')
-      .select(`
-        *,
-        reviewer:profiles!user_id(full_name, avatar_url)
-      `)
+      .select(
+        `
+        id,
+        user_id,
+        mechanic_id,
+        job_id,
+        rating,
+        comment,
+        created_at,
+        reviewer:profiles!user_id (
+          full_name,
+          avatar_url
+        )
+      `
+      )
       .eq('mechanic_id', mechanicId)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    return NextResponse.json(data || []);
-  } catch (err: any) {
-    console.error('Reviews GET error:', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    if (error) {
+      console.error('[REVIEWS_GET_ERROR]', error);
+      return jsonError('Failed to fetch reviews', 500);
+    }
+
+    return jsonSuccess(data ?? []);
+  } catch (error) {
+    console.error('[REVIEWS_GET_UNEXPECTED]', error);
+    return jsonError('Internal server error', 500);
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const supabase = await getMacSafeClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const supabase = await getServerClient();
 
-    const { mechanic_id, job_id, rating, comment } = await req.json();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    if (!mechanic_id || !job_id || !rating) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (authError || !user) {
+      return jsonError('Unauthorized', 401);
     }
 
-    // 1. Verify Job Ownership & Completion
+    const rawBody = await req.json().catch(() => null);
+
+    if (!rawBody) {
+      return jsonError('Invalid JSON body', 400);
+    }
+
+    const parsedBody = createReviewSchema.safeParse(rawBody);
+
+    if (!parsedBody.success) {
+      return jsonError('Validation failed', 400, parsedBody.error.flatten());
+    }
+
+    const { mechanic_id, job_id, rating, comment } = parsedBody.data;
+
     const { data: job, error: jobError } = await supabase
       .from('jobs')
-      .select('user_id, assigned_mechanic_id, status')
+      .select('id, user_id, assigned_mechanic_id, status')
       .eq('id', job_id)
       .single();
 
-    if (jobError || !job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-    if (job.user_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    if (job.assigned_mechanic_id !== mechanic_id) {
-      return NextResponse.json({ error: 'Mechanic mismatch' }, { status: 403 });
+    if (jobError || !job) {
+      return jsonError('Job not found', 404);
     }
 
-    // 2. Check for Duplicate Review
-    const { data: existing } = await supabase
+    if (job.user_id !== user.id) {
+      return jsonError('Forbidden', 403);
+    }
+
+    if (job.assigned_mechanic_id !== mechanic_id) {
+      return jsonError('Mechanic mismatch', 403);
+    }
+
+    if (!['completed', 'closed', 'resolved'].includes(String(job.status).toLowerCase())) {
+      return jsonError('Job must be completed before leaving a review', 400);
+    }
+
+    const { data: existingReview, error: existingError } = await supabase
       .from('reviews')
       .select('id')
       .eq('job_id', job_id)
+      .eq('user_id', user.id)
       .maybeSingle();
 
-    if (existing) return NextResponse.json({ error: 'Review already exists' }, { status: 409 });
+    if (existingError) {
+      console.error('[REVIEWS_DUPLICATE_CHECK_ERROR]', existingError);
+      return jsonError('Failed to verify existing review', 500);
+    }
 
-    // 3. Insert Review
+    if (existingReview) {
+      return jsonError('Review already exists', 409);
+    }
+
     const { data, error } = await supabase
       .from('reviews')
       .insert({
         user_id: user.id,
         mechanic_id,
         job_id,
-        rating: Math.min(5, Math.max(1, rating)), // Clamp rating 1-5
-        comment: comment?.trim(),
+        rating,
+        comment: comment?.trim() || null,
       })
-      .select()
+      .select(
+        `
+        id,
+        user_id,
+        mechanic_id,
+        job_id,
+        rating,
+        comment,
+        created_at
+      `
+      )
       .single();
 
-    if (error) throw error;
-    return NextResponse.json(data, { status: 201 });
+    if (error) {
+      console.error('[REVIEWS_POST_ERROR]', error);
 
-  } catch (err: any) {
-    console.error('Reviews POST error:', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+      if (error.code === '23505') {
+        return jsonError('Review already exists', 409);
+      }
+
+      return jsonError('Failed to create review', 500);
+    }
+
+    return jsonSuccess(data, 201);
+  } catch (error) {
+    console.error('[REVIEWS_POST_UNEXPECTED]', error);
+    return jsonError('Internal server error', 500);
   }
 }
