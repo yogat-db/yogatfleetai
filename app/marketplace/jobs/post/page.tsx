@@ -9,7 +9,7 @@ import {
   type ChangeEvent,
   type FormEvent,
 } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
   Briefcase,
@@ -166,6 +166,7 @@ async function resolveInsertedJobId(userId: string, insertedId?: string | null) 
 
 export default function PostJobPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -175,7 +176,9 @@ export default function PostJobPage() {
 
   const [vehicleId, setVehicleId] = useState('');
   const [category, setCategory] = useState<JobCategory>('Engine & Mechanical');
-  const [service, setService] = useState<string>(JOB_TEMPLATES['Engine & Mechanical'][0]);
+  const [service, setService] = useState<string>(
+    JOB_TEMPLATES['Engine & Mechanical'][0]
+  );
   const [customDetail, setCustomDetail] = useState('');
   const [description, setDescription] = useState('');
   const [budget, setBudget] = useState('');
@@ -183,14 +186,25 @@ export default function PostJobPage() {
   const [location, setLocation] = useState('');
   const [coords, setCoords] = useState<Coords>({ lat: null, lng: null });
 
+  // Diagnostic prefill from query string
+  const prefillVehicleId = searchParams.get('vehicle') ?? '';
+  const prefillDtc = searchParams.get('dtc') ?? '';
+  const prefillSummary = searchParams.get('summary') ?? '';
+  const prefillSeverity = searchParams.get('severity') ?? '';
+  const prefillFix = searchParams.get('fix') ?? '';
+  const prefillCost = searchParams.get('cost') ?? '';
+
   useEffect(() => {
     setService(JOB_TEMPLATES[category][0]);
   }, [category]);
 
   const generatedTitle = useMemo(() => {
     const detail = normalizeText(customDetail);
-    return `[${category}] ${service}${detail ? ` - ${detail}` : ''}`;
-  }, [category, service, customDetail]);
+    const dtcPrefix = prefillDtc ? `${prefillDtc} - ` : '';
+    return `[${category}] ${dtcPrefix}${service}${
+      detail ? ` - ${detail}` : ''
+    }`;
+  }, [category, service, customDetail, prefillDtc]);
 
   const selectedVehicle = useMemo(() => {
     return vehicles.find((vehicle) => vehicle.id === vehicleId) ?? null;
@@ -225,7 +239,7 @@ export default function PostJobPage() {
       setVehicles(list);
 
       if (list.length > 0) {
-        setVehicleId((current) => current || list[0].id);
+        setVehicleId((current) => current || prefillVehicleId || list[0].id);
       }
     } catch (err) {
       console.error('Fetch vehicles error:', err);
@@ -233,11 +247,48 @@ export default function PostJobPage() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [router, prefillVehicleId]);
 
   useEffect(() => {
     void fetchVehicles();
   }, [fetchVehicles]);
+
+  // Prefill form once from diagnostic query params
+  useEffect(() => {
+    if (!searchParams) return;
+
+    // Category & service if this came from diagnostics
+    if (prefillDtc) {
+      setCategory('Diagnostic only');
+      setService('Warning light scan');
+      setCustomDetail((current) => current || prefillDtc);
+    }
+
+    if (prefillCost) {
+      setBudget((current) => current || prefillCost);
+    }
+
+    const parts = [
+      prefillDtc ? `Fault code: ${prefillDtc}` : '',
+      prefillSeverity ? `AI severity: ${prefillSeverity}` : '',
+      prefillSummary ? `AI summary: ${prefillSummary}` : '',
+      prefillFix ? `Suggested fix: ${prefillFix}` : '',
+    ].filter(Boolean);
+
+    if (parts.length) {
+      setDescription((current) => {
+        if (current.trim()) return current;
+        return parts.join('\n\n');
+      });
+    }
+  }, [
+    searchParams,
+    prefillDtc,
+    prefillSummary,
+    prefillSeverity,
+    prefillFix,
+    prefillCost,
+  ]);
 
   const detectLocation = () => {
     if (!navigator.geolocation) {
@@ -298,7 +349,19 @@ export default function PostJobPage() {
       return;
     }
 
-    const cleanedDescription = normalizeText(description);
+    const diagnosticSnippet = [
+      prefillDtc ? `DTC code: ${prefillDtc}` : '',
+      prefillSeverity ? `AI severity: ${prefillSeverity}` : '',
+      prefillSummary ? `AI summary: ${prefillSummary}` : '',
+      prefillFix ? `Suggested fix: ${prefillFix}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const cleanedDescription = normalizeText(
+      [description, diagnosticSnippet].filter(Boolean).join('\n\n')
+    );
+
     if (!cleanedDescription) {
       toast.error('Please add a description');
       return;
@@ -339,6 +402,10 @@ export default function PostJobPage() {
         category,
         lat: coords.lat,
         lng: coords.lng,
+        diagnostic_code: prefillDtc || null,
+        ai_summary: prefillSummary || null,
+        ai_severity: prefillSeverity || null,
+        ai_fix: prefillFix || null,
       };
 
       const { data: insertedRow, error: insertError } = await supabase
@@ -349,7 +416,10 @@ export default function PostJobPage() {
 
       if (insertError) throw insertError;
 
-      const jobId = await resolveInsertedJobId(user.id, insertedRow?.id ?? null);
+      const jobId = await resolveInsertedJobId(
+        user.id,
+        insertedRow?.id ?? null
+      );
 
       if (!jobId) {
         throw new Error(
@@ -361,7 +431,8 @@ export default function PostJobPage() {
       router.push(`/marketplace/jobs/${jobId}`);
     } catch (err) {
       console.error('Post job error:', err);
-      const message = err instanceof Error ? err.message : 'Could not post job';
+      const message =
+        err instanceof Error ? err.message : 'Could not post job';
       setError(message);
       toast.error(message);
     } finally {
@@ -386,7 +457,8 @@ export default function PostJobPage() {
           <Car size={34} color={theme.colors.primary} />
           <h2 style={styles.emptyTitle}>Add a vehicle first</h2>
           <p style={styles.emptyBody}>
-            A job needs to be attached to a vehicle before mechanics can review it.
+            A job needs to be attached to a vehicle before mechanics can review
+            it.
           </p>
           <button
             type="button"
@@ -415,8 +487,9 @@ export default function PostJobPage() {
           <h1 style={styles.title}>Post a repair job</h1>
 
           <p style={styles.subtitle}>
-            Build a clear request with structured dropdowns, a generated title preview,
-            and optional location detection for faster, higher-quality mechanic responses.
+            Build a clear request with structured dropdowns, a generated title
+            preview, and optional location detection for faster, higher-quality
+            mechanic responses.
           </p>
         </header>
 
@@ -444,8 +517,15 @@ export default function PostJobPage() {
                     >
                       {vehicles.map((vehicle) => (
                         <option key={vehicle.id} value={vehicle.id}>
-                          {[vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Vehicle'}
-                          {vehicle.license_plate ? ` (${vehicle.license_plate})` : ''}
+                          {[
+                            vehicle.make,
+                            vehicle.model,
+                          ]
+                            .filter(Boolean)
+                            .join(' ') || 'Vehicle'}
+                          {vehicle.license_plate
+                            ? ` (${vehicle.license_plate})`
+                            : ''}
                         </option>
                       ))}
                     </select>
@@ -561,7 +641,10 @@ export default function PostJobPage() {
                     Budget (£)
                   </label>
                   <div style={styles.moneyInputWrap}>
-                    <PoundSterling size={16} color={theme.colors.text.muted} />
+                    <PoundSterling
+                      size={16}
+                      color={theme.colors.text.muted}
+                    />
                     <input
                       id="budget"
                       type="number"
@@ -644,7 +727,8 @@ export default function PostJobPage() {
                     rows={6}
                   />
                   <p style={styles.helper}>
-                    Clear descriptions improve quote quality and reduce back-and-forth.
+                    Clear descriptions improve quote quality and reduce
+                    back-and-forth.
                   </p>
                 </div>
               </div>
@@ -661,7 +745,11 @@ export default function PostJobPage() {
                 Cancel
               </button>
 
-              <button type="submit" disabled={submitting} style={styles.primaryButton}>
+              <button
+                type="submit"
+                disabled={submitting}
+                style={styles.primaryButton}
+              >
                 {submitting ? (
                   <>
                     <Loader2 size={18} className="spin" />
@@ -688,18 +776,35 @@ export default function PostJobPage() {
                 <span style={styles.previewMetaItem}>
                   <Car size={13} />
                   {selectedVehicle
-                    ? `${[selectedVehicle.make, selectedVehicle.model].filter(Boolean).join(' ') || 'Vehicle'}${selectedVehicle.license_plate ? ` (${selectedVehicle.license_plate})` : ''}`
+                    ? `${
+                        [
+                          selectedVehicle.make,
+                          selectedVehicle.model,
+                        ]
+                          .filter(Boolean)
+                          .join(' ') || 'Vehicle'
+                      }${
+                        selectedVehicle.license_plate
+                          ? ` (${selectedVehicle.license_plate})`
+                          : ''
+                      }`
                     : 'No vehicle selected'}
                 </span>
 
                 <span style={styles.previewMetaItem}>
                   <CalendarClock size={13} />
-                  {URGENCY_OPTIONS.find((item) => item.value === urgency)?.label}
+                  {
+                    URGENCY_OPTIONS.find(
+                      (item) => item.value === urgency
+                    )?.label
+                  }
                 </span>
 
                 <span style={styles.previewMetaItem}>
                   <PoundSterling size={13} />
-                  {budget.trim() ? `Up to £${budget}` : 'Budget not specified'}
+                  {budget.trim()
+                    ? `Up to £${budget}`
+                    : 'Budget not specified'}
                 </span>
 
                 <span style={styles.previewMetaItem}>
@@ -709,17 +814,25 @@ export default function PostJobPage() {
               </div>
 
               <p style={styles.previewDescription}>
-                {description.trim() || 'Your full description will appear here once added.'}
+                {description.trim() ||
+                  'Your full description will appear here once added.'}
               </p>
             </div>
 
             <div style={styles.tipCard}>
-              <p style={styles.tipTitle}>Tips for better mechanic responses</p>
+              <p style={styles.tipTitle}>
+                Tips for better mechanic responses
+              </p>
               <ul style={styles.tipList}>
                 <li>Choose the closest matching service from the dropdown.</li>
-                <li>Add one short detail instead of rewriting the whole title.</li>
+                <li>
+                  Add one short detail instead of rewriting the whole title.
+                </li>
                 <li>Use location detection, then edit the address if needed.</li>
-                <li>Mention symptoms, timing, noises, smells, and warning lights.</li>
+                <li>
+                  Mention symptoms, timing, noises, smells, and warning
+                  lights.
+                </li>
               </ul>
             </div>
           </aside>

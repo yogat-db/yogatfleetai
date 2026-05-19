@@ -72,11 +72,11 @@ export default function MechanicSubscribePage() {
         throw new Error(result?.error || 'Failed to load mechanic profile');
       }
 
-      if (!result?.data?.id) {
-        throw new Error('Mechanic profile not found');
-      }
+      if (!result?.mechanic?.id) {
+  throw new Error('Mechanic profile not found');
+}
 
-      setMechanic({ id: result.data.id });
+setMechanic({ id: result.mechanic.id });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load mechanic');
     } finally {

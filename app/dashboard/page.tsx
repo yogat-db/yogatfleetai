@@ -214,13 +214,16 @@ export default function DashboardPage() {
       // AI predictions
       if (vehiclesData?.length) {
         try {
-          const predRes = await fetch('/api/ai/predictive-maintenance');
-          if (predRes.ok) {
-            const json = (await predRes.json()) as Prediction[];
-            setPredictions(json || []);
-          } else {
-            setPredictions([]);
-          }
+          const predRes = await fetch('/api/ai/predictive-maintenance', {
+  cache: 'no-store',
+});
+
+if (predRes.ok) {
+  const json = await predRes.json();
+  setPredictions(Array.isArray(json?.predictions) ? json.predictions : []);
+} else {
+  setPredictions([]);
+}
         } catch {
           setPredictions([]);
         }

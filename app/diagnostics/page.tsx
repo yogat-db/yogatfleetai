@@ -28,7 +28,7 @@ interface Vehicle {
 interface ScanResult {
   code: string;
   description: string;
-  causes: string[];
+  causes?: string[];
   fix: string;
   estimatedCost: number | null;
   mechanicNeeded: boolean;
@@ -443,9 +443,9 @@ export default function DiagnosticsPage() {
 
                 <h5 style={styles.resultHeading}>Possible causes</h5>
                 <ul style={styles.list}>
-                  {result.causes.map((cause, i) => (
-                    <li key={i}>{cause}</li>
-                  ))}
+                  {(result.causes ?? []).map((cause, i) => (
+  <li key={i}>{cause}</li>
+))}
                 </ul>
 
                 <h5 style={styles.resultHeading}>Suggested fix</h5>
